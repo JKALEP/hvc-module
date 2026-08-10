@@ -1,0 +1,642 @@
+// Prisma schema — HVC Comercial S.A.C. — Sistema de costos y cotizaciones
+// Modelo simplificado: Importacion -> Producto (proveedor y ruc son texto) -> HistorialPrecio
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs" // NestJS corre en CommonJS; sin esto el cliente se emite en ESM y falla al cargar
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────
+// Importacion — cada carga de un archivo Excel
+// ─────────────────────────────────────────────────────────────
+model Importacion {
+  id               Int      @id @default(autoincrement())
+  nombreArchivo    String
+  fechaImportacion DateTime @default(now())
+  totalFilas       Int      @default(0)
+  filasCompletas   Int      @default(0)
+  estado           Estado   @default(INCOMPLETO)
+
+  productos Producto[]
+
+  @@map("importaciones")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Producto — una fila del requerimiento / una cotización
+// Una fila está COMPLETA solo si tiene: codigo + precioUnitario + proveedor + ruc
+// ─────────────────────────────────────────────────────────────
+model Producto {
+  id            Int    @id @default(autoincrement())
+  importacionId Int
+  codigo        String? // Se ingresa MANUAL por el usuario (no viene del Excel)
+  descripcion   String // Viene del Excel
+  unidadMedida  String? // Viene del Excel (UND, KG, MT, DOC, etc.)
+  cantidad      Decimal? @db.Decimal(14, 4) // Cuánto se necesita pedir
+  detalles      String? // Detalles / Observación (viene del Excel)
+  referencias   String? // Marca, modelo (viene del Excel)
+
+  // Precio SIEMPRE por unidad de medida (nunca total). Nullable hasta que el usuario lo llena.
+  precioUnitario Decimal? @db.Decimal(14, 4)
+  proveedor      String? // Nombre de la empresa (texto, no tabla)
+  ruc            String? // RUC del proveedor (texto)
+
+  estado        Estado   @default(INCOMPLETO)
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  importacion Importacion       @relation(fields: [importacionId], references: [id], onDelete: Cascade)
+  historial   HistorialPrecio[]
+
+  @@index([importacionId])
+  @@index([codigo])
+  @@index([proveedor])
+  @@index([ruc])
+  @@map("productos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// HistorialPrecio — se registra cada vez que cambia el precioUnitario
+// ─────────────────────────────────────────────────────────────
+model HistorialPrecio {
+  id             Int      @id @default(autoincrement())
+  productoId     Int
+  precioAnterior Decimal? @db.Decimal(14, 4) // Puede ser null si es el primer precio
+  precioNuevo    Decimal  @db.Decimal(14, 4)
+  fecha          DateTime @default(now())
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+
+  @@index([productoId])
+  @@map("historial_precios")
+}
+
+enum Estado {
+  COMPLETO
+  INCOMPLETO
+}
+
+// ═════════════════════════════════════════════════════════════
+// MÓDULO PERSONAL Y PROYECTOS
+// Nómina (EmpresaContratista, Trabajador, Supervisor) se carga por SQL directo.
+// ReporteDiario + Participacion se crean desde el formulario estructurado.
+// ═════════════════════════════════════════════════════════════
+
+enum EstadoEmpresaContratista {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoTrabajador {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoSupervisor {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoProyecto {
+  EN_EJECUCION
+  FINALIZADO
+  PAUSADO
+}
+
+// ─────────────────────────────────────────────────────────────
+// EmpresaContratista — catálogo, se llena por SQL
+// ─────────────────────────────────────────────────────────────
+model EmpresaContratista {
+  id     Int                      @id @default(autoincrement())
+  nombre String
+  ruc    String                   @unique
+  estado EstadoEmpresaContratista @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  trabajadores    Trabajador[]
+  participaciones Participacion[]
+  nominaMensual   NominaMensual[]
+
+  @@index([nombre])
+  @@map("empresas_contratistas")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Trabajador — nómina. Las bajas se hacen con estado = INACTIVO,
+// NUNCA borrando la fila (rompería el historial de participaciones).
+// ─────────────────────────────────────────────────────────────
+model Trabajador {
+  id        Int    @id @default(autoincrement())
+  dni       String @unique
+  nombres   String
+  apellidos String
+
+  // Empresa VIGENTE. NO es la verdad histórica:
+  //  - "¿con quién estaba en enero?" → NominaMensual
+  //  - "¿de qué empresa era en esta jornada?" → snapshot de Participacion
+  // Usarla para reconstruir el pasado hace que la utilización de meses
+  // cerrados cambie sola al mover a alguien de contrata.
+  empresaId Int
+  estado    EstadoTrabajador @default(ACTIVO)
+
+  // ── Datos de planilla ──
+  // Carga manual por SQL: todos opcionales y de texto libre, para que
+  // ninguna variación de escritura ("M" vs "MASCULINO", "SOLTERO(A)")
+  // rompa el INSERT. Son informativos, no entran en ningún cálculo.
+  tipoTrabajador  String?
+  paisNacimiento  String?
+  tipoDocumento   String?
+  sexo            String?
+  fechaNacimiento DateTime? @db.Date
+  estadoCivil     String?
+  sede            String?
+  moneda          String?
+
+  // Remuneración VIGENTE, de referencia. El costo histórico se calcula
+  // con NominaMensual.remuneracion, que no deriva al subir un sueldo.
+  remuneracion Decimal? @db.Decimal(12, 2)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  empresa         EmpresaContratista @relation(fields: [empresaId], references: [id], onDelete: Restrict)
+  participaciones Participacion[]
+  nominaMensual   NominaMensual[]
+
+  @@index([empresaId])
+  @@index([apellidos])
+  @@map("trabajadores")
+}
+
+// ─────────────────────────────────────────────────────────────
+// NominaMensual — foto de la planilla de un mes.
+//
+// Fuente de verdad de "quién estaba contratado, con quién y por cuánto"
+// en un período cerrado. Existe porque Participacion solo puede decir
+// quién PARTICIPÓ: alguien contratado todo el mes que no pisó obra no
+// deja ninguna fila, y sin embargo cuenta en el denominador de la
+// utilización.
+//
+// Granularidad mensual a propósito: la planilla en Perú es un artefacto
+// mensual (T-Registro / PLAME) y llega un archivo por mes y contratista.
+// Un traslado a mitad de mes atribuye ese mes a una sola empresa; la
+// atribución diaria exacta sigue estando en Participacion.
+//
+// Se carga por SQL, igual que el resto de la nómina.
+// ─────────────────────────────────────────────────────────────
+model NominaMensual {
+  id           Int @id @default(autoincrement())
+  anio         Int
+  mes          Int // 1–12
+  trabajadorId Int
+  empresaId    Int // afiliación de ESE mes, no la vigente
+
+  remuneracion Decimal? @db.Decimal(12, 2) // sueldo de ESE mes
+  moneda       String?
+  sede         String?
+  observacion  String?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  trabajador Trabajador         @relation(fields: [trabajadorId], references: [id], onDelete: Restrict)
+  empresa    EmpresaContratista @relation(fields: [empresaId], references: [id], onDelete: Restrict)
+
+  // Una persona no puede estar dos veces en la planilla del mismo mes.
+  @@unique([anio, mes, trabajadorId])
+  @@index([anio, mes, empresaId])
+  @@index([trabajadorId, anio, mes])
+  @@map("nomina_mensual")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Supervisor — catálogo mínimo
+// ─────────────────────────────────────────────────────────────
+model Supervisor {
+  id     Int              @id @default(autoincrement())
+  nombre String
+  estado EstadoSupervisor @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  reportes ReporteDiario[]
+
+  @@map("supervisores")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Proyecto — el avance acumulado NO vive aquí: ver AvanceSemanal
+// ─────────────────────────────────────────────────────────────
+model Proyecto {
+  id        Int            @id @default(autoincrement())
+  nombre    String
+  cliente   String?
+  ubicacion String?
+  estado    EstadoProyecto @default(EN_EJECUCION)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  reportes        ReporteDiario[]
+  ajustes         AjusteAvance[]
+  participaciones Participacion[]
+
+  @@index([estado])
+  @@map("proyectos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// AvanceSemanal — estimación MANUAL de ingeniería, una por semana.
+// No se deriva de equiposEjecutados. anio+semana los calcula el
+// backend a partir de `fecha` (semana ISO).
+// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────
+// AjusteAvance — override manual EXCEPCIONAL del avance calculado.
+//
+// El avance por defecto NO vive aquí: se calcula como
+// Σ equiposEjecutados / Σ equiposProgramados sobre todos los reportes
+// diarios del proyecto (ver ProyectoAnaliticaService.avanceTotal).
+//
+// Esta tabla existe solo para cuando el avance real de obra incluye
+// trabajo que no se mide en "equipos" (planos, permisos, materiales) y el
+// ingeniero necesita anotar un ajuste. Cada fila es un EVENTO con su fecha
+// y su justificación, no un valor que se sobrescribe: por eso no hay
+// unique por semana y la observación es obligatoria a nivel de service.
+//
+// Antes se llamaba AvanceSemanal y guardaba estimaciones semanales; anio y
+// semana se eliminaron porque solo existían para el unique semanal, y el
+// gráfico ahora indexa por `fecha`.
+// ─────────────────────────────────────────────────────────────
+model AjusteAvance {
+  id          Int      @id @default(autoincrement())
+  proyectoId  Int
+  porcentaje  Decimal  @db.Decimal(5, 2)
+  fecha       DateTime @db.Date
+  observacion String? // obligatoria al crear: un override sin justificación no sirve
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  proyecto Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+
+  @@index([proyectoId, fecha])
+  @@map("ajustes_avance")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ReporteDiario — se crea desde el formulario estructurado.
+// produccion y tecnicosLaborando son CALCULADOS por el backend.
+// calificacionPersonal es MANUAL y cualitativo: independiente de produccion.
+// ─────────────────────────────────────────────────────────────
+model ReporteDiario {
+  id           Int      @id @default(autoincrement())
+  fecha        DateTime @db.Date
+  proyectoId   Int
+  supervisorId Int
+
+  // Entrada manual
+  equiposProgramados  Int
+  equiposEjecutados   Int
+  tecnicosProgramados Int
+
+  // Calculado: equiposEjecutados / equiposProgramados * 100.
+  // null si equiposProgramados = 0 (no se fuerza a 0 para no ensuciar promedios).
+  produccion Decimal? @db.Decimal(5, 2)
+
+  // Manual: cuántas contratistas se esperaba que trabajen ese día.
+  // Es una expectativa, no un hecho medible, por eso no se deriva.
+  // Nullable: los reportes ya cargados no lo tienen, y un 0 diría
+  // "se esperaban cero contratistas", que es falso.
+  numeroContratistasProgramados Int?
+
+  // Calculado: COUNT de participaciones de este reporte.
+  tecnicosLaborando Int @default(0)
+
+  // Calculado: empresaId distintos entre las participaciones del reporte.
+  numeroContratistasTrabajando Int @default(0)
+
+  // Manuales y cualitativas. NO se derivan de produccion ni entre sí.
+  calificacionProveedor  Decimal? @db.Decimal(5, 2) // evalúa a la contratista
+  calificacionSupervisor Decimal? @db.Decimal(5, 2) // evalúa al supervisor de HVC
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  proyecto        Proyecto        @relation(fields: [proyectoId], references: [id], onDelete: Restrict)
+  supervisor      Supervisor      @relation(fields: [supervisorId], references: [id], onDelete: Restrict)
+  participaciones Participacion[]
+
+  @@unique([proyectoId, fecha])
+  @@index([fecha])
+  @@index([supervisorId])
+  @@map("reportes_diarios")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Participacion — tabla puente: "un trabajador participó en un
+// proyecto un día". empresaId / proyectoId / fecha son redundantes
+// A PROPÓSITO: evitan 2-3 joins en los indicadores de Fase 2 y
+// empresaId además congela la empresa del trabajador en esa fecha.
+// ─────────────────────────────────────────────────────────────
+model Participacion {
+  id           Int      @id @default(autoincrement())
+  reporteId    Int
+  trabajadorId Int
+  empresaId    Int      // snapshot de trabajador.empresaId
+  proyectoId   Int      // copia de reporte.proyectoId
+  fecha        DateTime @db.Date // copia de reporte.fecha
+
+  creadoEn DateTime @default(now())
+
+  reporte    ReporteDiario      @relation(fields: [reporteId], references: [id], onDelete: Cascade)
+  trabajador Trabajador         @relation(fields: [trabajadorId], references: [id], onDelete: Restrict)
+  empresa    EmpresaContratista @relation(fields: [empresaId], references: [id], onDelete: Restrict)
+  proyecto   Proyecto           @relation(fields: [proyectoId], references: [id], onDelete: Restrict)
+
+  @@unique([reporteId, trabajadorId])
+  @@index([trabajadorId, fecha])
+  @@index([empresaId, fecha])
+  @@index([proyectoId, fecha])
+  @@index([fecha])
+  @@map("participaciones")
+}
+
+// ═════════════════════════════════════════════════════════════
+// AUTENTICACIÓN Y PERMISOS
+//
+// Usuario es quien ENTRA al sistema. No se mezcla con Supervisor ni
+// Trabajador, que son entidades operativas: un técnico de obra no
+// necesariamente tiene login, y forzarle credenciales solo para que
+// exista en la planilla sería inventar cuentas que nadie usa.
+// ═════════════════════════════════════════════════════════════
+
+enum RolGlobal {
+  SUPERADMIN // única cuenta: crea Admins y les asigna módulos
+  ADMIN      // accede solo a los módulos que le asignaron
+  // Cliente externo. NO tiene filas en PermisoModulo: no entra a ningún
+  // módulo, solo ve lo que le compartieron por invitación. Vive en esta
+  // tabla y no en una propia para no duplicar login, JWT ni guards.
+  CLIENTE
+}
+
+enum Modulo {
+  COSTOS
+  PERSONAL_PROYECTOS
+  FOTOS
+}
+
+// Sub-roles: SOLO aplican al módulo FOTOS. Costos y PersonalProyectos
+// dan acceso completo al módulo o ninguno.
+enum NivelFotos {
+  ADMIN_FOTOS // crea sedes, proyectos de fotos y asigna colaboradores
+  COLABORADOR // solo ve y sube donde le dieron acceso explícito
+}
+
+enum EstadoUsuario {
+  ACTIVO
+  INACTIVO
+}
+
+enum EstadoInvitacion {
+  PENDIENTE
+  ACEPTADA
+  CANCELADA
+  // EXPIRADA no existe a propósito: se deriva de `expiraEn < ahora`.
+  // Guardarla obligaría a un proceso que barra la tabla para mantenerla
+  // cierta, y un estado que miente es peor que uno calculado.
+}
+
+model Usuario {
+  id           Int           @id @default(autoincrement())
+  email        String        @unique
+  nombre       String
+  // Hash bcrypt. La contraseña en claro nunca se guarda ni se registra.
+  passwordHash String
+  rol          RolGlobal     @default(ADMIN)
+  estado       EstadoUsuario @default(ACTIVO)
+  ultimoAcceso DateTime?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  permisos PermisoModulo[]
+
+  // Módulo Fotos
+  albumesCreados     AlbumFotos[]        @relation("AlbumesCreados")
+  compartidoConmigo  AccesoCompartido[]  @relation("CompartidoConmigo")
+  compartidosPorMi   AccesoCompartido[]  @relation("CompartidosPorMi")
+  fotosSubidas       Foto[]              @relation("FotosSubidas")
+  invitacionesHechas InvitacionCliente[] @relation("InvitacionesHechas")
+  invitacionAceptada InvitacionCliente[] @relation("InvitacionAceptada")
+
+  @@index([estado])
+  @@map("usuarios")
+}
+
+// Un usuario ↔ un módulo. Varias filas = varios módulos.
+//
+// Es tabla y no columnas booleanas en Usuario porque el acceso es una
+// COLECCIÓN de 1 a 3 módulos: agregar un módulo nuevo es un valor de enum,
+// no una migración de la tabla de usuarios.
+model PermisoModulo {
+  id        Int    @id @default(autoincrement())
+  usuarioId Int
+  modulo    Modulo
+
+  // Obligatorio cuando modulo = FOTOS, null en los otros dos.
+  // La BD no puede expresar esa condición (sería un CHECK entre columnas
+  // que Prisma no modela), así que se valida en PermisoService.
+  nivelFotos NivelFotos?
+
+  creadoEn DateTime @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  // Un usuario no puede tener dos permisos del mismo módulo.
+  @@unique([usuarioId, modulo])
+  @@index([usuarioId])
+  @@map("permisos_modulo")
+}
+
+// ═════════════════════════════════════════════════════════════
+// MÓDULO FOTOS
+//
+// Se llama AlbumFotos y NO ProyectoFoto a propósito: `Proyecto` ya existe
+// en el módulo de obra y tener `proyectoId` y `proyectoFotoId` a un
+// carácter de distancia es un accidente esperando.
+//
+// Regla de acceso, una sola en todo el módulo:
+//   ver == subir. Un ADMIN_FOTOS accede a todos los álbumes por su nivel;
+//   un COLABORADOR, solo donde tenga fila en AccesoAlbum. No hay acceso
+//   de solo lectura — el álbum funciona como un feed grupal.
+// ═════════════════════════════════════════════════════════════
+
+enum EstadoSede {
+  ACTIVA
+  INACTIVA
+}
+
+enum EstadoAlbum {
+  ABIERTO
+  CERRADO // solo lectura para TODOS, incluido un ADMIN_FOTOS, que puede reabrirlo
+}
+
+/// Árbol de ubicaciones. Auto-relación: un nodo puede no tener hijas o
+/// tener varias, sin límite de niveles.
+model Sede {
+  id       Int    @id @default(autoincrement())
+  nombre   String
+  parentId Int?
+
+  /// Ruta materializada ("1/4/9", ids separados por barra, incluye el
+  /// propio nodo). Permite listar un subárbol con `ruta LIKE '1/4/%'` en
+  /// vez de una consulta recursiva o N viajes a la BD. La mantiene
+  /// SedeService al crear y al mover.
+  ruta   String
+  estado EstadoSede @default(ACTIVA)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  padre       Sede?               @relation("SedeJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
+  hijas       Sede[]              @relation("SedeJerarquia")
+  albumes     AlbumFotos[]
+  compartidos AccesoCompartido[]
+  invitaciones InvitacionCliente[]
+
+  // Sin dos hermanas con el mismo nombre bajo la misma madre.
+  @@unique([parentId, nombre])
+  @@index([parentId])
+  @@index([ruta])
+  @@map("sedes")
+}
+
+/// Colección de fotos dentro de una sede. La crea un ADMIN_FOTOS.
+model AlbumFotos {
+  id          Int         @id @default(autoincrement())
+  sedeId      Int
+  nombre      String
+  descripcion String?
+  estado      EstadoAlbum @default(ABIERTO)
+  creadoPorId Int
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  sede         Sede                @relation(fields: [sedeId], references: [id], onDelete: Restrict)
+  creadoPor    Usuario             @relation("AlbumesCreados", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  compartidos  AccesoCompartido[]
+  invitaciones InvitacionCliente[]
+  fotos        Foto[]
+
+  @@unique([sedeId, nombre])
+  @@index([sedeId])
+  @@map("albumes_fotos")
+}
+
+/// Con quién está compartido algo: UNA sede o UN álbum, nunca los dos.
+///
+/// Sustituye a la antigua `AccesoAlbum` —que solo sabía de álbumes— porque
+/// «Compartir» es un único flujo que actúa igual sobre una carpeta que
+/// sobre un álbum, y para el interno que colabora igual que para el
+/// cliente externo. Dos tablas habrían significado dos reglas de cascada
+/// y dos caminos de código para la misma pregunta.
+///
+/// La cascada NO se materializa: compartir una sede es UNA fila, y los
+/// descendientes se resuelven en lectura comparando prefijos de `Sede.ruta`.
+/// Así no hay nada que resincronizar al mover o crear una subsede.
+///
+/// Un ADMIN_FOTOS nunca aparece aquí: accede a todo por su nivel.
+model AccesoCompartido {
+  id            Int      @id @default(autoincrement())
+  usuarioId     Int
+  sedeId        Int?
+  albumId       Int?
+  otorgadoPorId Int
+  creadoEn      DateTime @default(now())
+
+  usuario     Usuario     @relation("CompartidoConmigo", fields: [usuarioId], references: [id], onDelete: Cascade)
+  otorgadoPor Usuario     @relation("CompartidosPorMi", fields: [otorgadoPorId], references: [id], onDelete: Restrict)
+  sede        Sede?       @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+  album       AlbumFotos? @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  // Que exactamente uno de los dos venga informado lo valida el service:
+  // es un CHECK entre columnas que Prisma no modela.
+  @@unique([usuarioId, sedeId])
+  @@unique([usuarioId, albumId])
+  @@index([usuarioId])
+  @@map("accesos_compartidos")
+}
+
+/// Invitación pendiente a un cliente externo que todavía no tiene cuenta.
+model InvitacionCliente {
+  id    Int    @id @default(autoincrement())
+  /// Normalizado a minúsculas. Cualquier dominio: el dominio verificado
+  /// con SPF/DKIM es el del REMITENTE (HVC), no el del destinatario.
+  email String
+
+  /// SHA-256 del token, nunca el token. El enlace del correo es una
+  /// credencial: la BD no debe guardar nada que por sí solo dé acceso.
+  tokenHash String @unique
+
+  sedeId        Int?
+  albumId       Int?
+  invitadoPorId Int
+
+  estado     EstadoInvitacion @default(PENDIENTE)
+  expiraEn   DateTime
+  creadoEn   DateTime         @default(now())
+  aceptadaEn DateTime?
+  /// Se rellena al activar: la cuenta que nació de esta invitación.
+  clienteId  Int?
+
+  invitadoPor Usuario     @relation("InvitacionesHechas", fields: [invitadoPorId], references: [id], onDelete: Restrict)
+  cliente     Usuario?    @relation("InvitacionAceptada", fields: [clienteId], references: [id], onDelete: SetNull)
+  sede        Sede?       @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+  album       AlbumFotos? @relation(fields: [albumId], references: [id], onDelete: Cascade)
+
+  @@index([email, estado])
+  @@map("invitaciones_cliente")
+}
+
+model Foto {
+  id          Int     @id @default(autoincrement())
+  albumId     Int
+  descripcion String?
+  subidaPorId Int
+
+  /// Claves en el object storage (R2), no rutas de disco: el filesystem
+  /// de Render es efímero y se pierde en cada deploy.
+  claveImagen    String
+  claveMiniatura String
+
+  anchoPx       Int
+  altoPx        Int
+  bytes         Int // tamaño YA procesado
+  bytesOriginal Int // lo que subió el usuario, para medir el ahorro
+  formato       String // "webp"
+
+  /// Fecha EXIF de captura si el archivo la traía. Puede diferir de
+  /// creadoEn: una foto de ayer se puede subir hoy.
+  tomadaEn DateTime? @db.Date
+
+  creadoEn DateTime @default(now())
+
+  album     AlbumFotos @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  subidaPor Usuario    @relation("FotosSubidas", fields: [subidaPorId], references: [id], onDelete: Restrict)
+
+  // El feed se lee por álbum en orden cronológico.
+  @@index([albumId, creadoEn])
+  @@index([subidaPorId])
+  @@map("fotos")
+}
