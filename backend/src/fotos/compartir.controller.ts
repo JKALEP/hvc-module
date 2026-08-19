@@ -2,80 +2,120 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
+  Ip,
   Delete,
   Param,
   Body,
   ParseIntPipe,
-  BadRequestException,
 } from '@nestjs/common';
 import { CompartirService } from './compartir.service';
-import type { Objetivo } from './compartir.service';
-import {
-  RequiereModulo,
-  RequiereNivelFotos,
-  UsuarioActual,
-} from '../auth/decoradores';
-import { Modulo, NivelFotos } from '../../generated/prisma/enums';
+import { RequiereModulo, UsuarioActual } from '../auth/decoradores';
+import { Modulo } from '../../generated/prisma/enums';
 import type { UsuarioAutenticado } from '../auth/tipos';
 
 /**
- * Compartir carpetas y álbumes. Solo un ADMIN_FOTOS.
+ * Compartir carpetas.
  *
- * `:tipo` es "carpeta" o "album" —el lenguaje de la URL es el de la UI,
- * no el del schema—, y se traduce aquí al objetivo interno.
+ * Sin `@RequiereNivelFotos` a propósito: quien comparte no es un nivel sino
+ * quien tiene Acceso Total SOBRE ESA CARPETA (§5), y eso incluye al
+ * supervisor de §4 que la creó y no tiene ningún nivel global. El límite lo
+ * pone `AccesoService`, que sabe QUÉ carpeta se está compartiendo; un
+ * decorador solo sabe quién pide.
  */
 @RequiereModulo(Modulo.FOTOS)
-@RequiereNivelFotos(NivelFotos.ADMIN_FOTOS)
 @Controller('fotos/compartir')
 export class CompartirController {
   constructor(private readonly compartir: CompartirService) {}
 
-  private objetivo(tipo: string, id: number): Objetivo {
-    if (tipo === 'carpeta') return { tipo: 'sede', id };
-    if (tipo === 'album') return { tipo: 'album', id };
-    throw new BadRequestException(
-      `No se puede compartir "${tipo}". Solo "carpeta" o "album".`,
-    );
+  /** Árbol que se puede ofrecer en el selector de carpetas. */
+  @Get('carpetas')
+  carpetas(@UsuarioActual() usuario: UsuarioAutenticado) {
+    return this.compartir.carpetasQuePuedeCompartir(usuario);
   }
 
-  @Get(':tipo/:id')
-  listar(@Param('tipo') tipo: string, @Param('id', ParseIntPipe) id: number) {
-    return this.compartir.listar(this.objetivo(tipo, id));
+  /** Con quién está compartida una carpeta. */
+  @Get('carpeta/:id')
+  listar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.compartir.listar(usuario, id);
   }
 
-  @Post(':tipo/:id')
+  /** Correo + N carpetas + el grado de §5, en un solo paso. */
+  @Post()
   compartirCon(
     @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('tipo') tipo: string,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: { email?: string },
+    @Body()
+    dto: {
+      email?: string;
+      carpetaIds?: number[];
+      permiso?: string;
+      /** §9: los dos opcionales del formulario «Agregar colaborador». */
+      expiraEn?: string;
+      nombre?: string;
+    },
+    @Ip() ip: string,
   ) {
     return this.compartir.compartir(
       usuario,
-      this.objetivo(tipo, id),
       dto?.email,
+      dto?.carpetaIds,
+      dto?.permiso,
+      dto?.expiraEn,
+      dto?.nombre,
+      ip,
     );
   }
 
-  @Delete(':tipo/:id/acceso/:usuarioId')
-  quitar(
-    @Param('tipo') tipo: string,
+  /**
+   * Cambiar el grado de alguien sobre una carpeta (§10).
+   *
+   * PATCH y no otro POST a `/compartir`: la fila ya existe y lo que cambia
+   * es su valor. Admite `SIN_ACCESO`, que es la restricción de §7.
+   */
+  @Patch('carpeta/:id/acceso/:usuarioId')
+  cambiarGrado(
+    @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
     @Param('usuarioId', ParseIntPipe) usuarioId: number,
+    @Body() dto: { permiso?: string },
+    @Ip() ip: string,
   ) {
-    return this.compartir.quitarAcceso(this.objetivo(tipo, id), usuarioId);
+    return this.compartir.cambiarGrado(
+      usuario,
+      id,
+      usuarioId,
+      dto?.permiso,
+      ip,
+    );
+  }
+
+  @Delete('carpeta/:id/acceso/:usuarioId')
+  quitar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Param('usuarioId', ParseIntPipe) usuarioId: number,
+    @Ip() ip: string,
+  ) {
+    return this.compartir.quitarAcceso(usuario, id, usuarioId, ip);
   }
 
   @Post('invitacion/:invitacionId/reenviar')
   reenviar(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('invitacionId', ParseIntPipe) invitacionId: number,
+    @Ip() ip: string,
   ) {
-    return this.compartir.reenviar(usuario, invitacionId);
+    return this.compartir.reenviar(usuario, invitacionId, ip);
   }
 
   @Delete('invitacion/:invitacionId')
-  cancelar(@Param('invitacionId', ParseIntPipe) invitacionId: number) {
-    return this.compartir.cancelar(invitacionId);
+  cancelar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('invitacionId', ParseIntPipe) invitacionId: number,
+  ) {
+    return this.compartir.cancelar(usuario, invitacionId);
   }
 }

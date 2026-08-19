@@ -4,17 +4,22 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { CommonModule } from './common/common.module';
 import { AuthModule } from './auth/auth.module';
-import { JwtGuard } from './auth/jwt.guard';
-import { ModuloGuard } from './auth/modulo.guard';
-import { ImportacionModule } from './importacion/importacion.module';
-import { MaestroModule } from './maestro/maestro.module';
-import { ProyectoModule } from './proyecto/proyecto.module';
-import { SupervisorModule } from './supervisor/supervisor.module';
-import { TrabajadorModule } from './trabajador/trabajador.module';
-import { ReporteDiarioModule } from './reporte-diario/reporte-diario.module';
-import { IndicadoresModule } from './indicadores/indicadores.module';
-import { AlertasModule } from './alertas/alertas.module';
+import { JwtGuard } from './auth/guards/jwt.guard';
+import { ModuloGuard } from './auth/guards/modulo.guard';
+import { CatalogoModule } from './costos/catalogo/catalogo.module';
+import { ProveedorModule } from './costos/proveedor/proveedor.module';
+import { RequerimientoModule } from './costos/requerimiento/requerimiento.module';
+import { ObservacionModule } from './costos/observacion/observacion.module';
+import { PlantillaModule } from './costos/plantilla/plantilla.module';
+import { CotizacionModule } from './costos/cotizacion/cotizacion.module';
+import { AprobacionModule } from './costos/aprobacion/aprobacion.module';
+import { CostoModule } from './costos/costo/costo.module';
+import { ExportacionCostosModule } from './costos/exportacion/exportacion.module';
+import { GestionPersonalModule } from './personal/gestion-personal/gestion-personal.module';
+import { ObraModule } from './personal/obra/obra.module';
+import { EquiposModule } from './equipos/equipos.module';
 import { FotosModule } from './fotos/fotos.module';
 
 @Module({
@@ -27,17 +32,24 @@ import { FotosModule } from './fotos/fotos.module';
      */
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     PrismaModule,
+    // Services que usan dos o más módulos: líneas, exportación, correo y
+    // numeración. Global, igual que Prisma y Auth.
+    CommonModule,
     AuthModule,
-    // Módulo Costos
-    ImportacionModule,
-    MaestroModule,
+    // Módulo Costos: el proceso completo de requerimiento a costo.
+    CatalogoModule,
+    ProveedorModule,
+    RequerimientoModule,
+    ObservacionModule,
+    PlantillaModule,
+    CotizacionModule,
+    AprobacionModule,
+    CostoModule,
+    ExportacionCostosModule,
     // Módulo Personal / Proyectos
-    ProyectoModule,
-    SupervisorModule,
-    TrabajadorModule,
-    ReporteDiarioModule,
-    IndicadoresModule,
-    AlertasModule,
+    GestionPersonalModule,
+    ObraModule,
+    EquiposModule,
     // Módulo Fotos
     FotosModule,
   ],

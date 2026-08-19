@@ -6,6 +6,7 @@ import {
 import { createHash } from 'node:crypto';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditoriaFotosService } from './auditoria-fotos.service';
 
 /**
  * Activación de una invitación: rutas PÚBLICAS, sin sesión.
@@ -21,7 +22,10 @@ const LARGO_MINIMO_PASSWORD = 8;
 
 @Injectable()
 export class InvitacionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditoria: AuditoriaFotosService,
+  ) {}
 
   private hash(token: string) {
     return createHash('sha256').update(token).digest('hex');
@@ -38,8 +42,9 @@ export class InvitacionService {
         email: true,
         estado: true,
         expiraEn: true,
-        sede: { select: { nombre: true } },
-        album: { select: { nombre: true } },
+        carpetas: {
+          select: { carpetaId: true, carpeta: { select: { nombre: true } } },
+        },
         invitadoPor: { select: { nombre: true } },
       },
     });
@@ -65,7 +70,8 @@ export class InvitacionService {
 
     return {
       email: inv.email,
-      recurso: inv.sede?.nombre ?? inv.album?.nombre ?? '',
+      // Puede cubrir varias carpetas con un solo enlace.
+      recurso: inv.carpetas.map((c) => c.carpeta.nombre).join(', '),
       invitadoPor: inv.invitadoPor.nombre,
       expiraEn: inv.expiraEn,
     };
@@ -77,7 +83,13 @@ export class InvitacionService {
    * Si algo falla a mitad no puede quedar ni una cuenta sin acceso ni un
    * acceso sin cuenta.
    */
-  async activar(token: string, nombreCrudo: unknown, passwordCrudo: unknown) {
+  async activar(
+    token: string,
+    nombreCrudo: unknown,
+    passwordCrudo: unknown,
+    /** §23: aceptar una invitación es de las sensibles. */
+    ip?: string | null,
+  ) {
     const inv = await this.buscar(token);
     if (inv.expiraEn < new Date())
       throw new BadRequestException(
@@ -109,11 +121,18 @@ export class InvitacionService {
 
     const completa = await this.prisma.invitacionCliente.findUnique({
       where: { id: inv.id },
-      select: { sedeId: true, albumId: true, invitadoPorId: true },
+      select: {
+        invitadoPorId: true,
+        carpetas: { select: { carpetaId: true, permiso: true } },
+      },
     });
     if (!completa) throw new NotFoundException('Esa invitación no existe.');
+    if (completa.carpetas.length === 0)
+      throw new BadRequestException(
+        'Esta invitación se quedó sin carpetas. Pídele una nueva a quien te la envió.',
+      );
 
-    return this.prisma.$transaction(async (tx) => {
+    const creado = await this.prisma.$transaction(async (tx) => {
       const cliente = await tx.usuario.create({
         data: {
           email: inv.email,
@@ -127,13 +146,19 @@ export class InvitacionService {
         select: { id: true, email: true, nombre: true },
       });
 
-      await tx.accesoCompartido.create({
-        data: {
-          sedeId: completa.sedeId,
-          albumId: completa.albumId,
+      // Una invitación puede cubrir varias carpetas: todas de una vez.
+      //
+      // El permiso NO se decide aquí: viaja en la invitación desde que se
+      // envió (§9 lo pide en el formulario de compartir), así que aceptar
+      // solo lo copia. Elegirlo en este punto convertiría el enlace en
+      // algo que concede un acceso distinto del que se prometió.
+      await tx.accesoCompartido.createMany({
+        data: completa.carpetas.map((c) => ({
+          carpetaId: c.carpetaId,
           usuarioId: cliente.id,
           otorgadoPorId: completa.invitadoPorId,
-        },
+          permiso: c.permiso,
+        })),
       });
 
       await tx.invitacionCliente.update({
@@ -147,5 +172,37 @@ export class InvitacionService {
 
       return cliente;
     });
+
+    // §23, acciones 11 y 12 — son DOS hechos, no uno: «nació una cuenta» y
+    // «se aceptó esta invitación» se consultan por caminos distintos (por
+    // usuario y por invitación), y con un solo evento uno de los dos no
+    // encontraría nada.
+    //
+    // El autor es el propio cliente recién creado: nadie de HVC estaba
+    // delante cuando ocurrió, y atribuírselo a quien invitó diría que hizo
+    // algo que no hizo.
+    const autor = { id: creado.id, nombre: creado.nombre } as Parameters<
+      AuditoriaFotosService['registrar']
+    >[0];
+    await this.auditoria.registrar(autor, [
+      {
+        carpetaId: null,
+        entidad: 'CARPETA',
+        entidadId: creado.id,
+        accion: 'CREACION',
+        descripcion: `Se creó la cuenta de cliente ${creado.email}.`,
+        ip,
+      },
+      {
+        carpetaId: null,
+        entidad: 'INVITACION',
+        entidadId: inv.id,
+        accion: 'INVITACION_ACEPTADA',
+        descripcion: `${creado.email} aceptó su invitación.`,
+        ip,
+      },
+    ]);
+
+    return creado;
   }
 }

@@ -1,5 +1,4 @@
-// Prisma schema — HVC Comercial S.A.C. — Sistema de costos y cotizaciones
-// Modelo simplificado: Importacion -> Producto (proveedor y ruc son texto) -> HistorialPrecio
+// Prisma schema — HVC Comercial S.A.C.
 // Docs: https://pris.ly/d/prisma-schema
 
 generator client {
@@ -13,364 +12,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─────────────────────────────────────────────────────────────
-// Importacion — cada carga de un archivo Excel
-// ─────────────────────────────────────────────────────────────
-model Importacion {
-  id               Int      @id @default(autoincrement())
-  nombreArchivo    String
-  fechaImportacion DateTime @default(now())
-  totalFilas       Int      @default(0)
-  filasCompletas   Int      @default(0)
-  estado           Estado   @default(INCOMPLETO)
-
-  productos Producto[]
-
-  @@map("importaciones")
-}
-
-// ─────────────────────────────────────────────────────────────
-// Producto — una fila del requerimiento / una cotización
-// Una fila está COMPLETA solo si tiene: codigo + precioUnitario + proveedor + ruc
-// ─────────────────────────────────────────────────────────────
-model Producto {
-  id            Int    @id @default(autoincrement())
-  importacionId Int
-  codigo        String? // Se ingresa MANUAL por el usuario (no viene del Excel)
-  descripcion   String // Viene del Excel
-  unidadMedida  String? // Viene del Excel (UND, KG, MT, DOC, etc.)
-  cantidad      Decimal? @db.Decimal(14, 4) // Cuánto se necesita pedir
-  detalles      String? // Detalles / Observación (viene del Excel)
-  referencias   String? // Marca, modelo (viene del Excel)
-
-  // Precio SIEMPRE por unidad de medida (nunca total). Nullable hasta que el usuario lo llena.
-  precioUnitario Decimal? @db.Decimal(14, 4)
-  proveedor      String? // Nombre de la empresa (texto, no tabla)
-  ruc            String? // RUC del proveedor (texto)
-
-  estado        Estado   @default(INCOMPLETO)
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  importacion Importacion       @relation(fields: [importacionId], references: [id], onDelete: Cascade)
-  historial   HistorialPrecio[]
-
-  @@index([importacionId])
-  @@index([codigo])
-  @@index([proveedor])
-  @@index([ruc])
-  @@map("productos")
-}
-
-// ─────────────────────────────────────────────────────────────
-// HistorialPrecio — se registra cada vez que cambia el precioUnitario
-// ─────────────────────────────────────────────────────────────
-model HistorialPrecio {
-  id             Int      @id @default(autoincrement())
-  productoId     Int
-  precioAnterior Decimal? @db.Decimal(14, 4) // Puede ser null si es el primer precio
-  precioNuevo    Decimal  @db.Decimal(14, 4)
-  fecha          DateTime @default(now())
-
-  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
-
-  @@index([productoId])
-  @@map("historial_precios")
-}
-
-enum Estado {
-  COMPLETO
-  INCOMPLETO
-}
-
-// ═════════════════════════════════════════════════════════════
-// MÓDULO PERSONAL Y PROYECTOS
-// Nómina (EmpresaContratista, Trabajador, Supervisor) se carga por SQL directo.
-// ReporteDiario + Participacion se crean desde el formulario estructurado.
-// ═════════════════════════════════════════════════════════════
-
-enum EstadoEmpresaContratista {
-  ACTIVO
-  INACTIVO
-}
-
-enum EstadoTrabajador {
-  ACTIVO
-  INACTIVO
-}
-
-enum EstadoSupervisor {
-  ACTIVO
-  INACTIVO
-}
-
-enum EstadoProyecto {
-  EN_EJECUCION
-  FINALIZADO
-  PAUSADO
-}
-
-// ─────────────────────────────────────────────────────────────
-// EmpresaContratista — catálogo, se llena por SQL
-// ─────────────────────────────────────────────────────────────
-model EmpresaContratista {
-  id     Int                      @id @default(autoincrement())
-  nombre String
-  ruc    String                   @unique
-  estado EstadoEmpresaContratista @default(ACTIVO)
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  trabajadores    Trabajador[]
-  participaciones Participacion[]
-  nominaMensual   NominaMensual[]
-
-  @@index([nombre])
-  @@map("empresas_contratistas")
-}
-
-// ─────────────────────────────────────────────────────────────
-// Trabajador — nómina. Las bajas se hacen con estado = INACTIVO,
-// NUNCA borrando la fila (rompería el historial de participaciones).
-// ─────────────────────────────────────────────────────────────
-model Trabajador {
-  id        Int    @id @default(autoincrement())
-  dni       String @unique
-  nombres   String
-  apellidos String
-
-  // Empresa VIGENTE. NO es la verdad histórica:
-  //  - "¿con quién estaba en enero?" → NominaMensual
-  //  - "¿de qué empresa era en esta jornada?" → snapshot de Participacion
-  // Usarla para reconstruir el pasado hace que la utilización de meses
-  // cerrados cambie sola al mover a alguien de contrata.
-  empresaId Int
-  estado    EstadoTrabajador @default(ACTIVO)
-
-  // ── Datos de planilla ──
-  // Carga manual por SQL: todos opcionales y de texto libre, para que
-  // ninguna variación de escritura ("M" vs "MASCULINO", "SOLTERO(A)")
-  // rompa el INSERT. Son informativos, no entran en ningún cálculo.
-  tipoTrabajador  String?
-  paisNacimiento  String?
-  tipoDocumento   String?
-  sexo            String?
-  fechaNacimiento DateTime? @db.Date
-  estadoCivil     String?
-  sede            String?
-  moneda          String?
-
-  // Remuneración VIGENTE, de referencia. El costo histórico se calcula
-  // con NominaMensual.remuneracion, que no deriva al subir un sueldo.
-  remuneracion Decimal? @db.Decimal(12, 2)
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  empresa         EmpresaContratista @relation(fields: [empresaId], references: [id], onDelete: Restrict)
-  participaciones Participacion[]
-  nominaMensual   NominaMensual[]
-
-  @@index([empresaId])
-  @@index([apellidos])
-  @@map("trabajadores")
-}
-
-// ─────────────────────────────────────────────────────────────
-// NominaMensual — foto de la planilla de un mes.
-//
-// Fuente de verdad de "quién estaba contratado, con quién y por cuánto"
-// en un período cerrado. Existe porque Participacion solo puede decir
-// quién PARTICIPÓ: alguien contratado todo el mes que no pisó obra no
-// deja ninguna fila, y sin embargo cuenta en el denominador de la
-// utilización.
-//
-// Granularidad mensual a propósito: la planilla en Perú es un artefacto
-// mensual (T-Registro / PLAME) y llega un archivo por mes y contratista.
-// Un traslado a mitad de mes atribuye ese mes a una sola empresa; la
-// atribución diaria exacta sigue estando en Participacion.
-//
-// Se carga por SQL, igual que el resto de la nómina.
-// ─────────────────────────────────────────────────────────────
-model NominaMensual {
-  id           Int @id @default(autoincrement())
-  anio         Int
-  mes          Int // 1–12
-  trabajadorId Int
-  empresaId    Int // afiliación de ESE mes, no la vigente
-
-  remuneracion Decimal? @db.Decimal(12, 2) // sueldo de ESE mes
-  moneda       String?
-  sede         String?
-  observacion  String?
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  trabajador Trabajador         @relation(fields: [trabajadorId], references: [id], onDelete: Restrict)
-  empresa    EmpresaContratista @relation(fields: [empresaId], references: [id], onDelete: Restrict)
-
-  // Una persona no puede estar dos veces en la planilla del mismo mes.
-  @@unique([anio, mes, trabajadorId])
-  @@index([anio, mes, empresaId])
-  @@index([trabajadorId, anio, mes])
-  @@map("nomina_mensual")
-}
-
-// ─────────────────────────────────────────────────────────────
-// Supervisor — catálogo mínimo
-// ─────────────────────────────────────────────────────────────
-model Supervisor {
-  id     Int              @id @default(autoincrement())
-  nombre String
-  estado EstadoSupervisor @default(ACTIVO)
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  reportes ReporteDiario[]
-
-  @@map("supervisores")
-}
-
-// ─────────────────────────────────────────────────────────────
-// Proyecto — el avance acumulado NO vive aquí: ver AvanceSemanal
-// ─────────────────────────────────────────────────────────────
-model Proyecto {
-  id        Int            @id @default(autoincrement())
-  nombre    String
-  cliente   String?
-  ubicacion String?
-  estado    EstadoProyecto @default(EN_EJECUCION)
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  reportes        ReporteDiario[]
-  ajustes         AjusteAvance[]
-  participaciones Participacion[]
-
-  @@index([estado])
-  @@map("proyectos")
-}
-
-// ─────────────────────────────────────────────────────────────
-// AvanceSemanal — estimación MANUAL de ingeniería, una por semana.
-// No se deriva de equiposEjecutados. anio+semana los calcula el
-// backend a partir de `fecha` (semana ISO).
-// ─────────────────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────
-// AjusteAvance — override manual EXCEPCIONAL del avance calculado.
-//
-// El avance por defecto NO vive aquí: se calcula como
-// Σ equiposEjecutados / Σ equiposProgramados sobre todos los reportes
-// diarios del proyecto (ver ProyectoAnaliticaService.avanceTotal).
-//
-// Esta tabla existe solo para cuando el avance real de obra incluye
-// trabajo que no se mide en "equipos" (planos, permisos, materiales) y el
-// ingeniero necesita anotar un ajuste. Cada fila es un EVENTO con su fecha
-// y su justificación, no un valor que se sobrescribe: por eso no hay
-// unique por semana y la observación es obligatoria a nivel de service.
-//
-// Antes se llamaba AvanceSemanal y guardaba estimaciones semanales; anio y
-// semana se eliminaron porque solo existían para el unique semanal, y el
-// gráfico ahora indexa por `fecha`.
-// ─────────────────────────────────────────────────────────────
-model AjusteAvance {
-  id          Int      @id @default(autoincrement())
-  proyectoId  Int
-  porcentaje  Decimal  @db.Decimal(5, 2)
-  fecha       DateTime @db.Date
-  observacion String? // obligatoria al crear: un override sin justificación no sirve
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  proyecto Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
-
-  @@index([proyectoId, fecha])
-  @@map("ajustes_avance")
-}
-
-// ─────────────────────────────────────────────────────────────
-// ReporteDiario — se crea desde el formulario estructurado.
-// produccion y tecnicosLaborando son CALCULADOS por el backend.
-// calificacionPersonal es MANUAL y cualitativo: independiente de produccion.
-// ─────────────────────────────────────────────────────────────
-model ReporteDiario {
-  id           Int      @id @default(autoincrement())
-  fecha        DateTime @db.Date
-  proyectoId   Int
-  supervisorId Int
-
-  // Entrada manual
-  equiposProgramados  Int
-  equiposEjecutados   Int
-  tecnicosProgramados Int
-
-  // Calculado: equiposEjecutados / equiposProgramados * 100.
-  // null si equiposProgramados = 0 (no se fuerza a 0 para no ensuciar promedios).
-  produccion Decimal? @db.Decimal(5, 2)
-
-  // Manual: cuántas contratistas se esperaba que trabajen ese día.
-  // Es una expectativa, no un hecho medible, por eso no se deriva.
-  // Nullable: los reportes ya cargados no lo tienen, y un 0 diría
-  // "se esperaban cero contratistas", que es falso.
-  numeroContratistasProgramados Int?
-
-  // Calculado: COUNT de participaciones de este reporte.
-  tecnicosLaborando Int @default(0)
-
-  // Calculado: empresaId distintos entre las participaciones del reporte.
-  numeroContratistasTrabajando Int @default(0)
-
-  // Manuales y cualitativas. NO se derivan de produccion ni entre sí.
-  calificacionProveedor  Decimal? @db.Decimal(5, 2) // evalúa a la contratista
-  calificacionSupervisor Decimal? @db.Decimal(5, 2) // evalúa al supervisor de HVC
-
-  creadoEn      DateTime @default(now())
-  actualizadoEn DateTime @updatedAt
-
-  proyecto        Proyecto        @relation(fields: [proyectoId], references: [id], onDelete: Restrict)
-  supervisor      Supervisor      @relation(fields: [supervisorId], references: [id], onDelete: Restrict)
-  participaciones Participacion[]
-
-  @@unique([proyectoId, fecha])
-  @@index([fecha])
-  @@index([supervisorId])
-  @@map("reportes_diarios")
-}
-
-// ─────────────────────────────────────────────────────────────
-// Participacion — tabla puente: "un trabajador participó en un
-// proyecto un día". empresaId / proyectoId / fecha son redundantes
-// A PROPÓSITO: evitan 2-3 joins en los indicadores de Fase 2 y
-// empresaId además congela la empresa del trabajador en esa fecha.
-// ─────────────────────────────────────────────────────────────
-model Participacion {
-  id           Int      @id @default(autoincrement())
-  reporteId    Int
-  trabajadorId Int
-  empresaId    Int      // snapshot de trabajador.empresaId
-  proyectoId   Int      // copia de reporte.proyectoId
-  fecha        DateTime @db.Date // copia de reporte.fecha
-
-  creadoEn DateTime @default(now())
-
-  reporte    ReporteDiario      @relation(fields: [reporteId], references: [id], onDelete: Cascade)
-  trabajador Trabajador         @relation(fields: [trabajadorId], references: [id], onDelete: Restrict)
-  empresa    EmpresaContratista @relation(fields: [empresaId], references: [id], onDelete: Restrict)
-  proyecto   Proyecto           @relation(fields: [proyectoId], references: [id], onDelete: Restrict)
-
-  @@unique([reporteId, trabajadorId])
-  @@index([trabajadorId, fecha])
-  @@index([empresaId, fecha])
-  @@index([proyectoId, fecha])
-  @@index([fecha])
-  @@map("participaciones")
-}
-
 // ═════════════════════════════════════════════════════════════
 // AUTENTICACIÓN Y PERMISOS
 //
@@ -382,7 +23,7 @@ model Participacion {
 
 enum RolGlobal {
   SUPERADMIN // única cuenta: crea Admins y les asigna módulos
-  ADMIN      // accede solo a los módulos que le asignaron
+  ADMIN // accede solo a los módulos que le asignaron
   // Cliente externo. NO tiene filas en PermisoModulo: no entra a ningún
   // módulo, solo ve lo que le compartieron por invitación. Vive en esta
   // tabla y no en una propia para no duplicar login, JWT ni guards.
@@ -393,13 +34,43 @@ enum Modulo {
   COSTOS
   PERSONAL_PROYECTOS
   FOTOS
+  EQUIPOS
 }
 
-// Sub-roles: SOLO aplican al módulo FOTOS. Costos y PersonalProyectos
-// dan acceso completo al módulo o ninguno.
+// Nivel GLOBAL dentro del módulo FOTOS (§3): qué alcanza alguien sin que
+// nadie le haya compartido nada. PersonalProyectos da acceso completo al
+// módulo o ninguno; COSTOS tiene los suyos, en `RolCostos`.
+//
+// No hay valor para "sin acceso": eso es no tener fila en
+// `PermisoModulo`, igual que `EstadoInvitacion` no guarda EXPIRADA. Y
+// tampoco lo hay para el supervisor de §4 —el que entra al módulo pero
+// solo alcanza lo que le compartieron—: ése es `nivelFotos = null`, que
+// es literalmente "ningún alcance global".
+//
+// Sustituye al par ADMIN_FOTOS/COLABORADOR de v2, que mezclaba las dos
+// preguntas de §2: COLABORADOR no era un nivel global, era la ausencia
+// de uno.
 enum NivelFotos {
-  ADMIN_FOTOS // crea sedes, proyectos de fotos y asigna colaboradores
-  COLABORADOR // solo ve y sube donde le dieron acceso explícito
+  LECTURA_GLOBAL // ve todo el árbol; no crea, no sube, no comparte (§3.2)
+  EDITOR_GLOBAL // trabaja sobre todo el contenido; no administra permisos (§3.3)
+  ADMIN_GLOBAL // acceso absoluto, incluidas carpetas que nadie le compartió (§3.4)
+}
+
+// Sub-roles del módulo COSTOS: quién eres DENTRO del proceso de
+// requerimiento → cotización → aprobación → costo.
+//
+// Son responsabilidades, no personas. El proceso exige que la persona
+// que recomienda una cotización no sea la que la aprueba, y eso solo se
+// puede hacer cumplir si el sistema sabe qué papel juega cada quien.
+//
+// NO hay un valor para el administrador del módulo: los catálogos, los
+// proveedores, las plantillas y la auditoría los gestiona el SUPERADMIN,
+// que ya existe y ya pasa por encima de todos los permisos. Un rol más
+// solo para eso habría sido una tabla de permisos que nadie usa.
+enum RolCostos {
+  SOLICITANTE // emite requerimientos y registra el costo aprobado
+  GESTOR_COTIZACIONES // observa, comparte con proveedores, compara y recomienda
+  APROBADOR // acepta, rechaza o cierra sin acuerdo
 }
 
 enum EstadoUsuario {
@@ -431,13 +102,59 @@ model Usuario {
 
   permisos PermisoModulo[]
 
-  // Módulo Fotos
-  albumesCreados     AlbumFotos[]        @relation("AlbumesCreados")
-  compartidoConmigo  AccesoCompartido[]  @relation("CompartidoConmigo")
-  compartidosPorMi   AccesoCompartido[]  @relation("CompartidosPorMi")
-  fotosSubidas       Foto[]              @relation("FotosSubidas")
-  invitacionesHechas InvitacionCliente[] @relation("InvitacionesHechas")
-  invitacionAceptada InvitacionCliente[] @relation("InvitacionAceptada")
+  // Módulo Fotos. Propiedad y autoría van con Restrict —una carpeta sin
+  // dueño dejaría sin respuesta uno de los escalones de §25— salvo donde
+  // el dato es accesorio (responsable de una tarea, autor de un
+  // comentario, quien la completó), que van con SetNull y guardan el
+  // nombre en texto donde hace falta.
+  carpetasFotosPropias        CarpetaFotos[]        @relation("CarpetasFotosPropias")
+  albumesCreados              AlbumFotos[]          @relation("AlbumesCreados")
+  tareasCreadas               TareaFotos[]          @relation("TareasCreadas")
+  tareasResponsable           TareaFotos[]          @relation("TareasResponsable")
+  tareasCompletadas           TareaFotos[]          @relation("TareasCompletadas")
+  comentariosFotos            ComentarioFotos[]     @relation("ComentariosFotos")
+  compartidoConmigo           AccesoCompartido[]    @relation("CompartidoConmigo")
+  compartidosPorMi            AccesoCompartido[]    @relation("CompartidosPorMi")
+  fotosSubidas                Foto[]                @relation("FotosSubidas")
+  invitacionesHechas          InvitacionCliente[]   @relation("InvitacionesHechas")
+  invitacionAceptada          InvitacionCliente[]   @relation("InvitacionAceptada")
+  plantillasEstructuraCreadas PlantillaEstructura[] @relation("PlantillasEstructuraCreadas")
+  eventosFotos                EventoFotos[]         @relation("EventosFotos")
+
+  // Gestión de personal (listas SCTR) — auditoría de fiscalización.
+  periodosCreados    PeriodoPersonal[] @relation("PeriodosCreados")
+  fichasActualizadas FichaPersonal[]   @relation("FichasActualizadas")
+
+  // Obra
+  proyectosCreados Proyecto[] @relation("ProyectosCreados")
+  jornadasCreadas  Jornada[]  @relation("JornadasCreadas")
+
+  // Gestión de equipos. Todas nullable con SetNull en el otro lado: dar
+  // de baja a un usuario no puede borrar un equipo ni vaciar su historial.
+  equiposCreados         Equipo[]          @relation("EquiposCreados")
+  fotosEquipoSubidas     FotoEquipo[]      @relation("FotosEquipoSubidas")
+  fotosIncidenciaSubidas FotoIncidencia[]  @relation("FotosIncidenciaSubidas")
+  incidenciasCreadas     Incidencia[]      @relation("IncidenciasCreadas")
+  incidenciasResponsable Incidencia[]      @relation("IncidenciasResponsable")
+  cotizacionesCreadas    Cotizacion[]      @relation("CotizacionesCreadas")
+  ordenesCompraCreadas   OrdenCompra[]     @relation("OrdenesCompraCreadas")
+  eventosHistorial       EventoHistorial[] @relation("EventosHistorial")
+
+  // Módulo Costos. Todas nullable con SetNull en el otro lado, mismo
+  // criterio que Equipos: dar de baja una cuenta no puede borrar un
+  // requerimiento ni vaciar la bitácora del proceso. `EventoCostos`
+  // guarda además el nombre en texto, para que la auditoría siga
+  // sabiendo quién hizo qué cuando la FK se ponga a null.
+  requerimientosSolicitados Requerimiento[]          @relation("RequerimientosSolicitados")
+  observacionesEmitidas     Observacion[]            @relation("ObservacionesEmitidas")
+  observacionesConfirmadas  Observacion[]            @relation("ObservacionesConfirmadas")
+  solicitudesEnviadas       SolicitudCotizacion[]    @relation("SolicitudesEnviadas")
+  cotizacionesRegistradas   CotizacionProveedor[]    @relation("CotizacionesRegistradas")
+  evaluacionesHechas        EvaluacionCotizacion[]   @relation("EvaluacionesHechas")
+  aprobacionesHechas        Aprobacion[]             @relation("AprobacionesHechas")
+  costosRegistrados         Costo[]                  @relation("CostosRegistrados")
+  plantillasCreadas         PlantillaCorreoVersion[] @relation("PlantillasCreadas")
+  eventosCostos             EventoCostos[]           @relation("EventosCostos")
 
   @@index([estado])
   @@map("usuarios")
@@ -453,10 +170,24 @@ model PermisoModulo {
   usuarioId Int
   modulo    Modulo
 
-  // Obligatorio cuando modulo = FOTOS, null en los otros dos.
-  // La BD no puede expresar esa condición (sería un CHECK entre columnas
-  // que Prisma no modela), así que se valida en PermisoService.
+  // OPCIONAL cuando modulo = FOTOS, prohibido en los demás.
+  //
+  // Opcional y no obligatorio desde v3, y es un cambio con intención:
+  // null es el supervisor de §4 —entra al módulo y solo alcanza lo que
+  // le compartieron—, que es el caso más común de todos. Exigir un nivel
+  // global obligaría a inventarle uno a quien justamente no debe tener
+  // ninguno.
+  //
+  // La BD no puede expresar "prohibido en los demás" (sería un CHECK
+  // entre columnas que Prisma no modela), así que lo valida UsuarioService.
   nivelFotos NivelFotos?
+
+  // Lo mismo para COSTOS: obligatorio cuando modulo = COSTOS, null en los
+  // demás. Dos columnas y no una sola "sub-rol" polimórfica: son dos
+  // enums distintos, y una columna de texto que a veces guarda
+  // 'ADMIN_FOTOS' y a veces 'APROBADOR' pierde la validación de la base
+  // justo donde importa —el permiso de alguien—.
+  rolCostos RolCostos?
 
   creadoEn DateTime @default(now())
 
@@ -471,126 +202,261 @@ model PermisoModulo {
 // ═════════════════════════════════════════════════════════════
 // MÓDULO FOTOS
 //
-// Se llama AlbumFotos y NO ProyectoFoto a propósito: `Proyecto` ya existe
-// en el módulo de obra y tener `proyectoId` y `proyectoFotoId` a un
-// carácter de distancia es un accidente esperando.
+// Gestor de archivos para supervisión en obra: carpetas sin límite de
+// profundidad, tareas sobre equipos, álbumes, comentarios y fotografías,
+// compartido con clientes externos por invitación.
 //
-// Regla de acceso, una sola en todo el módulo:
-//   ver == subir. Un ADMIN_FOTOS accede a todos los álbumes por su nivel;
-//   un COLABORADOR, solo donde tenga fila en AccesoAlbum. No hay acceso
-//   de solo lectura — el álbum funciona como un feed grupal.
+// El modelo se llama `CarpetaFotos` y no `Carpeta` porque ese nombre lo
+// ocupa el módulo de Obra y Prisma tiene un único espacio de nombres.
+// Mismo criterio que llevó a `ClienteCostos` y a `CotizacionProveedor`.
+// Sustituye a `Sede`, que nombraba una ubicación física de cuando el
+// módulo no servía para otra cosa.
+//
+// DOS SISTEMAS DE ACCESO SEPARADOS (§2), y no se mezclan:
+//
+//   A. Nivel dentro del módulo — `PermisoModulo.nivelFotos`. Dice si
+//      entras y qué alcanzas GLOBALMENTE. Null = entras, pero solo a lo
+//      que te compartieron: es el supervisor de §4.
+//
+//   B. Permiso sobre una carpeta — `AccesoCompartido.permiso`. Dice qué
+//      puedes hacer DENTRO de una carpeta concreta.
+//
+// El permiso efectivo sale de cruzar los dos y lo resuelve un solo
+// sitio, `AccesoService.permisoEfectivo`, en el orden de §25: admin
+// global → nivel global → propietario → permiso específico → herencia →
+// restricción explícita. Diseñarlo centralizado no es una preferencia,
+// lo pide §25 con esas palabras.
 // ═════════════════════════════════════════════════════════════
 
-enum EstadoSede {
-  ACTIVA
-  INACTIVA
+/// Qué puede hacer alguien DENTRO de una carpeta (§5).
+///
+/// `SIN_ACCESO` no significa "no hay fila": es una NEGACIÓN EXPLÍCITA, y
+/// existe para poder expresar lo de §7 —«Proyecto A → Lectura, pero
+/// Inspecciones → Sin acceso»—. Se resuelve con el mismo mecanismo de
+/// prefijos de `ruta` que todo lo demás: gana la fila cuya carpeta esté
+/// más abajo en el camino. Sin este valor haría falta una segunda tabla
+/// de restricciones y una segunda regla de cascada que mantener a la par.
+enum PermisoCarpeta {
+  LECTURA
+  EDICION
+  TOTAL
+  SIN_ACCESO
 }
 
-enum EstadoAlbum {
-  ABIERTO
-  CERRADO // solo lectura para TODOS, incluido un ADMIN_FOTOS, que puede reabrirlo
+/// Una carpeta corriente o una que representa un EQUIPO del catálogo (§12).
+///
+/// Es un tipo en la misma tabla y no un modelo aparte porque, para
+/// navegar, un equipo es una carpeta más: tiene madre, tiene ruta, se
+/// comparte igual y cuelga de ella lo mismo. Lo único que añade es a qué
+/// equipo del catálogo apunta.
+enum TipoCarpetaFotos {
+  CARPETA
+  EQUIPO
 }
 
-/// Árbol de ubicaciones. Auto-relación: un nodo puede no tener hijas o
-/// tener varias, sin límite de niveles.
-model Sede {
+/// Árbol de carpetas. Auto-relación: un nodo puede no tener hijas o
+/// tener varias, sin límite de niveles (§11).
+model CarpetaFotos {
   id       Int    @id @default(autoincrement())
   nombre   String
   parentId Int?
 
   /// Ruta materializada ("1/4/9", ids separados por barra, incluye el
   /// propio nodo). Permite listar un subárbol con `ruta LIKE '1/4/%'` en
-  /// vez de una consulta recursiva o N viajes a la BD. La mantiene
-  /// SedeService al crear y al mover.
-  ruta   String
-  estado EstadoSede @default(ACTIVA)
+  /// vez de una consulta recursiva o N viajes a la BD. Sobre ella se
+  /// resuelven TAMBIÉN la herencia de permisos de §7 y la del archivado.
+  /// La mantienen los helpers de `common/arbol-ruta.ts` al crear y al mover.
+  ruta String
+
+  tipo TipoCarpetaFotos @default(CARPETA)
+
+  /// A qué equipo del catálogo de Gestión de Equipos representa esta
+  /// carpeta. Va con `tipo = EQUIPO` y solo con él, y eso lo hace cumplir
+  /// un CHECK que añade la migración a mano —`carpetas_fotos_equipo_segun_tipo_chk`—
+  /// porque Prisma no sabe declarar condiciones entre columnas. Nada en
+  /// este archivo delata que el CHECK existe: está aquí escrito.
+  ///
+  /// Es una FK y NO una copia de sus datos: el equipo del que se
+  /// fotografía una inspección es el mismo que ya está registrado allá.
+  /// Fotos nunca crea equipos por su cuenta —los referencia— y por eso
+  /// el borrado es Restrict: dar de baja un equipo que tiene fotos
+  /// documentadas tiene que fallar, no llevárselas por delante.
+  equipoId Int?
+
+  /// Quien la creó (§6). Obligatorio y con borrado Restrict: es uno de
+  /// los seis escalones de §25, y una carpeta sin dueño dejaría ese
+  /// escalón sin respuesta.
+  propietarioId Int
+
+  /// Archivada: solo lectura. Nadie sube fotos ni crea subcarpetas
+  /// dentro, ni siquiera un ADMIN_GLOBAL, que sí puede reabrirla.
+  ///
+  /// Se hereda hacia abajo y NO se materializa, por lo mismo que los
+  /// permisos: marcar la rama entera obligaría a reescribir filas al mover.
+  cerrada Boolean @default(false)
 
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  padre       Sede?               @relation("SedeJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
-  hijas       Sede[]              @relation("SedeJerarquia")
-  albumes     AlbumFotos[]
-  compartidos AccesoCompartido[]
-  invitaciones InvitacionCliente[]
+  padre        CarpetaFotos?       @relation("CarpetaFotosJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
+  hijas        CarpetaFotos[]      @relation("CarpetaFotosJerarquia")
+  equipo       Equipo?             @relation("CarpetasDeEquipo", fields: [equipoId], references: [id], onDelete: Restrict)
+  propietario  Usuario             @relation("CarpetasFotosPropias", fields: [propietarioId], references: [id], onDelete: Restrict)
+  albumes      AlbumFotos[]
+  tareas       TareaFotos[]
+  accesos      AccesoCompartido[]
+  invitaciones InvitacionCarpeta[]
+  comentarios  ComentarioFotos[]
+  eventos      EventoFotos[]
 
   // Sin dos hermanas con el mismo nombre bajo la misma madre.
   @@unique([parentId, nombre])
   @@index([parentId])
   @@index([ruta])
-  @@map("sedes")
+  @@index([equipoId])
+  @@index([propietarioId])
+  @@map("carpetas_fotos")
 }
 
-/// Colección de fotos dentro de una sede. La crea un ADMIN_FOTOS.
+/// Un álbum de fotos dentro de una carpeta (§16).
+///
+/// Es la fila que en v2 se llamaba `LoteFotos` —una subida anónima— con
+/// el nombre y la descripción que pide §16 devueltos. El `nombre` es
+/// NULLABLE a propósito: la captura rápida de §17 existe justamente para
+/// no obligar al supervisor a inventar un título antes de poder subir
+/// nada desde el celular. Cuando falta, la pantalla muestra la fecha.
 model AlbumFotos {
-  id          Int         @id @default(autoincrement())
-  sedeId      Int
-  nombre      String
+  id        Int @id @default(autoincrement())
+  carpetaId Int
+
+  nombre      String?
   descripcion String?
-  estado      EstadoAlbum @default(ABIERTO)
+
+  /// El día del trabajo que documenta, que no tiene por qué ser el de la
+  /// subida: se fotografía hoy lo que se hizo ayer. `@db.Date` porque es
+  /// un día de calendario, no un instante.
+  fecha DateTime? @db.Date
+
   creadoPorId Int
 
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  sede         Sede                @relation(fields: [sedeId], references: [id], onDelete: Restrict)
-  creadoPor    Usuario             @relation("AlbumesCreados", fields: [creadoPorId], references: [id], onDelete: Restrict)
-  compartidos  AccesoCompartido[]
-  invitaciones InvitacionCliente[]
-  fotos        Foto[]
+  carpeta     CarpetaFotos      @relation(fields: [carpetaId], references: [id], onDelete: Restrict)
+  creadoPor   Usuario           @relation("AlbumesCreados", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  fotos       Foto[]
+  comentarios ComentarioFotos[]
 
-  @@unique([sedeId, nombre])
-  @@index([sedeId])
+  // La galería pagina por álbum y en orden inverso.
+  @@index([carpetaId, creadoEn])
   @@map("albumes_fotos")
 }
 
-/// Con quién está compartido algo: UNA sede o UN álbum, nunca los dos.
+enum EstadoTareaFotos {
+  PENDIENTE
+  EN_PROCESO
+  COMPLETADA
+}
+
+/// Opcional (§13): HVC no la exige para el flujo básico.
+enum PrioridadTareaFotos {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+/// Una tarea de inspección (§13).
 ///
-/// Sustituye a la antigua `AccesoAlbum` —que solo sabía de álbumes— porque
-/// «Compartir» es un único flujo que actúa igual sobre una carpeta que
-/// sobre un álbum, y para el interno que colabora igual que para el
-/// cliente externo. Dos tablas habrían significado dos reglas de cascada
-/// y dos caminos de código para la misma pregunta.
+/// Cuelga de una CARPETA y no de un `Equipo`, aunque §13 diga «dentro de
+/// cada equipo»: una carpeta de tipo EQUIPO ya ES el equipo dentro del
+/// árbol. Colgarla del catálogo obligaría a resolver los permisos por un
+/// camino que no pasa por `ruta` —el único que este módulo sabe recorrer—
+/// y a que Fotos consultara el dominio de Gestión de Equipos para saber
+/// quién puede ver una tarea suya.
+model TareaFotos {
+  id        Int    @id @default(autoincrement())
+  carpetaId Int
+  titulo    String
+
+  descripcion String?
+  estado      EstadoTareaFotos     @default(PENDIENTE)
+  prioridad   PrioridadTareaFotos?
+
+  /// El día al que corresponde el trabajo, no el de creación.
+  fecha DateTime? @db.Date
+
+  responsableId Int?
+  creadoPorId   Int
+
+  /// Quién la completó y cuándo (§13). Se rellenan a la vez al pasar a
+  /// COMPLETADA y se vacían al reabrirla: «completada» sin saber por
+  /// quién no responde a lo que HVC quiere preguntar.
+  completadaEn    DateTime?
+  completadaPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  carpeta       CarpetaFotos      @relation(fields: [carpetaId], references: [id], onDelete: Restrict)
+  responsable   Usuario?          @relation("TareasResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
+  creadoPor     Usuario           @relation("TareasCreadas", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  completadaPor Usuario?          @relation("TareasCompletadas", fields: [completadaPorId], references: [id], onDelete: SetNull)
+  fotos         Foto[]
+  comentarios   ComentarioFotos[]
+
+  @@index([carpetaId, estado])
+  @@index([responsableId, estado])
+  @@map("tareas_fotos")
+}
+
+/// Con quién está compartida una carpeta, y con qué grado (§5, §10).
 ///
-/// La cascada NO se materializa: compartir una sede es UNA fila, y los
-/// descendientes se resuelven en lectura comparando prefijos de `Sede.ruta`.
-/// Así no hay nada que resincronizar al mover o crear una subsede.
+/// Una fila = un usuario + una carpeta + un permiso, para internos y
+/// para clientes externos por igual. `permiso` es lo que v2 no tenía:
+/// allí «tener acceso» y «poder escribir» eran lo mismo, que es
+/// exactamente lo que §2 manda separar.
 ///
-/// Un ADMIN_FOTOS nunca aparece aquí: accede a todo por su nivel.
+/// La cascada NO se materializa: compartir una carpeta es UNA fila y los
+/// descendientes se resuelven en lectura comparando prefijos de `ruta`.
+/// Así no hay nada que resincronizar al mover o al crear una subcarpeta.
+///
+/// Un ADMIN_GLOBAL nunca aparece aquí: alcanza todo por su nivel (§3.4).
 model AccesoCompartido {
-  id            Int      @id @default(autoincrement())
-  usuarioId     Int
-  sedeId        Int?
-  albumId       Int?
+  id        Int @id @default(autoincrement())
+  usuarioId Int
+  carpetaId Int
+
+  permiso PermisoCarpeta
+
   otorgadoPorId Int
   creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
 
-  usuario     Usuario     @relation("CompartidoConmigo", fields: [usuarioId], references: [id], onDelete: Cascade)
-  otorgadoPor Usuario     @relation("CompartidosPorMi", fields: [otorgadoPorId], references: [id], onDelete: Restrict)
-  sede        Sede?       @relation(fields: [sedeId], references: [id], onDelete: Cascade)
-  album       AlbumFotos? @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  usuario     Usuario      @relation("CompartidoConmigo", fields: [usuarioId], references: [id], onDelete: Cascade)
+  otorgadoPor Usuario      @relation("CompartidosPorMi", fields: [otorgadoPorId], references: [id], onDelete: Restrict)
+  carpeta     CarpetaFotos @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
 
-  // Que exactamente uno de los dos venga informado lo valida el service:
-  // es un CHECK entre columnas que Prisma no modela.
-  @@unique([usuarioId, sedeId])
-  @@unique([usuarioId, albumId])
+  @@unique([usuarioId, carpetaId])
   @@index([usuarioId])
+  @@index([carpetaId])
   @@map("accesos_compartidos")
 }
 
-/// Invitación pendiente a un cliente externo que todavía no tiene cuenta.
+/// Invitación pendiente a alguien que todavía no tiene cuenta (§9).
 model InvitacionCliente {
-  id    Int    @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
   /// Normalizado a minúsculas. Cualquier dominio: el dominio verificado
   /// con SPF/DKIM es el del REMITENTE (HVC), no el del destinatario.
   email String
+
+  /// §9 lo pide opcional: quien comparte no siempre sabe el nombre.
+  nombre String?
 
   /// SHA-256 del token, nunca el token. El enlace del correo es una
   /// credencial: la BD no debe guardar nada que por sí solo dé acceso.
   tokenHash String @unique
 
-  sedeId        Int?
-  albumId       Int?
   invitadoPorId Int
 
   estado     EstadoInvitacion @default(PENDIENTE)
@@ -598,22 +464,59 @@ model InvitacionCliente {
   creadoEn   DateTime         @default(now())
   aceptadaEn DateTime?
   /// Se rellena al activar: la cuenta que nació de esta invitación.
-  clienteId  Int?
+  clienteId Int?
 
-  invitadoPor Usuario     @relation("InvitacionesHechas", fields: [invitadoPorId], references: [id], onDelete: Restrict)
-  cliente     Usuario?    @relation("InvitacionAceptada", fields: [clienteId], references: [id], onDelete: SetNull)
-  sede        Sede?       @relation(fields: [sedeId], references: [id], onDelete: Cascade)
-  album       AlbumFotos? @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  invitadoPor Usuario             @relation("InvitacionesHechas", fields: [invitadoPorId], references: [id], onDelete: Restrict)
+  cliente     Usuario?            @relation("InvitacionAceptada", fields: [clienteId], references: [id], onDelete: SetNull)
+  carpetas    InvitacionCarpeta[]
 
   @@index([email, estado])
   @@map("invitaciones_cliente")
 }
 
+/// Qué carpetas cubre una invitación, y con qué permiso cada una.
+///
+/// Es tabla y no una columna porque desde el selector se eligen VARIAS de
+/// una vez y todas tienen que viajar en UN SOLO enlace: mandar tres
+/// correos con tres tokens al mismo cliente sería un despropósito. El
+/// `permiso` vive aquí y no en la invitación por lo mismo que en
+/// `AccesoCompartido`: se otorga POR carpeta, y una invitación puede dar
+/// lectura sobre una y edición sobre otra.
+model InvitacionCarpeta {
+  id           Int @id @default(autoincrement())
+  invitacionId Int
+  carpetaId    Int
+
+  permiso PermisoCarpeta
+
+  invitacion InvitacionCliente @relation(fields: [invitacionId], references: [id], onDelete: Cascade)
+  carpeta    CarpetaFotos      @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+
+  @@unique([invitacionId, carpetaId])
+  @@index([carpetaId])
+  @@map("invitaciones_carpeta")
+}
+
+/// Una fotografía, ya procesada a WebP.
+///
+/// Cuelga de un álbum O de una tarea, NUNCA de los dos, y puede no
+/// colgar de ninguno: eso último es la bandeja de §18 —el supervisor
+/// sube 50 fotos del día desde el celular y las clasifica después—. Un
+/// CHECK en la base hace cumplir el «nunca de los dos»; lo añade la
+/// migración a mano, porque Prisma no modela CHECKs.
+///
+/// No hay `carpetaId`: la carpeta se deduce del álbum o de la tarea.
+/// Guardarla además sería una tercera fuente de verdad, y la primera vez
+/// que alguien moviera un álbum de carpeta empezaría a mentir.
 model Foto {
-  id          Int     @id @default(autoincrement())
-  albumId     Int
-  descripcion String?
+  id      Int  @id @default(autoincrement())
+  albumId Int?
+  tareaId Int?
+
   subidaPorId Int
+
+  nombreOriginal String?
+  descripcion    String?
 
   /// Claves en el object storage (R2), no rutas de disco: el filesystem
   /// de Render es efímero y se pierde en cada deploy.
@@ -627,16 +530,1946 @@ model Foto {
   formato       String // "webp"
 
   /// Fecha EXIF de captura si el archivo la traía. Puede diferir de
-  /// creadoEn: una foto de ayer se puede subir hoy.
+  /// `creadoEn`: una foto de ayer se puede subir hoy. §15 avisa de no
+  /// depender solo de ella para la fecha del trabajo — para eso están
+  /// `AlbumFotos.fecha` y `TareaFotos.fecha`, que las escribe una persona.
   tomadaEn DateTime? @db.Date
 
   creadoEn DateTime @default(now())
 
-  album     AlbumFotos @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  subidaPor Usuario    @relation("FotosSubidas", fields: [subidaPorId], references: [id], onDelete: Restrict)
+  album       AlbumFotos?       @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  tarea       TareaFotos?       @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  subidaPor   Usuario           @relation("FotosSubidas", fields: [subidaPorId], references: [id], onDelete: Restrict)
+  comentarios ComentarioFotos[]
 
-  // El feed se lee por álbum en orden cronológico.
   @@index([albumId, creadoEn])
-  @@index([subidaPorId])
+  @@index([tareaId, creadoEn])
+  // La bandeja de §18: lo que subí y todavía no he clasificado.
+  @@index([subidaPorId, creadoEn])
   @@map("fotos")
+}
+
+/// Un comentario sobre una carpeta, una tarea, un álbum o una foto
+/// (§14). Exactamente uno de los cuatro; lo hace cumplir un CHECK que
+/// añade la migración.
+///
+/// Una tabla con cuatro FK nullable y no cuatro tablas: el comentario es
+/// el mismo objeto en los cuatro sitios —texto, autor, fecha, edición— y
+/// cuatro tablas serían cuatro CRUD idénticos con cuatro nombres. Es la
+/// forma de `EventoHistorial` de Equipos, que ya resuelve esto mismo
+/// para dos dueños.
+///
+/// `autorNombre` es snapshot además de la FK, por lo mismo que en la
+/// bitácora: dar de baja una cuenta no puede dejar comentarios firmados
+/// por nadie.
+model ComentarioFotos {
+  id Int @id @default(autoincrement())
+
+  carpetaId Int?
+  tareaId   Int?
+  albumId   Int?
+  fotoId    Int?
+
+  texto String
+
+  autorId     Int?
+  autorNombre String
+
+  creadoEn DateTime @default(now())
+
+  /// Null mientras no se haya tocado. §14 pide «última modificación», y
+  /// un `@updatedAt` no distingue «nunca editado» de «editado en el
+  /// mismo instante en que se creó».
+  editadoEn DateTime?
+
+  carpeta CarpetaFotos? @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  tarea   TareaFotos?   @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  album   AlbumFotos?   @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  foto    Foto?         @relation(fields: [fotoId], references: [id], onDelete: Cascade)
+  autor   Usuario?      @relation("ComentariosFotos", fields: [autorId], references: [id], onDelete: SetNull)
+
+  @@index([carpetaId, creadoEn])
+  @@index([tareaId, creadoEn])
+  @@index([albumId, creadoEn])
+  @@index([fotoId, creadoEn])
+  @@map("comentarios_fotos")
+}
+
+/// Qué crea un nodo de plantilla al instanciarla. Son los mismos tres
+/// que reconoce la importación por Excel de §19.
+enum TipoNodoPlantilla {
+  CARPETA
+  TAREA
+  ALBUM
+}
+
+/// Una estructura de trabajo reutilizable (§20): «Inspección de Equipo»
+/// con sus tareas ya escritas.
+///
+/// NO se versiona, al revés que `PlantillaCorreo` de Costos, y la
+/// diferencia importa. Aquélla se versiona porque cada
+/// `SolicitudCotizacion` guarda con qué versión salió, así que
+/// reescribirla cambiaría lo que dice un correo que ya está en la bandeja
+/// de un proveedor. Aquí nada apunta hacia atrás: crear desde plantilla
+/// COPIA carpetas y tareas, y desde ese momento la estructura vive por su
+/// cuenta. Versionarla sería una tabla más y un flujo de publicación que
+/// nadie leería nunca.
+model PlantillaEstructura {
+  id          Int     @id @default(autoincrement())
+  nombre      String  @unique
+  descripcion String?
+  activa      Boolean @default(true)
+
+  creadoPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  creadoPor Usuario?                  @relation("PlantillasEstructuraCreadas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  nodos     PlantillaEstructuraNodo[]
+
+  @@map("plantillas_estructura_fotos")
+}
+
+/// Un nodo de la plantilla: una carpeta, una tarea o un álbum por crear.
+///
+/// Auto-relación con `orden` y sin `ruta` materializada, al revés que
+/// `CarpetaFotos`: una plantilla se recorre ENTERA de una vez para
+/// instanciarla y nunca se consulta por subárbol, así que la ruta no
+/// pagaría lo que cuesta mantenerla.
+model PlantillaEstructuraNodo {
+  id          Int  @id @default(autoincrement())
+  plantillaId Int
+  parentId    Int?
+
+  tipo        TipoNodoPlantilla
+  nombre      String
+  descripcion String?
+  orden       Int               @default(0)
+
+  plantilla PlantillaEstructura       @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+  padre     PlantillaEstructuraNodo?  @relation("NodoPlantillaJerarquia", fields: [parentId], references: [id], onDelete: Cascade)
+  hijos     PlantillaEstructuraNodo[] @relation("NodoPlantillaJerarquia")
+
+  @@index([plantillaId, parentId, orden])
+  @@map("plantillas_estructura_nodos_fotos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EventoFotos — la bitácora del módulo (§23)
+//
+// Tabla y enums PROPIOS, no una extensión de `EventoCostos`: aquélla
+// cuelga cada evento de un `Requerimiento` y sus acciones son las del
+// proceso de compra. La FORMA sí se copia de allí, porque funciona —
+// entidad + acción + valor anterior/nuevo + usuario, con el nombre en
+// texto además de la FK—.
+//
+// `carpetaId` es el hilo: §23 quiere saber quién hizo qué sobre un
+// proyecto, y con esta columna eso es UNA consulta ordenada por fecha.
+// Es nullable porque las acciones que no cuelgan de ninguna carpeta
+// —publicar una plantilla, crear un equipo desde el atajo de §12— se
+// buscan por `entidad`.
+// ─────────────────────────────────────────────────────────────
+
+enum EntidadFotos {
+  CARPETA
+  ALBUM
+  TAREA
+  COMENTARIO
+  FOTO
+  ACCESO
+  INVITACION
+  PLANTILLA
+  IMPORTACION
+  /// El atajo de §12: un equipo creado DESDE Fotos. La fila vive en el
+  /// catálogo de Gestión de Equipos, que no tiene por qué registrar de
+  /// dónde vino; el hecho es del flujo de Fotos y lo anota Fotos.
+  EQUIPO
+}
+
+enum AccionFotos {
+  CREACION
+  EDICION
+  ELIMINACION
+  MOVIMIENTO
+  ARCHIVADO
+  REAPERTURA
+  TAREA_COMPLETADA
+  TAREA_REABIERTA
+  SUBIDA_FOTO
+  DESCARGA_FOTO
+  CLASIFICACION
+  COMPARTIR
+  CAMBIO_PERMISO
+  REVOCAR_ACCESO
+  INVITACION_ENVIADA
+  INVITACION_ACEPTADA
+  IMPORTACION_EXCEL
+  CREACION_DESDE_PLANTILLA
+  EQUIPO_CREADO_DESDE_FOTOS
+}
+
+model EventoFotos {
+  id        Int @id @default(autoincrement())
+  carpetaId Int?
+
+  entidad   EntidadFotos
+  entidadId Int
+  accion    AccionFotos
+
+  usuarioId     Int?
+  usuarioNombre String?
+
+  campoAfectado String?
+  valorAnterior String?
+  valorNuevo    String?
+  descripcion   String?
+
+  /// §23 la pide «si corresponde». Se guarda en las acciones sensibles
+  /// —compartir, invitar, descargar— y queda null en el resto.
+  ip String?
+
+  creadoEn DateTime @default(now())
+
+  carpeta CarpetaFotos? @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  usuario Usuario?      @relation("EventosFotos", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([carpetaId, creadoEn])
+  @@index([entidad, entidadId, creadoEn])
+  @@map("eventos_fotos")
+}
+
+// ═════════════════════════════════════════════════════════════
+// GESTIÓN DE PERSONAL — listas SCTR
+//
+// Reemplaza el manejo en Excel ("Lista SCTR") por algo editable mes a
+// mes. Es una pieza INDEPENDIENTE: no toca Trabajador, Supervisor,
+// EmpresaContratista ni NominaMensual, que siguen alimentando los
+// indicadores y el reporte diario exactamente igual.
+//
+// La diferencia con NominaMensual, que también es mensual: aquélla es la
+// planilla real que sirve de denominador a la utilización; ésta es la
+// lista que se presenta para el trámite SCTR. Se cruzarán en una fase
+// futura, no ahora.
+// ═════════════════════════════════════════════════════════════
+
+enum TipoPersonal {
+  SUPERVISOR // se agrupa por Área (interna)
+  CONTRATISTA // se agrupa por Empresa Contratista (externa)
+}
+
+/// Los siete campos del Excel que se editan con un selector.
+enum CampoPersonal {
+  TIPO_TRABAJADOR
+  PAIS_NACIMIENTO
+  TIPO_DOCUMENTO
+  SEXO
+  MONEDA
+  ESTADO_CIVIL
+  SEDE
+}
+
+// ─────────────────────────────────────────────────────────────
+// PeriodoPersonal — la lista de un mes, para un tipo.
+//
+// Año + mes + tipo es la unidad que se abre, edita, importa y exporta.
+// Supervisores y Contratistas del mismo mes son DOS periodos a
+// propósito: se agrupan por conceptos que no se mezclan (Área vs Empresa
+// Contratista) y viajan en hojas distintas del libro.
+// ─────────────────────────────────────────────────────────────
+model PeriodoPersonal {
+  id   Int          @id @default(autoincrement())
+  anio Int
+  mes  Int // 1–12
+  tipo TipoPersonal
+
+  // Color de la fila de grupo, en hex sin almohadilla.
+  //
+  // Se guarda porque el importador NO asume un color fijo: en los
+  // archivos reales OPERATIVO viene FFC000 y SUPERVISORES 3B7D23, y el
+  // export tiene que devolver el mismo que traía o el documento deja de
+  // parecerse al que se presenta para SCTR.
+  colorGrupo String @default("FFC000")
+
+  creadoPorId   Int?
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  creadoPor Usuario?        @relation("PeriodosCreados", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  grupos    GrupoPersonal[]
+  fichas    FichaPersonal[]
+
+  @@unique([anio, mes, tipo])
+  @@index([tipo, anio, mes])
+  @@index([creadoPorId])
+  @@map("periodos_personal")
+}
+
+// ─────────────────────────────────────────────────────────────
+// GrupoPersonal — Área o Empresa Contratista, según el tipo del periodo.
+//
+// UNA tabla y no dos: el comportamiento es idéntico (nombre, orden,
+// personal dentro) y lo único que cambia es la etiqueta en pantalla, que
+// se deriva de `periodo.tipo`. Dos tablas habrían sido dos CRUD, dos
+// importadores y dos exportadores para la misma fila de Excel.
+//
+// `nombre` NO es una FK a EmpresaContratista: es texto libre del Excel
+// («P&G», «HUAYLINOS») y atarlo obligaría a crear empresas reales al
+// importar. El vínculo es de la fase futura.
+// ─────────────────────────────────────────────────────────────
+model GrupoPersonal {
+  id        Int    @id @default(autoincrement())
+  periodoId Int
+  nombre    String
+  orden     Int    @default(0) // preserva el orden del Excel al exportar
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  periodo   PeriodoPersonal @relation(fields: [periodoId], references: [id], onDelete: Cascade)
+  fichas    FichaPersonal[]
+  // Obra: proyectos de los que este grupo es la empresa encargada.
+  proyectos Proyecto[]      @relation("ProyectosEncargados")
+
+  @@unique([periodoId, nombre])
+  @@index([periodoId])
+  @@map("grupos_personal")
+}
+
+// ─────────────────────────────────────────────────────────────
+// FichaPersonal — una persona en la lista de un mes.
+//
+// Los 13 campos del Excel, en su orden. Todo texto salvo la fecha y la
+// remuneración: mismo criterio que `Trabajador`, para que ninguna
+// variación de escritura rompa una importación. Los selectores se
+// alimentan de `OpcionPersonal`, pero el valor guardado NO se valida
+// contra el catálogo — un valor nuevo entra y luego se ofrece.
+//
+// `periodoId` está DUPLICADO (se podría llegar por el grupo). Es a
+// propósito, igual que `Participacion.proyectoId`: sin él la base no
+// puede exigir que el documento sea único dentro del periodo, y esa
+// regla es el control que hace fiable una lista de fiscalización.
+// ─────────────────────────────────────────────────────────────
+model FichaPersonal {
+  id        Int @id @default(autoincrement())
+  periodoId Int
+  grupoId   Int
+  orden     Int @default(0)
+
+  nombres         String
+  apellidoPaterno String
+  apellidoMaterno String
+  tipoTrabajador  String
+  paisNacimiento  String
+  tipoDocumento   String // TPO IDENT: DNI, CE
+  // NUM. IDENT — SIEMPRE texto. En los archivos reales 136 de 573 vienen
+  // como número de Excel; guardarlos así perdería los ceros a la
+  // izquierda ("003017132" → 3017132) y el documento dejaría de ser válido.
+  numeroDocumento String
+  sexo            String // M / F
+  fechaNacimiento DateTime @db.Date
+  moneda          String
+  remuneracion    Decimal  @db.Decimal(12, 2)
+  estadoCivil     String
+  sede            String
+
+  creadoEn         DateTime @default(now())
+  actualizadoEn    DateTime @updatedAt
+  actualizadoPorId Int?
+
+  periodo        PeriodoPersonal @relation(fields: [periodoId], references: [id], onDelete: Cascade)
+  grupo          GrupoPersonal   @relation(fields: [grupoId], references: [id], onDelete: Cascade)
+  actualizadoPor Usuario?        @relation("FichasActualizadas", fields: [actualizadoPorId], references: [id], onDelete: SetNull)
+
+  // ── Obra ──
+  // Todas con onDelete: SetNull en el otro lado. Borrar a alguien de una
+  // lista SCTR no puede alterar la asistencia de días ya cerrados: lo que
+  // se muestra es el snapshot, y esto es solo navegación.
+  proyectosSupervisados Proyecto[]          @relation("ProyectosSupervisados")
+  proyectosApoyados     Proyecto[]          @relation("ProyectosApoyados")
+  jornadasSupervisadas  Jornada[]           @relation("JornadasSupervisadas")
+  jornadasApoyadas      Jornada[]           @relation("JornadasApoyadas")
+  asistencias           AsistenciaJornada[] @relation("Asistencias")
+
+  // El documento no se repite dentro del mismo periodo.
+  @@unique([periodoId, numeroDocumento])
+  @@index([grupoId])
+  @@index([periodoId])
+  @@index([apellidoPaterno])
+  @@index([actualizadoPorId])
+  @@map("fichas_personal")
+}
+
+// ─────────────────────────────────────────────────────────────
+// OpcionPersonal — lo que ofrecen los selectores.
+//
+// UNA tabla para los siete campos en vez de siete tablas: todas tienen
+// la misma forma (campo, valor, orden) y ninguna tiene reglas propias.
+//
+// Es un catálogo de SUGERENCIAS, no una restricción: `FichaPersonal`
+// guarda texto libre. Un Excel con "VENEZOLANO" entra aunque ese país no
+// esté dado de alta, y a partir de ahí aparece en la lista.
+// ─────────────────────────────────────────────────────────────
+model OpcionPersonal {
+  id    Int           @id @default(autoincrement())
+  campo CampoPersonal
+  valor String
+  orden Int           @default(0)
+
+  creadoEn DateTime @default(now())
+
+  @@unique([campo, valor])
+  @@index([campo])
+  @@map("opciones_personal")
+}
+
+// ═════════════════════════════════════════════════════════════
+// OBRA — proyectos y su registro diario
+//
+// Sustituye al modelo anterior (Proyecto + ReporteDiario +
+// Participacion + AjusteAvance), retirado el 12/08/2026 a
+// `backend/archivo/20260812-personal-legado.sql`.
+//
+// La diferencia de fondo: las personas y las empresas ya no viven en
+// tablas propias de este módulo, salen de las listas SCTR
+// (GrupoPersonal / FichaPersonal). Aquí solo se guarda QUIÉN participó
+// QUÉ día, congelado.
+//
+// El ESTADO del proyecto no está en la base: es función pura del avance
+// (0 → INICIO, 1-99 → EN_PROCESO, 100 → FINALIZADO) y se deriva en
+// lectura. Guardarlo sería guardar un cálculo, y una columna que nadie
+// escribe es la que un día alguien escribe a mano y desincroniza.
+// ═════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────
+// Carpeta — árbol para organizar proyectos.
+//
+// Calcado de `Sede` en Fotos: auto-relación + ruta materializada. Sin
+// `cerrada` ni acceso compartido, que allí existen porque hay externos
+// y archivo; aquí no hay ni una cosa ni la otra.
+//
+// Un proyecto NO necesita carpeta: `Proyecto.carpetaId` es nullable y
+// null significa que vive en la raíz del explorador.
+// ─────────────────────────────────────────────────────────────
+model Carpeta {
+  id       Int    @id @default(autoincrement())
+  nombre   String
+  parentId Int?
+
+  /// Ruta materializada ("1/4/9", ids separados por barra, incluye el
+  /// propio nodo). Misma convención que Sede.ruta: permite listar un
+  /// subárbol con `ruta LIKE '1/4/%'` en vez de una consulta recursiva.
+  /// La mantiene CarpetaService al crear y al mover.
+  ruta String
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  padre     Carpeta?   @relation("CarpetaJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
+  hijas     Carpeta[]  @relation("CarpetaJerarquia")
+  proyectos Proyecto[]
+
+  // Sin dos hermanas con el mismo nombre bajo la misma madre.
+  @@unique([parentId, nombre])
+  @@index([parentId])
+  @@index([ruta])
+  @@map("carpetas")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Proyecto — una obra.
+//
+// Encargado, supervisor y apoyo se resuelven contra el PeriodoPersonal
+// que corresponde a `fechaInicio`, y quedan FIJOS: son una decisión
+// administrativa, no una consulta. Que el supervisor de una obra cambie
+// porque RR.HH. subió la planilla del mes siguiente sería un efecto
+// secundario, no una funcionalidad.
+//
+// Por eso cada uno guarda un SNAPSHOT del nombre (y del documento, en
+// las personas) además de la FK. La vigencia frente al periodo actual se
+// DERIVA en lectura comparando ese documento contra el último periodo;
+// nunca se almacena. Reasignar es una acción explícita.
+// ─────────────────────────────────────────────────────────────
+model Proyecto {
+  id     Int    @id @default(autoincrement())
+  nombre String
+
+  /// null = vive en la raíz del explorador.
+  carpetaId Int?
+
+  /// Lugar físico de la obra. NO es la carpeta: aquello organiza el
+  /// sistema, esto dice dónde se trabaja.
+  sede String
+
+  fechaInicio      DateTime @db.Date
+  /// PREVISTA, no límite: se pueden registrar jornadas más allá.
+  fechaFinPrevista DateTime @db.Date
+
+  /// Denominador del avance acumulado, fijo para todo el proyecto.
+  totalEquipos Int
+
+  encargadoGrupoId Int
+  encargadoNombre  String
+
+  supervisorFichaId   Int
+  supervisorNombre    String
+  supervisorDocumento String
+
+  apoyoFichaId   Int?
+  apoyoNombre    String?
+  apoyoDocumento String?
+
+  creadoPorId   Int?
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  carpeta    Carpeta?       @relation(fields: [carpetaId], references: [id], onDelete: SetNull)
+  encargado  GrupoPersonal  @relation("ProyectosEncargados", fields: [encargadoGrupoId], references: [id], onDelete: Restrict)
+  supervisor FichaPersonal  @relation("ProyectosSupervisados", fields: [supervisorFichaId], references: [id], onDelete: Restrict)
+  apoyo      FichaPersonal? @relation("ProyectosApoyados", fields: [apoyoFichaId], references: [id], onDelete: SetNull)
+  creadoPor  Usuario?       @relation("ProyectosCreados", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  jornadas   Jornada[]
+
+  @@index([carpetaId])
+  @@index([nombre])
+  @@index([encargadoGrupoId])
+  @@index([supervisorFichaId])
+  @@map("proyectos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Jornada — una fecha de un proyecto.
+//
+// `produccion`, `avanceAcumulado` y `calificacionProveedor` NO están
+// aquí: son cálculos sobre estas columnas y se resuelven en lectura.
+// ─────────────────────────────────────────────────────────────
+model Jornada {
+  id         Int      @id @default(autoincrement())
+  proyectoId Int
+  fecha      DateTime @db.Date
+
+  equiposEjecutados  Int
+  equiposProgramados Int
+
+  /// MANUAL: lo escribe el supervisor cada día. No se deriva del tamaño
+  /// de ningún grupo — el sistema no mantiene una lista de "quiénes
+  /// debían venir", así que tampoco puede saber quién faltó. Solo
+  /// refleja el número.
+  contratistasProgramados Int
+
+  /// Supervisor DEL DÍA. Por defecto el fijo del proyecto; se reemplaza
+  /// ese día puntual si alguien cubrió, sin tocar la configuración
+  /// general de la obra.
+  supervisorFichaId Int?
+  supervisorNombre  String?
+
+  /// Apoyo DEL DÍA. Mismo criterio, y puede quedar sin asignar.
+  apoyoFichaId Int?
+  apoyoNombre  String?
+
+  creadoPorId   Int?
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  proyecto    Proyecto            @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  supervisor  FichaPersonal?      @relation("JornadasSupervisadas", fields: [supervisorFichaId], references: [id], onDelete: SetNull)
+  apoyo       FichaPersonal?      @relation("JornadasApoyadas", fields: [apoyoFichaId], references: [id], onDelete: SetNull)
+  creadoPor   Usuario?            @relation("JornadasCreadas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  asistencias AsistenciaJornada[]
+
+  // Una sola jornada por proyecto y día.
+  @@unique([proyectoId, fecha])
+  @@index([proyectoId, fecha])
+  @@map("jornadas")
+}
+
+// ─────────────────────────────────────────────────────────────
+// AsistenciaJornada — quién participó ese día.
+//
+// SOLO hay fila para quien participó. No existe lista de esperados: el
+// supervisor registra a quien vino, buscando en todo el periodo de
+// personal, sin restricción de empresa.
+// ─────────────────────────────────────────────────────────────
+model AsistenciaJornada {
+  id        Int @id @default(autoincrement())
+  jornadaId Int
+
+  /// Navegación, no identidad. SetNull a propósito: editar o borrar a
+  /// alguien en Gestión de personal NO puede alterar ni romper la
+  /// asistencia de días ya cerrados.
+  fichaPersonalId Int?
+
+  // ── SNAPSHOT: esto es lo que se muestra, pase lo que pase después ──
+  nombreCompleto String
+  documento      String
+
+  /// Empresa o área a la que pertenecía ESE día. Compararlo con
+  /// `proyecto.encargadoNombre` es lo que resalta al personal externo;
+  /// se deriva en lectura, no se guarda un booleano que envejezca.
+  grupoNombre String
+
+  creadoEn DateTime @default(now())
+
+  jornada Jornada        @relation(fields: [jornadaId], references: [id], onDelete: Cascade)
+  ficha   FichaPersonal? @relation("Asistencias", fields: [fichaPersonalId], references: [id], onDelete: SetNull)
+
+  // La misma persona no se registra dos veces el mismo día.
+  @@unique([jornadaId, documento])
+  @@index([jornadaId])
+  @@index([fichaPersonalId])
+  @@map("asistencias_jornada")
+}
+
+// ═════════════════════════════════════════════════════════════
+// GESTIÓN DE EQUIPOS
+//
+// Inventario de equipos que HVC administra para terceros. La estructura
+// de cada organización se configura entera desde la pantalla: su árbol
+// de ubicaciones y sus campos. Dar de alta un cliente nuevo no toca
+// código.
+//
+// Sin relación con el árbol de carpetas de Fotos ni con el de Obra: son
+// tres jerarquías de tres dominios distintos que solo comparten la idea
+// de "nodo con padre". Lo único que se reutiliza de Fotos es el servicio
+// de subida a R2, a nivel de código.
+//
+// NO hay soft-delete en este módulo. Los campos `activo` son
+// interruptores de VISIBILIDAD, no borrado lógico: apagan lo que se
+// ofrece de aquí en adelante sin tocar lo ya capturado. Borrar es borrar.
+// ═════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────
+// Organizacion — la empresa cuyo inventario se administra.
+//
+// Se llama así y NO "Cliente" porque el sistema ya usa esa palabra:
+// `RolGlobal.CLIENTE` es una cuenta externa que entra al portal a ver
+// fotos. Mismo término para dos cosas distintas en la misma base es
+// justo lo que se evitó al llamar `AlbumFotos` a lo que iba a chocar
+// con `proyectoId`.
+// ─────────────────────────────────────────────────────────────
+model Organizacion {
+  id     Int     @id @default(autoincrement())
+  nombre String
+  /// Visibilidad, no borrado: una organización inactiva deja de
+  /// ofrecerse al registrar equipos, pero los suyos siguen existiendo.
+  activo Boolean @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  nodos             NodoEstructura[]
+  definicionesCampo DefinicionCampo[]
+  equipos           Equipo[]
+  cotizaciones      Cotizacion[]
+  ordenesCompra     OrdenCompra[]
+
+  @@unique([nombre])
+  @@index([activo])
+  @@map("organizaciones")
+}
+
+// ─────────────────────────────────────────────────────────────
+// NodoEstructura — el árbol de ubicaciones de una organización.
+//
+// Autorreferenciado y sin niveles fijos a propósito: una organización
+// tiene "Lima → Sede Norte" (2 niveles) y otra "Torre → Piso → Zona →
+// Área → Ambiente" (5). Columnas fijas obligarían a migrar el schema
+// cada vez que un cliente organice distinto su inventario.
+//
+// A diferencia de `Sede` y `Carpeta`, aquí NO hay ruta materializada:
+// esos árboles se recorren por subárbol entero (cascada de accesos,
+// contadores agregados) y éste se navega nivel a nivel. Si más adelante
+// hacen falta contadores de subárbol, se añade `ruta` y se reutiliza
+// `common/arbol-ruta.ts`.
+// ─────────────────────────────────────────────────────────────
+model NodoEstructura {
+  id             Int    @id @default(autoincrement())
+  organizacionId Int
+  nombre         String
+  orden          Int    @default(0)
+  padreId        Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  organizacion Organizacion     @relation(fields: [organizacionId], references: [id], onDelete: Restrict)
+  padre        NodoEstructura?  @relation("NodoJerarquia", fields: [padreId], references: [id], onDelete: Restrict)
+  hijos        NodoEstructura[] @relation("NodoJerarquia")
+  equipos      Equipo[]
+
+  // Sin dos hermanos con el mismo nombre bajo el mismo padre.
+  @@unique([padreId, nombre])
+  @@index([organizacionId, padreId])
+  @@map("nodos_estructura")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Campos dinámicos
+// ─────────────────────────────────────────────────────────────
+
+enum TipoCampo {
+  TEXTO
+  TEXTO_LARGO
+  NUMERO_ENTERO
+  NUMERO_DECIMAL
+  MONEDA
+  FECHA
+  FECHA_HORA
+  BOOLEANO
+  LISTA
+  SELECCION_MULTIPLE
+  ARCHIVO
+  IMAGEN
+  CORREO
+  TELEFONO
+  URL
+}
+
+model DefinicionCampo {
+  id             Int       @id @default(autoincrement())
+  organizacionId Int
+  nombre         String
+  /// Slug estable ("tipo_de_equipo"). Sobrevive a que se renombre el
+  /// campo visible, así que un reporte guardado no se rompe.
+  clave          String
+  tipo           TipoCampo
+  obligatorio    Boolean   @default(false)
+  orden          Int       @default(0)
+  /// Visibilidad, no borrado: un campo inactivo deja de pedirse en el
+  /// formulario, pero sus valores ya capturados siguen mostrándose en la
+  /// ficha y contando en los reportes.
+  activo         Boolean   @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  organizacion Organizacion       @relation(fields: [organizacionId], references: [id], onDelete: Restrict)
+  opciones     OpcionCampo[]
+  valores      ValorCampoEquipo[]
+
+  @@unique([organizacionId, clave])
+  @@index([organizacionId, orden])
+  @@map("definiciones_campo")
+}
+
+model OpcionCampo {
+  id                Int     @id @default(autoincrement())
+  definicionCampoId Int
+  etiqueta          String
+  orden             Int     @default(0)
+  activo            Boolean @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  definicionCampo DefinicionCampo    @relation(fields: [definicionCampoId], references: [id], onDelete: Cascade)
+  valoresDeLista  ValorCampoEquipo[] @relation("OpcionElegida")
+  elegidaEn       ValorCampoOpcion[]
+
+  @@unique([definicionCampoId, etiqueta])
+  @@index([definicionCampoId, orden])
+  @@map("opciones_campo")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ValorCampoEquipo — lo que un equipo vale para un campo.
+//
+// EAV y no JSONB porque la pantalla principal y los reportes filtran y
+// ordenan POR campo: una fila indexable lo resuelve con un índice
+// normal, mientras que una clave dentro de JSONB necesita GIN y
+// expresiones a medida.
+//
+// Una sola columna se llena según el tipo; el resto queda null. Es una
+// tabla en vez de una por tipo porque a este volumen los joins extra no
+// compran nada y sí complican cada lectura.
+// ─────────────────────────────────────────────────────────────
+model ValorCampoEquipo {
+  id                Int @id @default(autoincrement())
+  equipoId          Int
+  definicionCampoId Int
+
+  valorTexto    String?
+  /// (14,4) y no (12,2): esta columna cubre MONEDA y NUMERO_DECIMAL a la
+  /// vez, así que toma la más ancha de las dos escalas del repo.
+  valorNumero   Decimal?  @db.Decimal(14, 4)
+  /// Aparte del anterior: NUMERO_ENTERO en una columna con decimales
+  /// obliga a recordar en cada lectura que "esto en realidad no tiene".
+  valorEntero   Int?
+  valorFecha    DateTime?
+  valorBooleano Boolean?
+  /// Solo para LISTA. La selección múltiple va en ValorCampoOpcion.
+  opcionId      Int?
+  /// Para ARCHIVO e IMAGEN: clave en R2, NUNCA una URL firmada — el
+  /// bucket es privado y los enlaces caducan en minutos.
+  claveArchivo  String?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  equipo           Equipo             @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  definicionCampo  DefinicionCampo    @relation(fields: [definicionCampoId], references: [id], onDelete: Cascade)
+  opcion           OpcionCampo?       @relation("OpcionElegida", fields: [opcionId], references: [id], onDelete: Restrict)
+  opcionesElegidas ValorCampoOpcion[]
+
+  // Un equipo tiene UN valor por campo. Es lo que hace del EAV una
+  // fuente de verdad y no una bitácora de intentos.
+  @@unique([equipoId, definicionCampoId])
+  @@index([definicionCampoId, valorTexto])
+  @@index([definicionCampoId, valorNumero])
+  @@index([definicionCampoId, valorFecha])
+  @@index([definicionCampoId, opcionId])
+  @@map("valores_campo")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ValorCampoOpcion — selección múltiple.
+//
+// Tabla puente en vez de un `String[]`. La razón por la que se eligió
+// EAV sobre JSONB era la filtrabilidad, y un array de Postgres tiene
+// exactamente el problema que se quería evitar: no entra en un B-tree,
+// no tiene integridad contra OpcionCampo, y "equipos con la opción X"
+// acaba siendo un escaneo.
+// ─────────────────────────────────────────────────────────────
+model ValorCampoOpcion {
+  id                 Int @id @default(autoincrement())
+  valorCampoEquipoId Int
+  opcionId           Int
+
+  valorCampo ValorCampoEquipo @relation(fields: [valorCampoEquipoId], references: [id], onDelete: Cascade)
+  opcion     OpcionCampo      @relation(fields: [opcionId], references: [id], onDelete: Restrict)
+
+  @@unique([valorCampoEquipoId, opcionId])
+  @@index([opcionId])
+  @@map("valores_campo_opcion")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Equipo
+// ─────────────────────────────────────────────────────────────
+model Equipo {
+  id             Int @id @default(autoincrement())
+  organizacionId Int
+  nodoId         Int
+
+  /// El "ITEM" del Excel del cliente. Columna real y no campo dinámico
+  /// porque casi toda organización tiene un identificador propio y
+  /// buscarlo no debería pasar por la tabla EAV.
+  codigoInterno String?
+
+  creadoPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  organizacion  Organizacion       @relation(fields: [organizacionId], references: [id], onDelete: Restrict)
+  nodo          NodoEstructura     @relation(fields: [nodoId], references: [id], onDelete: Restrict)
+  creadoPor     Usuario?           @relation("EquiposCreados", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  valores       ValorCampoEquipo[]
+  fotos         FotoEquipo[]
+  incidencias   Incidencia[]
+  cotizaciones  Cotizacion[]
+  ordenesCompra OrdenCompra[]
+  historial     EventoHistorial[]
+
+  // Relación inversa del módulo Fotos (§12): las carpetas de tipo EQUIPO
+  // que apuntan a este equipo. Es la ÚNICA huella de Fotos en este
+  // modelo, y va en un solo sentido —Fotos referencia, jamás crea ni
+  // edita—. El Restrict está del otro lado: borrar un equipo con fotos
+  // documentadas falla en vez de llevárselas por delante.
+  carpetasFotos CarpetaFotos[] @relation("CarpetasDeEquipo")
+
+  @@unique([organizacionId, codigoInterno])
+  @@index([organizacionId, nodoId])
+  @@index([nodoId])
+  @@map("equipos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Fotos — una tabla por dueño, sin capa polimórfica.
+//
+// Se guarda la CLAVE de R2, no una URL: el bucket es privado y se sirve
+// con enlaces firmados de vencimiento corto.
+// ─────────────────────────────────────────────────────────────
+model FotoEquipo {
+  id             Int     @id @default(autoincrement())
+  equipoId       Int
+  claveArchivo   String
+  claveMiniatura String?
+  nombreOriginal String?
+  subidaPorId    Int?
+
+  creadoEn DateTime @default(now())
+
+  equipo    Equipo   @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  subidaPor Usuario? @relation("FotosEquipoSubidas", fields: [subidaPorId], references: [id], onDelete: SetNull)
+
+  @@index([equipoId, creadoEn])
+  @@map("fotos_equipo")
+}
+
+model FotoIncidencia {
+  id             Int     @id @default(autoincrement())
+  incidenciaId   Int
+  claveArchivo   String
+  claveMiniatura String?
+  nombreOriginal String?
+  subidaPorId    Int?
+
+  creadoEn DateTime @default(now())
+
+  incidencia Incidencia @relation(fields: [incidenciaId], references: [id], onDelete: Cascade)
+  subidaPor  Usuario?   @relation("FotosIncidenciaSubidas", fields: [subidaPorId], references: [id], onDelete: SetNull)
+
+  @@index([incidenciaId, creadoEn])
+  @@map("fotos_incidencia")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Incidencia
+//
+// `tipo` y `prioridad` son texto libre y no un enum ni una relación a
+// OpcionCampo: cada organización tiene su vocabulario ("Tipo de
+// atención" vs "Tipo de servicio") y HVC todavía no fijó su catálogo.
+// Migrarlos a campos configurables después no rompe lo demás.
+// ─────────────────────────────────────────────────────────────
+enum EstadoIncidencia {
+  ABIERTA
+  EN_ATENCION
+  CERRADA
+}
+
+model Incidencia {
+  id     Int    @id @default(autoincrement())
+  /// Correlativo legible (INC-2026-001), generado por el service.
+  codigo String @unique
+
+  equipoId Int
+
+  tipo          String
+  prioridad     String?
+  descripcion   String
+  observacion   String?
+  recomendacion String?
+  responsableId Int?
+
+  estado      EstadoIncidencia @default(ABIERTA)
+  fechaCierre DateTime?
+
+  creadoPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  equipo        Equipo            @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  responsable   Usuario?          @relation("IncidenciasResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
+  creadoPor     Usuario?          @relation("IncidenciasCreadas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  fotos         FotoIncidencia[]
+  cotizaciones  Cotizacion[]
+  ordenesCompra OrdenCompra[]
+  historial     EventoHistorial[]
+
+  @@index([equipoId, estado])
+  @@index([estado, creadoEn])
+  @@map("incidencias")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Cotización y Orden de compra.
+//
+// Se guardan como DATOS EDITABLES, nunca como archivo: no hay columna
+// para adjuntar un PDF. El documento se arma en pantalla desde estas
+// filas y sus líneas, y los botones de exportar generan el Excel o el
+// PDF en el momento, sin dejar nada guardado.
+//
+// Tampoco hay columna `monto`: el total es la suma de las líneas y se
+// calcula en lectura. Guardarlo sería guardar un cálculo — habría que
+// reescribirlo al crear, editar y borrar cada línea, y el día que uno
+// de esos caminos fallara el total mentiría.
+//
+// Las relaciones son opcionales a propósito: una cotización puede
+// existir sin incidencia, y una OC puede no venir de una cotización.
+// ─────────────────────────────────────────────────────────────
+enum EstadoCotizacion {
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+}
+
+model Cotizacion {
+  id             Int    @id @default(autoincrement())
+  codigo         String @unique
+  organizacionId Int
+  equipoId       Int?
+  incidenciaId   Int?
+
+  proveedor String
+  estado    EstadoCotizacion @default(PENDIENTE)
+
+  creadoPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  organizacion  Organizacion      @relation(fields: [organizacionId], references: [id], onDelete: Restrict)
+  equipo        Equipo?           @relation(fields: [equipoId], references: [id], onDelete: SetNull)
+  incidencia    Incidencia?       @relation(fields: [incidenciaId], references: [id], onDelete: SetNull)
+  creadoPor     Usuario?          @relation("CotizacionesCreadas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  lineas        LineaCotizacion[]
+  ordenesCompra OrdenCompra[]
+
+  @@index([organizacionId, estado])
+  @@index([equipoId])
+  @@index([incidenciaId])
+  @@map("cotizaciones")
+}
+
+enum EstadoOrdenCompra {
+  EMITIDA
+  EN_PROCESO
+  ATENDIDA
+  CANCELADA
+}
+
+model OrdenCompra {
+  id             Int    @id @default(autoincrement())
+  codigo         String @unique
+  organizacionId Int
+  cotizacionId   Int?
+  equipoId       Int?
+  incidenciaId   Int?
+
+  proveedor String
+  estado    EstadoOrdenCompra @default(EMITIDA)
+
+  creadoPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  organizacion Organizacion       @relation(fields: [organizacionId], references: [id], onDelete: Restrict)
+  cotizacion   Cotizacion?        @relation(fields: [cotizacionId], references: [id], onDelete: SetNull)
+  equipo       Equipo?            @relation(fields: [equipoId], references: [id], onDelete: SetNull)
+  incidencia   Incidencia?        @relation(fields: [incidenciaId], references: [id], onDelete: SetNull)
+  creadoPor    Usuario?           @relation("OrdenesCompraCreadas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  lineas       LineaOrdenCompra[]
+
+  @@index([organizacionId, estado])
+  @@index([cotizacionId])
+  @@map("ordenes_compra")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EventoHistorial — bitácora de equipos e incidencias.
+//
+// Una sola tabla para los dos: cada evento pertenece a UNO, nunca a
+// ambos. Prisma no expresa CHECK, así que la restricción va en el SQL
+// de la migración:
+//
+//   CHECK (("equipoId" IS NULL) <> ("incidenciaId" IS NULL))
+//
+// Lo escribe la capa de servicio en cada operación relevante, no un
+// campo que la organización tenga que configurar: la trazabilidad no es
+// opcional ni depende de cómo cada cliente arme su estructura.
+// ─────────────────────────────────────────────────────────────
+enum TipoEventoHistorial {
+  CREACION
+  CAMBIO_CAMPO
+  CAMBIO_ESTADO
+  RELACION_INCIDENCIA
+  RELACION_COTIZACION
+  RELACION_ORDEN_COMPRA
+  FOTO_AGREGADA
+}
+
+model EventoHistorial {
+  id           Int  @id @default(autoincrement())
+  equipoId     Int?
+  incidenciaId Int?
+
+  tipo      TipoEventoHistorial
+  usuarioId Int?
+
+  /// Clave del DefinicionCampo, cuando el evento es un cambio de campo.
+  campoAfectado String?
+  valorAnterior String?
+  valorNuevo    String?
+  /// Texto libre para lo que no es un cambio de campo puntual.
+  descripcion   String?
+
+  creadoEn DateTime @default(now())
+
+  equipo     Equipo?     @relation(fields: [equipoId], references: [id], onDelete: Cascade)
+  incidencia Incidencia? @relation(fields: [incidenciaId], references: [id], onDelete: Cascade)
+  usuario    Usuario?    @relation("EventosHistorial", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([equipoId, creadoEn])
+  @@index([incidenciaId, creadoEn])
+  @@map("historial_equipos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Líneas de cotización y de orden de compra.
+//
+// Dos tablas y no una polimórfica, mismo criterio que las fotos de este
+// módulo: cada una cuelga de su dueño con una FK directa. Una tabla
+// compartida con un `tipo` obligaría a comprobar en cada consulta que
+// la línea es del documento que se cree.
+//
+// `subtotal` NO es columna: es cantidad × precioUnitario y se calcula
+// en lectura, igual que el total del documento.
+// ─────────────────────────────────────────────────────────────
+model LineaCotizacion {
+  id           Int @id @default(autoincrement())
+  cotizacionId Int
+  orden        Int @default(0)
+
+  descripcion    String
+  cantidad       Decimal @db.Decimal(14, 4)
+  precioUnitario Decimal @db.Decimal(14, 4)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  cotizacion Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+
+  @@index([cotizacionId, orden])
+  @@map("lineas_cotizacion")
+}
+
+model LineaOrdenCompra {
+  id            Int @id @default(autoincrement())
+  ordenCompraId Int
+  orden         Int @default(0)
+
+  descripcion    String
+  cantidad       Decimal @db.Decimal(14, 4)
+  precioUnitario Decimal @db.Decimal(14, 4)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  ordenCompra OrdenCompra @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+
+  @@index([ordenCompraId, orden])
+  @@map("lineas_orden_compra")
+}
+
+// ═════════════════════════════════════════════════════════════
+// MÓDULO COSTOS — requerimiento → cotización → aprobación → costo
+//
+// Sustituye al modelo anterior (Importacion + Producto +
+// HistorialPrecio), que era un capturador de precios sobre Excel: se
+// subía un .xlsx, se rellenaban a mano código, precio, proveedor y RUC,
+// y una fila estaba «completa» cuando tenía los cuatro. No representaba
+// ningún proceso — no había requerimiento, ni aprobación, ni quién pidió
+// qué a quién.
+//
+// Aquí el Excel no existe. Los ítems se escriben uno a uno y lo que se
+// guarda son DATOS ESTRUCTURADOS: el PDF y el Excel se generan desde
+// estas tablas cuando alguien los pide, y nunca al revés.
+//
+// ── Prefijo `costos_` en TODAS las tablas ────────────────────────────
+// El módulo de Equipos ya tiene una tabla `cotizaciones` con otro
+// significado —allí HVC EMITE una cotización hacia su cliente; aquí
+// RECIBE cotizaciones de sus proveedores—. Prefijar solo la que choca
+// habría dejado una excepción que nadie recuerda; prefijar todas hace
+// obvio de qué módulo es cada tabla al mirar la base.
+//
+// Por la misma razón el modelo se llama `CotizacionProveedor` y no
+// `Cotizacion`: Prisma tiene un único espacio de nombres.
+// ═════════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────────
+// Catálogos configurables (§58)
+//
+// UNA tabla para los tres catálogos y no tres tablas: todas tienen la
+// misma forma (tipo, valor, orden, estado) y ninguna tiene reglas
+// propias. Es el mismo criterio que `OpcionPersonal`, que cubre siete
+// campos con una sola tabla.
+//
+// Son catálogos y no enums porque el negocio los cambia sin avisar:
+// «Preventivo», «Correctivo» y lo que HVC decida mañana no pueden
+// exigir una migración.
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoCatalogo {
+  ACTIVO
+  INACTIVO // deja de ofrecerse; lo ya capturado sigue en pie
+}
+
+enum TipoCatalogo {
+  TIPO_MANTENIMIENTO // Preventivo, Correctivo…
+  TIPO_REQUERIMIENTO // Emergencia, Programado…
+  UNIDAD_MEDIDA // UND, KG, MT…
+}
+
+model OpcionCatalogo {
+  id    Int          @id @default(autoincrement())
+  tipo  TipoCatalogo
+  valor String
+  orden Int          @default(0)
+
+  estado EstadoCatalogo @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  requerimientosPorMantenimiento Requerimiento[] @relation("TipoMantenimiento")
+  requerimientosPorTipo          Requerimiento[] @relation("TipoRequerimiento")
+
+  @@unique([tipo, valor])
+  @@index([tipo, orden])
+  @@map("costos_opciones_catalogo")
+}
+
+// ─────────────────────────────────────────────────────────────
+// ClienteCostos — para quién es el requerimiento (§13)
+//
+// Se llama así y NO `Cliente` por lo mismo que `Organizacion` en
+// Equipos: `RolGlobal.CLIENTE` ya usa esa palabra para una cuenta
+// externa que entra al portal de Fotos. Mismo término para dos cosas
+// distintas en la misma base es justo lo que se lleva evitando.
+//
+// Entidad PROPIA del módulo y sin relación con `Organizacion` ni con
+// ninguna otra tabla existente: decisión explícita de HVC. Simple hoy,
+// pero con su propia tabla desde el principio para poder ampliarla —o
+// apuntarla a un módulo corporativo— sin tocar el requerimiento.
+// ─────────────────────────────────────────────────────────────
+model ClienteCostos {
+  id     Int     @id @default(autoincrement())
+  nombre String
+  ruc    String?
+
+  contacto  String?
+  correo    String?
+  telefono  String?
+  direccion String?
+
+  estado EstadoCatalogo @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  requerimientos Requerimiento[]
+
+  @@unique([nombre])
+  @@index([estado])
+  @@index([ruc])
+  @@map("costos_clientes")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Supervisor — quién responde por el requerimiento (§13)
+//
+// Catálogo propio y no una FK a `FichaPersonal` de las listas SCTR: una
+// ficha existe POR MES, así que un requerimiento de agosto y otro de
+// septiembre apuntarían a dos filas distintas de la misma persona, y
+// «los requerimientos de Fulano» dejaría de ser una consulta.
+//
+// §4 lo permite explícitamente: el módulo no debe quedar bloqueado
+// esperando la integración con Personal. Cuando esa integración llegue,
+// se añade aquí una `fichaPersonalId` opcional y nada más cambia.
+// ─────────────────────────────────────────────────────────────
+model Supervisor {
+  id     Int    @id @default(autoincrement())
+  nombre String
+
+  /// Único cuando está, pero opcional: HVC no siempre lo tiene a mano.
+  documento String?
+  cargo     String?
+  correo    String?
+  telefono  String?
+
+  estado EstadoCatalogo @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  requerimientos Requerimiento[]
+
+  @@unique([documento])
+  @@index([estado])
+  @@map("costos_supervisores")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Proveedor — a quién se le pide cotización (§31)
+//
+// Entidad estructurada y no texto suelto, que es lo que había antes
+// (`Producto.proveedor` y `Producto.ruc`, dos columnas de String). Sin
+// tabla no se puede buscar por RUC ni por correo (§30), ni evitar que
+// «FERRETERIA SAC» y «Ferretería S.A.C.» sean dos proveedores.
+//
+// Propio de Costos: NO toca el `proveedor` de texto que usan las
+// cotizaciones y órdenes de compra del módulo de Equipos. Son dos
+// dominios que hoy no se conocen.
+// ─────────────────────────────────────────────────────────────
+model Proveedor {
+  id Int @id @default(autoincrement())
+
+  /// Opcional porque un proveedor puede entrar al sistema antes de que
+  /// alguien tenga su ficha RUC. Único cuando está.
+  ruc             String?
+  razonSocial     String
+  nombreComercial String?
+
+  correo    String?
+  telefono  String?
+  direccion String?
+
+  estado EstadoCatalogo @default(ACTIVO)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  solicitudes  SolicitudCotizacion[]
+  cotizaciones CotizacionProveedor[]
+  costos       Costo[]
+
+  @@unique([ruc])
+  @@index([razonSocial])
+  @@index([correo])
+  @@index([estado])
+  @@map("costos_proveedores")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Requerimiento — la cabecera del proceso (§13, §17, §18)
+//
+// El ESTADO sí se guarda aquí, al revés que el avance de un proyecto de
+// Obra: no es un cálculo sobre otras columnas, es dónde está el proceso,
+// y cada transición la dispara una persona con un permiso concreto.
+// Derivarlo obligaría a preguntarle a cinco tablas de qué turno es.
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoRequerimiento {
+  BORRADOR // se está escribiendo; todavía no lo vio nadie
+  PENDIENTE_REVISION // emitido, esperando al Gestor
+  OBSERVADO // el Gestor pidió corregir; la pelota es del Solicitante
+  PENDIENTE_COTIZACION // compartido con proveedores, esperando respuestas
+  COTIZACIONES_RECIBIDAS // hay al menos una cotización registrada
+  EN_EVALUACION // el Gestor está comparando
+  PENDIENTE_APROBACION // hay recomendación, esperando al Aprobador
+  APROBADO
+  RECHAZADO // el Aprobador lo devolvió al Gestor (§43)
+  SIN_ACUERDO // se cerró sin llegar a acuerdo con los proveedores (§45)
+  PENDIENTE_REGISTRO_COSTO // aprobado; el Solicitante debe registrar el costo
+  FINALIZADO
+  CANCELADO
+}
+
+model Requerimiento {
+  id Int @id @default(autoincrement())
+
+  /// El número de pedido: `001-000106`. Lo da una SEQUENCE de Postgres
+  /// (`NumeracionService`), nunca el frontend.
+  ///
+  /// NULL mientras es BORRADOR y se asigna AL EMITIR, que es lo que pide
+  /// §25 («al emitir: generar identificadores»). Así un borrador que se
+  /// abandona no se lleva por delante un número de la serie.
+  numero String?
+
+  estado EstadoRequerimiento @default(BORRADOR)
+
+  // ── Los cinco campos del formulario inicial (§13) ──
+  //
+  // Los cuatro que salen de un selector guardan FK **y** snapshot del
+  // nombre. Mismo criterio que `Proyecto` en Obra: el documento emitido
+  // tiene que seguir diciendo lo que decía el día que se emitió, aunque
+  // después alguien renombre al cliente o desactive un tipo.
+  tipoMantenimientoId     Int
+  tipoMantenimientoNombre String
+
+  tipoRequerimientoId     Int
+  tipoRequerimientoNombre String
+
+  supervisorId     Int
+  supervisorNombre String
+
+  clienteId     Int
+  clienteNombre String
+
+  lugarEntrega String
+  fechaEntrega DateTime @db.Date
+
+  // ── Fechas, que §65 exige no mezclar ──
+  //
+  /// La del documento. Nace igual a la de creación y un usuario
+  /// autorizado puede moverla (§18).
+  fechaEmision DateTime @db.Date
+
+  /// Cuándo se creó la fila, de verdad. Para auditoría: esta NO se toca.
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  /// Cuándo pasó de BORRADOR a PENDIENTE_REVISION.
+  emitidoEn     DateTime?
+  /// Cuándo llegó a FINALIZADO, SIN_ACUERDO o CANCELADO.
+  cerradoEn     DateTime?
+
+  solicitanteId Int?
+
+  tipoMantenimiento OpcionCatalogo @relation("TipoMantenimiento", fields: [tipoMantenimientoId], references: [id], onDelete: Restrict)
+  tipoRequerimiento OpcionCatalogo @relation("TipoRequerimiento", fields: [tipoRequerimientoId], references: [id], onDelete: Restrict)
+  supervisor        Supervisor     @relation(fields: [supervisorId], references: [id], onDelete: Restrict)
+  cliente           ClienteCostos  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  solicitante       Usuario?       @relation("RequerimientosSolicitados", fields: [solicitanteId], references: [id], onDelete: SetNull)
+
+  items         RequerimientoItem[]
+  observaciones Observacion[]
+  solicitudes   SolicitudCotizacion[]
+  cotizaciones  CotizacionProveedor[]
+  evaluaciones  EvaluacionCotizacion[]
+  aprobaciones  Aprobacion[]
+  costo         Costo?
+  eventos       EventoCostos[]
+
+  @@unique([numero])
+  @@index([estado, creadoEn])
+  @@index([solicitanteId, estado])
+  @@index([clienteId])
+  @@index([supervisorId])
+  @@map("costos_requerimientos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// RequerimientoItem — las cinco columnas de §19
+//
+// `unidad` es TEXTO y no una FK al catálogo, igual que en
+// `FichaPersonal`: el catálogo SUGIERE lo que ofrece el selector, no
+// restringe lo guardado. Atarlo obligaría a que desactivar una unidad
+// rompiera requerimientos viejos.
+//
+// `cantidad` es entero porque §21 lo dice: se piden 3 rollos, no 3,25.
+// (En una cotización sí es decimal: ahí el proveedor puede cotizar por
+// metro.)
+// ─────────────────────────────────────────────────────────────
+model RequerimientoItem {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+  orden           Int @default(0)
+
+  descripcion        String
+  unidad             String
+  cantidad           Int
+  detalleObservacion String?
+  referencias        String?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  requerimiento   Requerimiento             @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  lineasCotizadas CotizacionProveedorItem[]
+  lineasCosto     CostoItem[]
+
+  @@index([requerimientoId, orden])
+  @@map("costos_requerimiento_items")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Observacion — lo que el Gestor le devuelve al Solicitante (§27-29)
+//
+// Tabla y no una columna de texto en el requerimiento porque §44 admite
+// varias vueltas y §53 prohíbe perder lo anterior: cada observación es
+// un hecho fechado, con su autor y con la constancia de que la otra
+// parte la leyó.
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoObservacion {
+  PENDIENTE
+  ATENDIDA // el Solicitante dejó constancia de que la revisó (§29)
+}
+
+model Observacion {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+
+  texto       String
+  estado      EstadoObservacion @default(PENDIENTE)
+  creadoPorId Int?
+
+  /// Lo que contestó el Solicitante al confirmar, si escribió algo.
+  respuesta       String?
+  confirmadaPorId Int?
+  confirmadaEn    DateTime?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  requerimiento Requerimiento @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  creadoPor     Usuario?      @relation("ObservacionesEmitidas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  confirmadaPor Usuario?      @relation("ObservacionesConfirmadas", fields: [confirmadaPorId], references: [id], onDelete: SetNull)
+
+  @@index([requerimientoId, estado])
+  @@map("costos_observaciones")
+}
+
+// ─────────────────────────────────────────────────────────────
+// SolicitudCotizacion — a quién se le pidió, cuándo y si salió (§33, §67)
+//
+// SIN `@@unique([requerimientoId, proveedorId])` a propósito: §44 admite
+// volver a pedirle al mismo proveedor en una segunda vuelta, y una
+// restricción de unicidad lo habría impedido justo donde el proceso lo
+// contempla.
+//
+// Guarda `plantillaVersionId` porque §68 exige que un requerimiento
+// histórico conserve la versión de plantilla con la que se le escribió
+// al proveedor. Publicar una versión nueva no puede reescribir lo que
+// ya se mandó.
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoEnvio {
+  PENDIENTE
+  ENVIADO
+  FALLIDO
+}
+
+model SolicitudCotizacion {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+  proveedorId     Int
+
+  /// El correo al que se mandó, congelado: el del proveedor puede
+  /// cambiar mañana y esto tiene que seguir diciendo a dónde fue.
+  destinatario       String
+  plantillaVersionId Int?
+
+  estadoEnvio EstadoEnvio @default(PENDIENTE)
+
+  /// Qué dijo el proveedor de correo cuando falló. Sin esto, un envío
+  /// caído solo se nota porque nadie responde.
+  errorEnvio String?
+
+  enviadoPorId Int?
+  creadoEn     DateTime  @default(now())
+  enviadoEn    DateTime?
+
+  requerimiento    Requerimiento           @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  proveedor        Proveedor               @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  plantillaVersion PlantillaCorreoVersion? @relation(fields: [plantillaVersionId], references: [id], onDelete: SetNull)
+  enviadoPor       Usuario?                @relation("SolicitudesEnviadas", fields: [enviadoPorId], references: [id], onDelete: SetNull)
+  cotizaciones     CotizacionProveedor[]
+
+  @@index([requerimientoId, proveedorId])
+  @@index([estadoEnvio])
+  @@map("costos_solicitudes_cotizacion")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CotizacionProveedor — lo que respondió un proveedor (§34-37)
+//
+// Se llama así y no `Cotizacion` porque ese nombre lo ocupa el módulo de
+// Equipos, con el significado CONTRARIO: allí HVC emite hacia su
+// cliente, aquí recibe de su proveedor.
+//
+// Sin adjunto y sin columna de total, igual que los documentos de
+// Equipos: el total es la suma de las líneas y se calcula en lectura.
+// §36 es explícito en que los proveedores mandan formatos distintos y
+// que hoy NO se interpretan automáticamente — el Gestor teclea lo que
+// hace falta para comparar. El día que se decida guardar el PDF recibido
+// (§70), será una tabla de evidencias colgando de aquí, nunca la fuente.
+// ─────────────────────────────────────────────────────────────
+
+enum EstadoCotizacionProveedor {
+  REGISTRADA // el Gestor la cargó
+  RECOMENDADA // el Gestor la eligió (§38). NO es aprobada.
+  APROBADA // solo el Aprobador llega aquí (§42)
+  RECHAZADA // el Aprobador la devolvió (§43)
+  DESCARTADA // el Gestor la dejó fuera de la comparación
+}
+
+model CotizacionProveedor {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+  proveedorId     Int
+
+  /// De qué solicitud viene, cuando viene de una. Un proveedor puede
+  /// cotizar sin que se le haya pedido formalmente.
+  solicitudId Int?
+
+  estado EstadoCotizacionProveedor @default(REGISTRADA)
+
+  // ── Lo que §37 exige poder comparar de un vistazo ──
+  garantia        String?
+  plazoEntrega    String?
+  condicionesPago String?
+  observaciones   String?
+
+  /// La fecha del documento del proveedor, que no es la de registro
+  /// (§65). Una cotización del lunes se puede cargar el jueves.
+  fechaCotizacion DateTime  @db.Date
+  validaHasta     DateTime? @db.Date
+
+  /// §54: un ítem del requerimiento cambió DESPUÉS de recibir esta
+  /// cotización, así que ya no cotiza lo que se está pidiendo. Hay que
+  /// volver a pedírsela a ese proveedor.
+  ///
+  /// Es un CAMPO y no un valor más de `estado` a propósito. Son dos
+  /// hechos ortogonales: «el Aprobador la aceptó» y «lo pedido cambió
+  /// después» pueden ser ciertos a la vez, y meterlos en la misma
+  /// columna obligaría a borrar el primero para poder decir el segundo —
+  /// justo lo que §53 prohíbe. Además así se puede marcar una rechazada
+  /// sin perder que fue rechazada.
+  ///
+  /// Se apaga cuando el Gestor actualiza la cotización con lo que el
+  /// proveedor respondió de nuevo.
+  requiereRevision Boolean @default(false)
+  /// Qué cambió, para que el Gestor sepa qué volver a preguntar.
+  revisionMotivo   String?
+
+  registradaPorId Int?
+  creadoEn        DateTime @default(now())
+  actualizadoEn   DateTime @updatedAt
+
+  requerimiento Requerimiento             @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  proveedor     Proveedor                 @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  solicitud     SolicitudCotizacion?      @relation(fields: [solicitudId], references: [id], onDelete: SetNull)
+  registradaPor Usuario?                  @relation("CotizacionesRegistradas", fields: [registradaPorId], references: [id], onDelete: SetNull)
+  items         CotizacionProveedorItem[]
+  evaluaciones  EvaluacionCotizacion[]
+  costos        Costo[]
+
+  @@index([requerimientoId, estado])
+  @@index([requerimientoId, requiereRevision])
+  @@index([proveedorId])
+  @@map("costos_cotizaciones_proveedor")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CotizacionProveedorItem — el detalle de una cotización
+//
+// `requerimientoItemId` es NULLABLE a propósito: lo normal es que cada
+// línea responda a un ítem pedido —y así la comparación entre
+// proveedores es línea a línea—, pero §36 admite que el proveedor
+// añada lo suyo: flete, instalación, un repuesto que hace falta y nadie
+// pidió. Forzar la FK habría obligado a inventar ítems fantasma en el
+// requerimiento para poder cargar la cotización tal como llegó.
+//
+// Aquí la cantidad SÍ es decimal, al revés que en el requerimiento: se
+// piden 3 rollos pero se cotizan 45,5 metros.
+// ─────────────────────────────────────────────────────────────
+model CotizacionProveedorItem {
+  id                  Int  @id @default(autoincrement())
+  cotizacionId        Int
+  requerimientoItemId Int?
+  orden               Int  @default(0)
+
+  descripcion String
+  unidad      String?
+  cantidad    Decimal @db.Decimal(14, 4)
+
+  /// (14,4) y no (12,2): es un precio POR UNIDAD, y un precio unitario
+  /// con dos decimales pierde el céntimo en cuanto la cantidad es alta.
+  /// Mismo criterio que `ValorCampoEquipo.valorNumero`.
+  precioUnitario Decimal @db.Decimal(14, 4)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  cotizacion        CotizacionProveedor @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  requerimientoItem RequerimientoItem?  @relation(fields: [requerimientoItemId], references: [id], onDelete: SetNull)
+
+  @@index([cotizacionId, orden])
+  @@index([requerimientoItemId])
+  @@map("costos_cotizacion_items")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EvaluacionCotizacion — la recomendación del Gestor (§38-39)
+//
+// Tabla propia y no una columna `recomendada` en la cotización porque
+// §44 admite ciclos: el Aprobador rechaza, el Gestor vuelve a evaluar y
+// recomienda otra. Con una columna, la segunda vuelta borraría la
+// primera y se perdería por qué se había recomendado aquélla.
+//
+// `ronda` numera las vueltas. La recomendación VIGENTE es la de ronda
+// más alta, calculada en lectura: un booleano `vigente` habría que
+// apagarlo a mano en la anterior, y el día que ese camino fallara
+// habría dos recomendaciones vigentes a la vez.
+// ─────────────────────────────────────────────────────────────
+model EvaluacionCotizacion {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+  cotizacionId    Int
+  ronda           Int @default(1)
+
+  /// Obligatoria: §39 exige que el Gestor escriba por qué eligió ésa.
+  justificacion String
+
+  gestorId Int?
+  creadoEn DateTime @default(now())
+
+  requerimiento Requerimiento       @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  cotizacion    CotizacionProveedor @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  gestor        Usuario?            @relation("EvaluacionesHechas", fields: [gestorId], references: [id], onDelete: SetNull)
+  aprobaciones  Aprobacion[]
+
+  @@unique([requerimientoId, ronda])
+  @@index([cotizacionId])
+  @@map("costos_evaluaciones")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Aprobacion — la decisión del Aprobador (§41-45)
+//
+// Una fila POR DECISIÓN, no una por requerimiento: el ciclo de §44
+// —rechazo, nueva evaluación, nueva decisión— tiene que quedar entero.
+// «Se aprobó a la segunda» es información, y sobrescribir la primera
+// decisión la borraría.
+// ─────────────────────────────────────────────────────────────
+
+enum DecisionAprobacion {
+  ACEPTADA
+  RECHAZADA // vuelve al Gestor; no es cierre (§43)
+  SIN_ACUERDO // cierre definitivo sin compra (§45)
+}
+
+model Aprobacion {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+
+  /// Sobre qué recomendación se decidió. Nullable porque cerrar SIN
+  /// ACUERDO no exige que haya habido una.
+  evaluacionId Int?
+
+  decision DecisionAprobacion
+
+  /// El motivo. Obligatorio al rechazar o cerrar sin acuerdo — lo exige
+  /// el service, no la base: aceptar puede no llevar comentario.
+  comentario String?
+
+  aprobadorId Int?
+  creadoEn    DateTime @default(now())
+
+  requerimiento Requerimiento         @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  evaluacion    EvaluacionCotizacion? @relation(fields: [evaluacionId], references: [id], onDelete: SetNull)
+  aprobador     Usuario?              @relation("AprobacionesHechas", fields: [aprobadorId], references: [id], onDelete: SetNull)
+
+  @@index([requerimientoId, creadoEn])
+  @@map("costos_aprobaciones")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Costo — lo que finalmente costó (§47-52)
+//
+// Uno por requerimiento: `requerimientoId` es único. No es una compra
+// parcial ni un histórico de intentos, es el cierre económico del
+// proceso.
+// ─────────────────────────────────────────────────────────────
+model Costo {
+  id              Int @id @default(autoincrement())
+  requerimientoId Int
+  proveedorId     Int
+
+  /// La cotización aprobada de la que sale.
+  cotizacionId Int
+
+  // Snapshot de los datos del proveedor que §48 muestra en la ventana.
+  // Se congelan: dentro de un año el teléfono del proveedor será otro y
+  // este registro tiene que seguir diciendo a quién se le compró.
+  proveedorRazonSocial String
+  proveedorRuc         String?
+  proveedorTelefono    String?
+
+  registradoPorId Int?
+  creadoEn        DateTime @default(now())
+  actualizadoEn   DateTime @updatedAt
+
+  requerimiento Requerimiento       @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  proveedor     Proveedor           @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  cotizacion    CotizacionProveedor @relation(fields: [cotizacionId], references: [id], onDelete: Restrict)
+  registradoPor Usuario?            @relation("CostosRegistrados", fields: [registradoPorId], references: [id], onDelete: SetNull)
+  items         CostoItem[]
+
+  @@unique([requerimientoId])
+  @@index([proveedorId])
+  @@map("costos_costos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// CostoItem — el costo de cada ítem (§49-50) y la Base de Costos (§52)
+//
+// Las cinco primeras columnas se COPIAN del ítem del requerimiento en
+// vez de leerse a través de la FK. Es un snapshot deliberado: §53
+// prohíbe perder un valor histórico en silencio, y §54 advierte de que
+// un ítem puede cambiar después. Además la Base de Costos se lee de
+// aquí de un tirón, sin recorrer tres tablas para poder mostrar una
+// descripción.
+//
+// `costoUnitario` es POR UNIDAD DE MEDIDA, nunca el total de la línea.
+// El total es cantidad × costoUnitario y se calcula en lectura, igual
+// que en los documentos de Equipos. Guardar el unitario es lo que hace
+// comparable «¿cuánto costó la cinta?» entre un requerimiento de 4
+// unidades y otro de 40.
+// ─────────────────────────────────────────────────────────────
+model CostoItem {
+  id      Int @id @default(autoincrement())
+  costoId Int
+
+  /// Navegación, no identidad: lo que se muestra es el snapshot.
+  requerimientoItemId Int?
+  orden               Int  @default(0)
+
+  descripcion        String
+  unidad             String
+  cantidad           Int
+  detalleObservacion String?
+  referencias        String?
+
+  costoUnitario Decimal @db.Decimal(14, 4)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  costo             Costo              @relation(fields: [costoId], references: [id], onDelete: Cascade)
+  requerimientoItem RequerimientoItem? @relation(fields: [requerimientoItemId], references: [id], onDelete: SetNull)
+
+  @@index([costoId, orden])
+  /// La Base de Costos busca por descripción (§52).
+  @@index([descripcion])
+  @@map("costos_costo_items")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Plantillas de correo, con versión (§32, §68)
+//
+// Dos tablas y no una: la plantilla es la identidad («Solicitud de
+// cotización») y la versión es su contenido en un momento dado. Una
+// sola tabla con `version` obligaría a duplicar la identidad en cada
+// versión y a decidir cuál es «la» plantilla en cada consulta.
+//
+// `SolicitudCotizacion` apunta a la VERSIÓN, no a la plantilla: por eso
+// publicar una v3 no cambia lo que decía el correo que se mandó con la
+// v1. Es exactamente lo que pide §68.
+// ─────────────────────────────────────────────────────────────
+
+enum TipoPlantilla {
+  SOLICITUD_COTIZACION
+}
+
+model PlantillaCorreo {
+  id     Int           @id @default(autoincrement())
+  tipo   TipoPlantilla
+  nombre String
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  versiones PlantillaCorreoVersion[]
+
+  @@unique([tipo])
+  @@map("costos_plantillas_correo")
+}
+
+model PlantillaCorreoVersion {
+  id          Int @id @default(autoincrement())
+  plantillaId Int
+  version     Int
+
+  asunto String
+
+  /// Texto con marcadores `{{numero_requerimiento}}`, `{{cliente}}`…
+  /// Se sustituyen al enviar; lo que se guarda es la plantilla, no el
+  /// correo ya resuelto.
+  cuerpo String
+
+  /// Cuál se usa a partir de ahora. Es una DECISIÓN, no un cálculo:
+  /// por eso se guarda. Que solo haya una activa por plantilla lo hace
+  /// cumplir el service.
+  activa Boolean @default(false)
+
+  creadoPorId Int?
+  creadoEn    DateTime @default(now())
+
+  plantilla   PlantillaCorreo       @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+  creadoPor   Usuario?              @relation("PlantillasCreadas", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  solicitudes SolicitudCotizacion[]
+
+  @@unique([plantillaId, version])
+  @@index([plantillaId, activa])
+  @@map("costos_plantillas_correo_version")
+}
+
+// ─────────────────────────────────────────────────────────────
+// EventoCostos — la bitácora del módulo (§53, §64)
+//
+// Tabla PROPIA y no una extensión de `EventoHistorial`, que es de
+// Equipos: aquélla exige con un CHECK que el dueño sea exactamente un
+// equipo o una incidencia, y aquí hay trece clases de entidad. Relajar
+// ese CHECK habría tocado un módulo terminado para meterle un dominio
+// que no le incumbe.
+//
+// La forma sí se copia de allí, porque funciona: usuario, fecha, acción,
+// valor anterior, valor nuevo, motivo.
+//
+// `requerimientoId` es la clave del asunto: §64 pide poder reconstruir
+// la cadena entera —Luis creó → Rodolfo observó → … → Luis registró el
+// costo— y con esta columna eso es UNA consulta ordenada por fecha. Es
+// nullable porque las acciones de administración (dar de alta un
+// proveedor, publicar una plantilla) no cuelgan de ningún requerimiento;
+// ésas se buscan por `entidad`.
+//
+// `usuarioNombre` es snapshot además de la FK: borrar una cuenta pone la
+// FK a null, y una auditoría que ya no sabe quién hizo qué no es una
+// auditoría.
+// ─────────────────────────────────────────────────────────────
+
+enum EntidadCostos {
+  REQUERIMIENTO
+  REQUERIMIENTO_ITEM
+  OBSERVACION
+  SOLICITUD_COTIZACION
+  COTIZACION
+  EVALUACION
+  APROBACION
+  COSTO
+  PROVEEDOR
+  CLIENTE
+  SUPERVISOR
+  CATALOGO
+  PLANTILLA
+}
+
+enum AccionCostos {
+  CREACION
+  EDICION
+  CAMBIO_ESTADO
+  ELIMINACION
+  EMISION
+  OBSERVACION_EMITIDA
+  OBSERVACION_CONFIRMADA
+  ENVIO_CORREO
+  RECOMENDACION
+  DECISION
+  REGISTRO_COSTO
+}
+
+model EventoCostos {
+  id              Int  @id @default(autoincrement())
+  requerimientoId Int?
+
+  entidad   EntidadCostos
+  entidadId Int
+  accion    AccionCostos
+
+  usuarioId     Int?
+  usuarioNombre String?
+
+  campoAfectado String?
+  valorAnterior String?
+  valorNuevo    String?
+
+  /// Por qué se hizo, cuando el proceso lo exige (§53).
+  motivo String?
+
+  /// Texto libre para lo que no es un cambio de campo puntual.
+  descripcion String?
+
+  creadoEn DateTime @default(now())
+
+  requerimiento Requerimiento? @relation(fields: [requerimientoId], references: [id], onDelete: Cascade)
+  usuario       Usuario?       @relation("EventosCostos", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([requerimientoId, creadoEn])
+  @@index([entidad, entidadId, creadoEn])
+  @@map("costos_eventos")
 }

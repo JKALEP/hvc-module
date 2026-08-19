@@ -1,6 +1,7 @@
 import type {
   Modulo,
   NivelFotos,
+  RolCostos,
   RolGlobal,
 } from '../../generated/prisma/enums';
 
@@ -18,7 +19,10 @@ export interface UsuarioAutenticado {
   rol: RolGlobal;
   permisos: {
     modulo: Modulo;
+    /** Solo tiene valor cuando modulo === 'FOTOS'. */
     nivelFotos: NivelFotos | null;
+    /** Solo tiene valor cuando modulo === 'COSTOS'. */
+    rolCostos: RolCostos | null;
   }[];
 }
 

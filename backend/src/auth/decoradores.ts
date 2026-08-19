@@ -3,7 +3,11 @@ import {
   createParamDecorator,
   type ExecutionContext,
 } from '@nestjs/common';
-import type { Modulo, NivelFotos } from '../../generated/prisma/enums';
+import type {
+  Modulo,
+  NivelFotos,
+  RolCostos,
+} from '../../generated/prisma/enums';
 import type { PeticionConUsuario, UsuarioAutenticado } from './tipos';
 
 // Claves de metadata que leen los guards.
@@ -11,6 +15,7 @@ export const CLAVE_PUBLICO = 'auth:publico';
 export const CLAVE_MODULO = 'auth:modulo';
 export const CLAVE_SUPERADMIN = 'auth:superadmin';
 export const CLAVE_NIVEL_FOTOS = 'auth:nivelFotos';
+export const CLAVE_ROL_COSTOS = 'auth:rolCostos';
 export const CLAVE_CLIENTE = 'auth:cliente';
 
 /**
@@ -37,6 +42,24 @@ export const SoloSuperAdmin = () => SetMetadata(CLAVE_SUPERADMIN, true);
  */
 export const RequiereNivelFotos = (nivel: NivelFotos) =>
   SetMetadata(CLAVE_NIVEL_FOTOS, nivel);
+
+/**
+ * Exige uno de estos roles dentro del módulo COSTOS.
+ *
+ * Se combina con `@RequiereModulo(Modulo.COSTOS)`, que va en la clase; el
+ * rol va en el MÉTODO, porque dentro de un mismo controller conviven
+ * acciones de roles distintos —listar un requerimiento lo hacen los tres,
+ * aprobarlo solo uno—.
+ *
+ * Variádico a propósito: `@RequiereRolCostos('SOLICITANTE', 'APROBADOR')`.
+ * Un endpoint por rol para devolver lo mismo habría triplicado el
+ * controller.
+ *
+ * El SUPERADMIN pasa por encima sin declarar nada: `reglaSuperAdmin` va
+ * antes en la cadena.
+ */
+export const RequiereRolCostos = (...roles: RolCostos[]) =>
+  SetMetadata(CLAVE_ROL_COSTOS, roles);
 
 /**
  * Abre una ruta a las cuentas CLIENTE.

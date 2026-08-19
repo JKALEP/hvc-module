@@ -55,45 +55,85 @@
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
+
+    /* Color de marca: coral/naranja tomado del logo (llama HVC). */
+    --primary: oklch(0.58 0.19 35);
+    --primary-foreground: oklch(0.99 0 0);
+
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
+    --muted-foreground: oklch(0.5 0 0);
+    --accent: oklch(0.96 0.02 35);
+    --accent-foreground: oklch(0.35 0.12 35);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --border: oklch(0.914 0 0);
+    --input: oklch(0.914 0 0);
+    --ring: oklch(0.58 0.19 35 / 0.45);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
 
-    /* Series de los gráficos (Fase 3). --chart-1..5 son escala de grises:
-       sirven para superficies, no para distinguir dos series entre sí.
-       Par validado en ambos modos: separación CVD ΔE 24.7 claro / 26.8
-       oscuro, contraste >= 3:1 contra --card.
-       El color sigue a la ENTIDAD: "programado" es siempre azul. */
     --serie-programado: #2a78d6;
     --serie-ejecutado: #eb6834;
-    /* Tercer slot, para la comparación mensual entre contratistas.
-       Los tres juntos pasan todos los pares en ambos modos; un cuarto
-       (amarillo) rompería el piso contra el naranja. */
     --serie-aqua: #1baf7a;
 
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+
+    /* ============================================================
+       SIDEBAR — COLOR
+       El sidebar es SIEMPRE oscuro (navy), sin importar si el resto
+       de la app está en modo claro u oscuro — por eso estos valores
+       están solo aquí en :root y NO se repiten dentro de .dark más
+       abajo.
+       ============================================================ */
+    --sidebar: oklch(0.205 0.025 258);
+    --sidebar-foreground: oklch(0.88 0.01 258);
+    --sidebar-muted: oklch(0.6 0.02 258);
+    --sidebar-border: oklch(1 0 0 / 8%);
+    --sidebar-hover: oklch(1 0 0 / 6%);
+    --sidebar-accent: color-mix(in oklch, var(--primary) 20%, var(--sidebar));
+    --sidebar-accent-foreground: oklch(0.97 0.01 35);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-ring: var(--ring);
+
+    /* ============================================================
+       SIDEBAR — TIPOGRAFÍA
+       ============================================================ */
+    --sidebar-text-logo: 14.5px;
+    --sidebar-text-section: 11px;
+    --sidebar-text-item: 13.5px;
+    --sidebar-text-profile-name: 13px;
+    --sidebar-text-profile-role: 11px;
+    --sidebar-font-weight-item: 500;
+    --sidebar-font-weight-active: 600;
+    --sidebar-letter-spacing-section: 0.06em;
+
+    /* ============================================================
+       SIDEBAR — ESPACIADO Y TAMAÑOS
+       ============================================================ */
+    --sidebar-item-height: 2.25rem;
+    --sidebar-item-gap: 0.125rem;
+    --sidebar-icon-size: 17px;
+    --sidebar-radius: var(--radius-md);
+    --sidebar-padding-x: 0.75rem;
+    --sidebar-section-gap: 1.5rem;
+
+    /* ============================================================
+       ANCHO DEL SIDEBAR — nombres DISTINTOS a los que usa
+       SidebarProvider ("--sidebar-width" / "--sidebar-width-icon")
+       a propósito. Si usaran el mismo nombre, la variable que
+       AppLayout.tsx pasa como `style` terminaría refiriéndose a sí
+       misma (var(--sidebar-width) dentro de --sidebar-width), lo
+       cual es un ciclo inválido en CSS y hace que el ancho colapse
+       a "auto" — eso era el bug del contenido "que no respeta el
+       3 de 10". Toca estos dos valores para cambiar el ancho real.
+       ============================================================ */
+    --sidebar-width-config: 17rem;
+    --sidebar-width-icon-config: 3.5rem;
 }
 
 .dark {
@@ -103,37 +143,32 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
+
+    --primary: oklch(0.66 0.19 35);
+    --primary-foreground: oklch(0.145 0 0);
+
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);
     --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --accent: oklch(0.28 0.05 35);
+    --accent-foreground: oklch(0.9 0.05 35);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --ring: oklch(0.66 0.19 35 / 0.5);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
 
-    /* Pasos propios para la superficie oscura, no un volteo del claro. */
     --serie-programado: #3987e5;
     --serie-ejecutado: #d95926;
     --serie-aqua: #199e70;
 
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    /* El sidebar NO se redefine aquí a propósito: se queda fijo con
+       los valores de :root en ambos temas. */
 }
 
 @layer base {

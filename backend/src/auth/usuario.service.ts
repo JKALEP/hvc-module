@@ -6,10 +6,20 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import type { Modulo, NivelFotos } from '../../generated/prisma/enums';
+import type {
+  Modulo,
+  NivelFotos,
+  RolCostos,
+} from '../../generated/prisma/enums';
+import { limpiar } from '../common/texto';
 
 const MODULOS = ['COSTOS', 'PERSONAL_PROYECTOS', 'FOTOS'] as const;
-const NIVELES = ['ADMIN_FOTOS', 'COLABORADOR'] as const;
+const NIVELES = ['LECTURA_GLOBAL', 'EDITOR_GLOBAL', 'ADMIN_GLOBAL'] as const;
+const ROLES_COSTOS = [
+  'SOLICITANTE',
+  'GESTOR_COTIZACIONES',
+  'APROBADOR',
+] as const;
 const ESTADOS = ['ACTIVO', 'INACTIVO'] as const;
 
 // Coste de bcrypt. 10 es el equilibrio habitual: ~100 ms por hash, que a
@@ -20,6 +30,7 @@ const LARGO_MINIMO_PASSWORD = 8;
 export interface PermisoDto {
   modulo?: string | null;
   nivelFotos?: string | null;
+  rolCostos?: string | null;
 }
 
 export interface CrearUsuarioDto {
@@ -40,14 +51,8 @@ export interface EditarUsuarioDto {
 export class UsuarioService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private limpiar(valor: unknown): string | null {
-    if (typeof valor !== 'string') return null;
-    const s = valor.trim();
-    return s === '' ? null : s;
-  }
-
   private emailValido(valor: unknown): string {
-    const s = this.limpiar(valor)?.toLowerCase();
+    const s = limpiar(valor)?.toLowerCase();
     if (!s) throw new BadRequestException('El correo es obligatorio.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s))
       throw new BadRequestException(`El correo "${s}" no es válido.`);
@@ -55,7 +60,7 @@ export class UsuarioService {
   }
 
   private passwordValida(valor: unknown): string {
-    const s = this.limpiar(valor);
+    const s = limpiar(valor);
     if (!s) throw new BadRequestException('La contraseña es obligatoria.');
     if (s.length < LARGO_MINIMO_PASSWORD)
       throw new BadRequestException(
@@ -67,13 +72,21 @@ export class UsuarioService {
   /**
    * Valida la lista de módulos.
    *
-   * Aquí se hace cumplir la regla que la BD no puede expresar:
-   * nivelFotos es OBLIGATORIO si el módulo es FOTOS y debe ser null en
-   * los otros dos.
+   * Aquí se hacen cumplir las dos reglas que la BD no puede expresar
+   * (serían CHECK entre columnas, que Prisma no modela):
+   *   · nivelFotos solo se admite si el módulo es FOTOS, donde es
+   *     OPCIONAL (sin nivel = el supervisor de §4); null en los demás.
+   *   · rolCostos es OBLIGATORIO si el módulo es COSTOS, y null si no.
+   *
+   * Los dos sub-roles se comprueban con el mismo esqueleto pero por
+   * separado: son enums distintos y el mensaje de error tiene que nombrar
+   * los valores de SU módulo, no una lista mezclada que no ayuda a nadie.
    */
-  private permisosValidos(
-    lista: PermisoDto[] | null | undefined,
-  ): { modulo: Modulo; nivelFotos: NivelFotos | null }[] {
+  private permisosValidos(lista: PermisoDto[] | null | undefined): {
+    modulo: Modulo;
+    nivelFotos: NivelFotos | null;
+    rolCostos: RolCostos | null;
+  }[] {
     if (!Array.isArray(lista) || lista.length === 0)
       throw new BadRequestException(
         'Asigna al menos un módulo: sin módulos la cuenta no puede entrar a nada.',
@@ -81,7 +94,7 @@ export class UsuarioService {
 
     const vistos = new Set<string>();
     return lista.map((p) => {
-      const modulo = this.limpiar(p.modulo)?.toUpperCase();
+      const modulo = limpiar(p.modulo)?.toUpperCase();
       if (!modulo || !MODULOS.includes(modulo as (typeof MODULOS)[number]))
         throw new BadRequestException(
           `Módulo inválido: "${String(p.modulo)}". Valores permitidos: ${MODULOS.join(', ')}.`,
@@ -90,21 +103,55 @@ export class UsuarioService {
         throw new BadRequestException(`El módulo ${modulo} está repetido.`);
       vistos.add(modulo);
 
-      const nivel = this.limpiar(p.nivelFotos)?.toUpperCase();
+      const nivel = limpiar(p.nivelFotos)?.toUpperCase();
+      const rol = limpiar(p.rolCostos)?.toUpperCase();
 
       if (modulo === 'FOTOS') {
-        if (!nivel || !NIVELES.includes(nivel as (typeof NIVELES)[number]))
+        // El nivel es OPCIONAL desde v3, y no es una relajación: sin nivel
+        // es el supervisor de §4 —entra al módulo y solo alcanza lo que le
+        // compartieron—, que es el caso más común de todos. Los tres
+        // valores que sí existen conceden alcance sobre TODO el árbol, así
+        // que exigir uno obligaría a regalar acceso global a quien no debe
+        // tener ninguno.
+        if (nivel && !NIVELES.includes(nivel as (typeof NIVELES)[number]))
           throw new BadRequestException(
-            `El módulo Fotos requiere un nivel: ${NIVELES.join(' o ')}.`,
+            `Nivel de Fotos inválido: "${nivel}". Valores permitidos: ${NIVELES.join(', ')}, o ninguno para acceso solo a lo compartido.`,
           );
-        return { modulo: modulo as Modulo, nivelFotos: nivel as NivelFotos };
+        if (rol)
+          throw new BadRequestException(
+            'El módulo Fotos no lleva rol de Costos: quita el rol.',
+          );
+        return {
+          modulo: modulo as Modulo,
+          nivelFotos: (nivel as NivelFotos | undefined) ?? null,
+          rolCostos: null,
+        };
       }
 
-      if (nivel)
+      if (modulo === 'COSTOS') {
+        if (
+          !rol ||
+          !ROLES_COSTOS.includes(rol as (typeof ROLES_COSTOS)[number])
+        )
+          throw new BadRequestException(
+            `El módulo Costos requiere un rol: ${ROLES_COSTOS.join(', ')}.`,
+          );
+        if (nivel)
+          throw new BadRequestException(
+            'El módulo Costos no lleva nivel de Fotos: quita el nivel.',
+          );
+        return {
+          modulo: modulo as Modulo,
+          nivelFotos: null,
+          rolCostos: rol as RolCostos,
+        };
+      }
+
+      if (nivel || rol)
         throw new BadRequestException(
-          `El módulo ${modulo} no tiene sub-roles: quita el nivel.`,
+          `El módulo ${modulo} no tiene sub-roles: quita el nivel y el rol.`,
         );
-      return { modulo: modulo as Modulo, nivelFotos: null };
+      return { modulo: modulo as Modulo, nivelFotos: null, rolCostos: null };
     });
   }
 
@@ -118,7 +165,7 @@ export class UsuarioService {
       ultimoAcceso: true,
       creadoEn: true,
       permisos: {
-        select: { id: true, modulo: true, nivelFotos: true },
+        select: { id: true, modulo: true, nivelFotos: true, rolCostos: true },
         orderBy: { modulo: 'asc' as const },
       },
     };
@@ -143,7 +190,7 @@ export class UsuarioService {
   /** Crea un Admin. El rol SUPERADMIN solo lo pone el script de semilla. */
   async crear(dto: CrearUsuarioDto) {
     const email = this.emailValido(dto.email);
-    const nombre = this.limpiar(dto.nombre);
+    const nombre = limpiar(dto.nombre);
     if (!nombre) throw new BadRequestException('El nombre es obligatorio.');
     const password = this.passwordValida(dto.password);
     const permisos = this.permisosValidos(dto.permisos);
@@ -184,13 +231,13 @@ export class UsuarioService {
     const data: Record<string, unknown> = {};
 
     if ('nombre' in dto) {
-      const nombre = this.limpiar(dto.nombre);
+      const nombre = limpiar(dto.nombre);
       if (!nombre) throw new BadRequestException('El nombre es obligatorio.');
       data.nombre = nombre;
     }
 
     if ('estado' in dto && dto.estado !== null && dto.estado !== undefined) {
-      const estado = this.limpiar(dto.estado)?.toUpperCase();
+      const estado = limpiar(dto.estado)?.toUpperCase();
       if (!estado || !ESTADOS.includes(estado as (typeof ESTADOS)[number]))
         throw new BadRequestException(
           `Estado inválido. Valores permitidos: ${ESTADOS.join(', ')}.`,

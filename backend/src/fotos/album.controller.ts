@@ -2,7 +2,7 @@ import {
   Controller,
   Get,
   Post,
-  Put,
+  Patch,
   Delete,
   Param,
   Query,
@@ -11,106 +11,68 @@ import {
   UploadedFiles,
   UseInterceptors,
   UseFilters,
+  BadRequestException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { ErroresDeSubidaFilter } from './subida.filtro';
 import { AlbumService } from './album.service';
-import type { CrearAlbumDto, EditarAlbumDto } from './album.service';
-import { FotoService } from './foto.service';
-import type { ArchivoSubido } from './foto.service';
+import type { ArchivoSubido } from './album.service';
 import { LIMITES } from './imagen.service';
-import {
-  RequiereModulo,
-  RequiereNivelFotos,
-  UsuarioActual,
-} from '../auth/decoradores';
-import { Modulo, NivelFotos } from '../../generated/prisma/enums';
+import { ErroresDeSubidaFilter } from './subida.filtro';
+import { RequiereModulo, UsuarioActual } from '../auth/decoradores';
+import { Modulo } from '../../generated/prisma/enums';
 import type { UsuarioAutenticado } from '../auth/tipos';
 
 /**
- * Álbumes y su feed.
+ * Álbumes y fotos.
  *
- * El módulo FOTOS se exige a nivel de clase; el nivel ADMIN_FOTOS solo en
- * los endpoints de administración. Todo lo demás —ver el feed y subir— es
- * para cualquiera con acceso al álbum, sea admin o colaborador: quien
- * entra, publica.
+ * Vivía dentro de `CarpetaController` porque en v2 la galería era «las fotos
+ * de esta carpeta» y no había álbum al que entrar. Con el álbum de vuelta
+ * (§16) son dos recursos, dos services y dos ciclos de vida, y compartir
+ * controller solo hacía que un archivo creciera con dos temas dentro.
+ *
+ * Los álbumes cuelgan de la carpeta en la URL —`carpeta/:id/album`— porque
+ * es donde se crean y por donde se listan; las fotos van por su id, que es
+ * como llegan los enlaces de descarga.
  */
 @RequiereModulo(Modulo.FOTOS)
-@Controller('fotos/album')
+@Controller('fotos')
 export class AlbumController {
-  constructor(
-    private readonly album: AlbumService,
-    private readonly foto: FotoService,
-  ) {}
+  constructor(private readonly album: AlbumService) {}
 
-  // Álbumes que el usuario ve. Admin: todos. Colaborador: los suyos.
-  @Get()
-  listar(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Query('sedeId', new ParseIntPipe({ optional: true })) sedeId?: number,
-  ) {
-    return this.album.listar(usuario, sedeId);
-  }
-
-  @Get(':id')
-  detalle(
+  /** Galería de la carpeta, paginada por álbum. */
+  @Get('carpeta/:id/album')
+  galeria(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.album.obtenerConAcceso(usuario, id);
-  }
-
-  @RequiereNivelFotos(NivelFotos.ADMIN_FOTOS)
-  @Post()
-  crear(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Body() dto: CrearAlbumDto,
-  ) {
-    return this.album.crear(usuario, dto);
-  }
-
-  // Renombrar, mover de sede y abrir/cerrar. Un álbum CERRADO es de solo
-  // lectura para todos; reabrirlo también pasa por aquí.
-  @RequiereNivelFotos(NivelFotos.ADMIN_FOTOS)
-  @Put(':id')
-  editar(@Param('id', ParseIntPipe) id: number, @Body() dto: EditarAlbumDto) {
-    return this.album.editar(id, dto);
-  }
-
-  // Con quién está compartido vive en `/fotos/compartir`: es el mismo
-  // flujo para una carpeta que para un álbum y no debe partirse en dos.
-
-  // ── Feed: para TODOS los que acceden al álbum ──
-
-  @Get(':id/foto')
-  feed(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) id: number,
+    @Query('cursor', new ParseIntPipe({ optional: true })) cursor?: number,
     @Query('subidaPorId', new ParseIntPipe({ optional: true }))
     subidaPorId?: number,
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
   ) {
-    return this.foto.feed(usuario, id, { subidaPorId, desde, hasta });
+    return this.album.galeria(usuario, id, {
+      cursor,
+      subidaPorId,
+      desde,
+      hasta,
+    });
   }
 
-  // Quiénes han publicado aquí, para el filtro del feed.
-  @Get(':id/autores')
+  /** Quiénes han publicado aquí, para el filtro. */
+  @Get('carpeta/:id/autores')
   autores(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.foto.autores(usuario, id);
+    return this.album.autores(usuario, id);
   }
 
   /**
-   * Sube fotos. Sin restricción de nivel: es el feed compartido.
-   * Multer las mantiene en memoria — nunca tocan el disco, que en Render
-   * es efímero.
+   * Subir fotos. El álbum se crea solo, sin paso de «nombrar» nada (§17).
+   * Multer las mantiene en memoria: nunca tocan el disco, que en Render es
+   * efímero.
    */
-  @Post(':id/foto')
-  // El filtro traduce los cortes de multer, que ocurren antes de que el
-  // service llegue a validar nada.
+  @Post('carpeta/:id/album')
   @UseFilters(ErroresDeSubidaFilter)
   @UseInterceptors(
     FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
@@ -123,16 +85,155 @@ export class AlbumController {
     @UploadedFiles() archivos: ArchivoSubido[],
     @Body() dto: { descripcion?: string },
   ) {
-    return this.foto.subir(usuario, id, archivos, dto?.descripcion);
+    return this.album.subir(
+      usuario,
+      { tipo: 'carpeta', carpetaId: id },
+      archivos,
+      dto?.descripcion,
+    );
   }
 
-  // Puede borrar quien la subió o un ADMIN_FOTOS.
-  @Delete(':id/foto/:fotoId')
-  eliminarFoto(
+  // ── Álbumes con nombre (§16) ──
+
+  @Post('album/carpeta/:id')
+  crearAlbum(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) carpetaId: number,
+    @Body() dto: { nombre?: string; descripcion?: string; fecha?: string },
+  ) {
+    return this.album.crearAlbum(usuario, carpetaId, dto ?? {});
+  }
+
+  @Patch('album/:id')
+  editarAlbum(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { nombre?: string; descripcion?: string; fecha?: string },
+  ) {
+    return this.album.editarAlbum(usuario, id, dto ?? {});
+  }
+
+  /** Subir a un álbum que YA existe (§16). */
+  @Post('album/:id/foto')
+  @UseFilters(ErroresDeSubidaFilter)
+  @UseInterceptors(
+    FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
+      limits: { fileSize: LIMITES.bytesMaximos },
+    }),
+  )
+  subirAAlbum(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) albumId: number,
+    @UploadedFiles() archivos: ArchivoSubido[],
+    @Body() dto: { descripcion?: string },
+  ) {
+    return this.album.subir(
+      usuario,
+      { tipo: 'album', albumId },
+      archivos,
+      dto?.descripcion,
+    );
+  }
+
+  /** Fotos de una tarea (§15: «tarea relacionada»). */
+  @Post('tarea/:id/foto')
+  @UseFilters(ErroresDeSubidaFilter)
+  @UseInterceptors(
+    FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
+      limits: { fileSize: LIMITES.bytesMaximos },
+    }),
+  )
+  subirATarea(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) tareaId: number,
+    @UploadedFiles() archivos: ArchivoSubido[],
+    @Body() dto: { descripcion?: string },
+  ) {
+    return this.album.subir(
+      usuario,
+      { tipo: 'tarea', tareaId },
+      archivos,
+      dto?.descripcion,
+    );
+  }
+
+  // ── Bandeja de pendientes (§17, §18) ──
+
+  /**
+   * «Subir fotos sin asignar» (§17). No lleva id en la ruta porque no hay
+   * destino: la bandeja es siempre la de quien sube.
+   */
+  @Post('bandeja')
+  @UseFilters(ErroresDeSubidaFilter)
+  @UseInterceptors(
+    FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
+      limits: { fileSize: LIMITES.bytesMaximos },
+    }),
+  )
+  subirSinAsignar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @UploadedFiles() archivos: ArchivoSubido[],
+    @Body() dto: { descripcion?: string },
+  ) {
+    return this.album.subir(
+      usuario,
+      { tipo: 'bandeja' },
+      archivos,
+      dto?.descripcion,
+    );
+  }
+
+  @Get('bandeja')
+  bandeja(@UsuarioActual() usuario: UsuarioAutenticado) {
+    return this.album.bandeja(usuario);
+  }
+
+  /** Clasificar por lotes (§18). El destino llega en el cuerpo. */
+  @Post('bandeja/clasificar')
+  clasificar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body()
+    dto: {
+      fotoIds?: number[];
+      carpetaId?: number;
+      albumId?: number;
+      tareaId?: number;
+    },
+  ) {
+    // El cuerpo llega con ids sueltos —es lo natural en JSON— y aquí se
+    // convierte en el destino tipado que el service exige. Traducir en la
+    // frontera evita que la unión se contamine con opcionales.
+    const destino =
+      dto?.tareaId !== undefined
+        ? ({ tipo: 'tarea', tareaId: Number(dto.tareaId) } as const)
+        : dto?.albumId !== undefined
+          ? ({ tipo: 'album', albumId: Number(dto.albumId) } as const)
+          : dto?.carpetaId !== undefined
+            ? ({ tipo: 'carpeta', carpetaId: Number(dto.carpetaId) } as const)
+            : null;
+
+    if (!destino)
+      throw new BadRequestException(
+        'Indica a dónde van las fotos: una tarea, un álbum o una carpeta.',
+      );
+
+    return this.album.clasificar(usuario, dto?.fotoIds ?? [], destino);
+  }
+
+  @Get('foto/:fotoId/descarga')
+  descargar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('fotoId', ParseIntPipe) fotoId: number,
   ) {
-    return this.foto.eliminar(usuario, id, fotoId);
+    return this.album.urlDeDescarga(usuario, fotoId);
+  }
+
+  /** Borra quien la subió (EDICION) o quien administra la carpeta (TOTAL). */
+  @Delete('foto/:fotoId')
+  eliminarFoto(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('fotoId', ParseIntPipe) fotoId: number,
+  ) {
+    return this.album.eliminar(usuario, fotoId);
   }
 }

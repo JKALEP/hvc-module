@@ -84,11 +84,25 @@ export class AlmacenamientoService {
   }
 
   /**
-   * Clave de un objeto. Se agrupa por álbum para que el bucket sea
-   * navegable y borrar un álbum entero sea un prefijo.
+   * Clave de un objeto. Se agrupa para que el bucket sea navegable y borrar
+   * un grupo entero sea un prefijo.
+   *
+   * `grupo` es el id del álbum cuando la foto tiene uno, y `u<usuarioId>`
+   * cuando no —las de una tarea y las de la bandeja de §18—. Admite texto
+   * desde la Fase 6 por eso: es lo ÚNICO que cambió aquí.
+   *
+   * ⚠️ El prefijo sigue siendo `lotes/` aunque el modelo ya no tenga lotes.
+   * Cambiarlo no rompería nada —la clave se guarda por foto en la BD, así
+   * que los objetos viejos se seguirían sirviendo— pero partiría el bucket
+   * en dos prefijos para siempre a cambio de nada. Lo mismo valió para
+   * `albumes/`, de antes de v2, que también sigue ahí.
    */
-  construirClave(albumId: number, nombre: string, variante: 'img' | 'thumb') {
-    return `albumes/${albumId}/${variante}/${nombre}`;
+  construirClave(
+    grupo: number | string,
+    nombre: string,
+    variante: 'img' | 'thumb',
+  ) {
+    return `lotes/${grupo}/${variante}/${nombre}`;
   }
 
   async subir(clave: string, contenido: Buffer, tipoMime: string) {

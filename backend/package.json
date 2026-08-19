@@ -18,7 +18,10 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "seed:superadmin": "npm run build && node dist/src/cli/seed-superadmin.js"
+    "seed:superadmin": "npm run build && node dist/src/cli/seed-superadmin.js",
+    "seed:costos": "npm run build && node dist/src/cli/seed-costos.js",
+    "verificar:fotos": "node scripts/verificar-fotos.cjs",
+    "r2:huerfanos": "node scripts/limpiar-r2-huerfanos.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1106.0",
@@ -30,11 +33,15 @@
     "@nestjs/throttler": "^6.5.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@types/pdfkit": "^0.17.6",
     "bcryptjs": "^3.0.3",
+    "exceljs": "^4.4.0",
     "multer": "^2.2.0",
+    "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
     "prisma": "^7.9.1",
     "reflect-metadata": "^0.2.2",
+    "resend": "^6.20.0",
     "rxjs": "^7.8.1",
     "sharp": "^0.35.3",
     "xlsx": "^0.18.5"

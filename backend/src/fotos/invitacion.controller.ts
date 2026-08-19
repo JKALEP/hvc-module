@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Ip } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { InvitacionService } from './invitacion.service';
 import { AuthService } from '../auth/auth.service';
@@ -34,11 +34,13 @@ export class InvitacionController {
   async activar(
     @Param('token') token: string,
     @Body() dto: { nombre?: string; password?: string },
+    @Ip() ip: string,
   ) {
     const cliente = await this.invitacion.activar(
       token,
       dto?.nombre,
       dto?.password,
+      ip,
     );
     return this.auth.emitirSesion(cliente.id);
   }

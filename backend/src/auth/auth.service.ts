@@ -45,7 +45,9 @@ export class AuthService {
         rol: true,
         estado: true,
         passwordHash: true,
-        permisos: { select: { modulo: true, nivelFotos: true } },
+        permisos: {
+          select: { modulo: true, nivelFotos: true, rolCostos: true },
+        },
       },
     });
     if (!usuario) throw generico;
@@ -97,7 +99,9 @@ export class AuthService {
         email: true,
         nombre: true,
         rol: true,
-        permisos: { select: { modulo: true, nivelFotos: true } },
+        permisos: {
+          select: { modulo: true, nivelFotos: true, rolCostos: true },
+        },
       },
     });
     if (!usuario) throw new UnauthorizedException('Cuenta no encontrada.');
