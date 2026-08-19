@@ -301,11 +301,12 @@ export interface NuevaTarea {
 /**
  * Dónde se puede comentar (§14).
  *
- * Son TRES y §14 nombra cuatro porque un equipo ES una carpeta de tipo
- * EQUIPO (§12): comentar un equipo y comentar una carpeta son la misma
- * llamada. La foto individual, que §14 marca opcional, llega en la Fase 6.
+ * §14 nombra cuatro —carpeta, equipo, tarea, álbum— y aquí hay `carpeta`
+ * cubriendo dos: un equipo ES una carpeta de tipo EQUIPO (§12), así que
+ * comentar un equipo y comentar una carpeta son la misma llamada. `foto` es
+ * el opcional de §14, con ruta desde la Fase 6 y pantalla desde la 9a.
  */
-export type EntidadComentable = 'carpeta' | 'tarea' | 'album';
+export type EntidadComentable = 'carpeta' | 'tarea' | 'album' | 'foto';
 
 export interface Comentario {
   id: number;

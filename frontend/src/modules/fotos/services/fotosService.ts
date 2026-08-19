@@ -407,7 +407,11 @@ export async function eliminarComentario(id: number): Promise<void> {
 
 export async function crearAlbum(
   carpetaId: number,
-  payload: { nombre: string; descripcion?: string; fecha?: string },
+  payload: {
+    nombre: string;
+    descripcion?: string | null;
+    fecha?: string | null;
+  },
 ): Promise<Album> {
   const { data } = await api.post<Album>(
     `/fotos/album/carpeta/${carpetaId}`,

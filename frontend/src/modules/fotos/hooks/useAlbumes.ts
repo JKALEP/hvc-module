@@ -92,3 +92,51 @@ export function useEliminarFoto() {
       toast.error(getErrorMessage(error, 'No se pudo eliminar la foto')),
   });
 }
+
+/**
+ * Crear un álbum vacío con nombre (§16).
+ *
+ * Existe además de subir fotos: §16 quiere el álbum como tipo de contenido,
+ * no solo como efecto de arrastrar archivos.
+ */
+export function useCrearAlbum() {
+  const invalidar = useInvalidarFotos();
+  return useMutation({
+    mutationFn: ({
+      carpetaId,
+      payload,
+    }: {
+      carpetaId: number;
+      payload: { nombre: string; descripcion?: string | null; fecha?: string | null };
+    }) => fotos.crearAlbum(carpetaId, payload),
+    onSuccess: (a) => {
+      invalidar();
+      toast.success(`Álbum creado: ${a.nombre ?? 'sin título'}`);
+    },
+    onError: (error) =>
+      toast.error(getErrorMessage(error, 'No se pudo crear el álbum')),
+  });
+}
+
+export function useEditarAlbum() {
+  const invalidar = useInvalidarFotos();
+  return useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: number;
+      payload: {
+        nombre?: string | null;
+        descripcion?: string | null;
+        fecha?: string | null;
+      };
+    }) => fotos.editarAlbum(id, payload),
+    onSuccess: () => {
+      invalidar();
+      toast.success('Álbum actualizado');
+    },
+    onError: (error) =>
+      toast.error(getErrorMessage(error, 'No se pudo actualizar el álbum')),
+  });
+}

@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   FolderPlusIcon,
   FoldersIcon,
+  ImagesIcon,
   SearchIcon,
   FileSpreadsheetIcon,
   Share2Icon,
@@ -21,6 +22,7 @@ import { PanelSubida } from '@/modules/fotos/components/PanelSubida';
 import { PanelTareas } from '@/modules/fotos/components/PanelTareas';
 import { HiloComentarios } from '@/modules/fotos/components/HiloComentarios';
 import { DialogoImportar } from '@/modules/fotos/components/DialogoImportar';
+import { DialogoAlbum } from '@/modules/fotos/components/DialogoAlbum';
 import {
   usePlantillas,
   useAplicarPlantilla,
@@ -44,7 +46,12 @@ import { esAdminFotos, nivelFotosDe } from '@/shared/lib/modulos';
 import { alcanza } from '@/modules/fotos/lib/permisos';
 import { useDebounce } from '@/shared/hooks/useDebounce';
 import { SEARCH_DEBOUNCE_MS } from '@/shared/lib/constants';
-import type { CarpetaListada, FiltrosGaleria, Orden } from '@/modules/fotos/types';
+import type {
+  AlbumDeGaleria,
+  CarpetaListada,
+  FiltrosGaleria,
+  Orden,
+} from '@/modules/fotos/types';
 
 const SIN_FILTROS: FiltrosGaleria = { subidaPorId: null, desde: '', hasta: '' };
 
@@ -81,6 +88,11 @@ export function Fotos() {
   const { data: plantillas } = usePlantillas(true);
   const aplicar = useAplicarPlantilla();
   const [importando, setImportando] = useState(false);
+  // `undefined` = cerrado · `null` = crear uno nuevo · álbum = editarlo.
+  // Tres estados en una variable porque son tres estados de UN diálogo.
+  const [albumEnEdicion, setAlbumEnEdicion] = useState<
+    AlbumDeGaleria | null | undefined
+  >(undefined);
   const [filtros, setFiltros] = useState<FiltrosGaleria>(SIN_FILTROS);
   const [texto, setTexto] = useState('');
   const [orden, setOrden] = useState<Orden>('nombre');
@@ -348,6 +360,18 @@ export function Fotos() {
             />
           </section>
 
+          {/* §16: crear el álbum ANTES de tener fotos. El botón vive junto a
+              la subida y no en la cabecera —que ya va llena— porque es una
+              acción sobre las fotos, no sobre la carpeta. */}
+          {data.puedeEscribir && (
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => setAlbumEnEdicion(null)}>
+                <ImagesIcon />
+                Nuevo álbum
+              </Button>
+            </div>
+          )}
+
           {data.puedeEscribir && <PanelSubida sedeId={sedeId} />}
 
           <div className="flex flex-wrap items-end gap-3">
@@ -429,6 +453,11 @@ export function Fotos() {
             onCargarMas={() => void galeria.fetchNextPage()}
             puedeBorrar={(f) =>
               admin || (f.subidaPor?.id === usuario?.id && !data.ramaCerrada)
+            }
+            permiso={data.permiso}
+            ramaCerrada={data.ramaCerrada}
+            onRenombrar={
+              data.puedeEscribir ? (a) => setAlbumEnEdicion(a) : undefined
             }
             vacio={{
               titulo: hayFiltro ? 'Ninguna foto con esos filtros' : 'Sin fotos',
@@ -526,6 +555,18 @@ export function Fotos() {
 
       {dialogo?.tipo === 'compartir' && (
         <DialogoCompartir carpetaInicial={dialogo.carpeta} onCerrar={cerrar} />
+      )}
+
+      {sedeId !== null && albumEnEdicion !== undefined && (
+        <DialogoAlbum
+          // El `key` es lo que hace que el diálogo arranque con los datos del
+          // álbum ya dentro: cambiarlo lo remonta. Ver su cabecera.
+          key={albumEnEdicion?.id ?? 'nuevo'}
+          carpetaId={sedeId}
+          album={albumEnEdicion}
+          abierto
+          onCerrar={() => setAlbumEnEdicion(undefined)}
+        />
       )}
 
       {sedeId !== null && (
