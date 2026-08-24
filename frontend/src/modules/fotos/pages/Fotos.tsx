@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  ArchiveIcon,
   FoldersIcon,
   MessageCircleIcon,
   PlusIcon,
@@ -30,6 +29,9 @@ import {
   DetalleAlbumDialog,
 } from '@/modules/fotos/components/GaleriaAlbumes';
 import { PestanasFicha } from '@/modules/fotos/components/PestanasFicha';
+import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
+import { AvisoArchivada } from '@/modules/fotos/components/AvisoArchivada';
+import { EtiquetaSeccion } from '@/modules/fotos/components/EtiquetaSeccion';
 import { Button } from '@/shared/ui/button';
 import { Card, CardContent } from '@/shared/ui/card';
 import { Input } from '@/shared/ui/input';
@@ -141,7 +143,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
       />
 
       {/* ── Bloque «Carpetas» ── */}
-      <div className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <PanelFotos className="space-y-4">
         <PageHeader
           title={data?.carpetaActual?.nombre ?? 'Fotos'}
           description={
@@ -205,14 +207,11 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
         </div>
 
         {data?.ramaCerrada && (
-          <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning-soft px-4 py-3 text-sm text-warning-soft-foreground">
-            <ArchiveIcon className="mt-0.5 size-4 shrink-0" />
-            <p>
-              Esta carpeta está archivada. Se puede consultar y descargar,
-              pero nadie puede subir fotos ni crear carpetas dentro. Un
-              administrador de Fotos puede reabrirla.
-            </p>
-          </div>
+          <AvisoArchivada>
+            Esta carpeta está archivada. Se puede consultar y descargar,
+            pero nadie puede subir fotos ni crear carpetas dentro. Un
+            administrador de Fotos puede reabrirla.
+          </AvisoArchivada>
         )}
 
         {cargando && (
@@ -233,9 +232,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
         {secciones.map((bloque) => (
           <section key={bloque.clave} className="space-y-3">
-            <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              {bloque.etiqueta}
-            </h2>
+            <EtiquetaSeccion>{bloque.etiqueta}</EtiquetaSeccion>
             <div className={GRID_CARPETAS}>
               {bloque.carpetas.map((c) => (
                 <TarjetaCarpeta
@@ -296,7 +293,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
             }
           />
         )}
-      </div>
+      </PanelFotos>
       {/* ── Fin bloque «Carpetas» ── */}
 
       {/* ── Bloque «Ficha del equipo» ──
@@ -327,7 +324,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
             </Card>
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <PanelFotos>
             <PestanasFicha
               contenidoAlbumes={
                 <div className="space-y-4">
@@ -401,7 +398,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                 />
               }
             />
-          </div>
+          </PanelFotos>
         </div>
       )}
       {/* ── Fin bloque «Ficha» ── */}

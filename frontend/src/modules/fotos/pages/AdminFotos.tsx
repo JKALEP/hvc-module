@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { FolderIcon, HistoryIcon, LayoutTemplateIcon, PlusIcon, Trash2Icon, WrenchIcon, XIcon } from 'lucide-react';
 
+
+import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
 import { PageHeader } from '@/shared/components/PageHeader';
 import { EmptyState } from '@/shared/components/EmptyState';
 import { Badge } from '@/shared/ui/badge';
@@ -140,7 +142,7 @@ function ColoresDelExplorador() {
   ];
 
   return (
-    <div className="surface p-4">
+    <PanelFotos denso>
       <h2 className="mb-1 font-medium text-foreground">
         Color en el explorador
       </h2>
@@ -191,7 +193,7 @@ function ColoresDelExplorador() {
           );
         })}
       </div>
-    </div>
+    </PanelFotos>
   );
 }
 
@@ -262,7 +264,7 @@ function CamposDeEquipoAdmin() {
     <div className="space-y-6">
       <ColoresDelExplorador />
 
-      <div className="surface p-4">
+      <PanelFotos denso>
         <h2 className="mb-3 font-medium text-foreground">Nuevo campo</h2>
         <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto]">
           <Input
@@ -304,7 +306,7 @@ function CamposDeEquipoAdmin() {
           Todos los campos son opcionales al crear un equipo: nunca bloquean el
           registro en obra.
         </p>
-      </div>
+      </PanelFotos>
 
       {!campos && !isError && (
         <div className="flex justify-center py-8">
@@ -328,7 +330,7 @@ function CamposDeEquipoAdmin() {
 
       <div className="space-y-2">
         {campos?.map((c) => (
-          <div key={c.id} className="surface p-4">
+          <PanelFotos key={c.id} denso>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="flex items-center gap-2 font-medium text-foreground">
@@ -424,7 +426,7 @@ function CamposDeEquipoAdmin() {
                 </div>
               </div>
             )}
-          </div>
+          </PanelFotos>
         ))}
       </div>
     </div>

@@ -8,6 +8,8 @@ import {
   Trash2Icon,
 } from 'lucide-react';
 
+
+import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
 import { Badge } from '@/shared/ui/badge';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
@@ -115,7 +117,7 @@ export function PanelTareas({
     );
 
   return (
-    <section className="rounded-xl border border-border bg-card p-4">
+    <PanelFotos as="section" denso>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-medium text-foreground">
           {portal ? 'Tareas' : 'Tareas del equipo'}
@@ -201,7 +203,7 @@ export function PanelTareas({
           </Button>
         </div>
       )}
-    </section>
+    </PanelFotos>
   );
 }
 

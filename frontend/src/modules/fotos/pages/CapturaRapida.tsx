@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { CameraIcon, InboxIcon, UploadIcon } from 'lucide-react';
 
+
+import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
 import { PageHeader } from '@/shared/components/PageHeader';
 import { EmptyState } from '@/shared/components/EmptyState';
 import { Button } from '@/shared/ui/button';
@@ -130,7 +132,7 @@ export function CapturaRapida() {
         description="Sube fotos desde obra sin navegar por las carpetas. Lo que no puedas asignar ahora queda en la bandeja."
       />
 
-      <section className="space-y-4 rounded-xl border border-border bg-card p-4">
+      <PanelFotos as="section" denso className="space-y-4">
         <h2 className="font-medium text-foreground">1 · A dónde van</h2>
 
         <div className="grid gap-3 sm:grid-cols-3">
@@ -214,9 +216,9 @@ export function CapturaRapida() {
                 : (dentro?.carpetaActual?.nombre ?? '—')}
           </span>
         </p>
-      </section>
+      </PanelFotos>
 
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <PanelFotos as="section" denso className="space-y-3">
         <h2 className="font-medium text-foreground">2 · Las fotos</h2>
 
         <Input
@@ -259,9 +261,9 @@ export function CapturaRapida() {
             Subir sin asignar
           </Button>
         </div>
-      </section>
+      </PanelFotos>
 
-      <section className="space-y-3 rounded-xl border border-border bg-card p-4">
+      <PanelFotos as="section" denso className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="font-medium text-foreground">
             Fotos pendientes de organizar
@@ -337,7 +339,7 @@ export function CapturaRapida() {
             </div>
           </>
         )}
-      </section>
+      </PanelFotos>
     </div>
   );
 }

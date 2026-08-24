@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ArchiveIcon, FoldersIcon, XIcon } from 'lucide-react';
+import { FoldersIcon, XIcon } from 'lucide-react';
 
+
+import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
+import { AvisoArchivada } from '@/modules/fotos/components/AvisoArchivada';
+import { EtiquetaSeccion } from '@/modules/fotos/components/EtiquetaSeccion';
 import { PageHeader } from '@/shared/components/PageHeader';
 import { EmptyState } from '@/shared/components/EmptyState';
 import { TarjetaCarpeta } from '@/modules/fotos/components/TarjetaCarpeta';
@@ -80,10 +84,9 @@ export function Portal() {
       </div>
 
       {data?.ramaCerrada && (
-        <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning-soft px-4 py-3 text-sm text-warning-soft-foreground">
-          <ArchiveIcon className="mt-0.5 size-4 shrink-0" />
-          <p>Esta carpeta está archivada: ya no se le añaden fotos nuevas.</p>
-        </div>
+        <AvisoArchivada>
+          Esta carpeta está archivada: ya no se le añaden fotos nuevas.
+        </AvisoArchivada>
       )}
 
       {cargando && (
@@ -104,9 +107,7 @@ export function Portal() {
 
       {(data?.secciones ?? []).map((seccion) => (
         <section key={seccion.clave} className="space-y-3">
-          <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            {seccion.etiqueta}
-          </h2>
+          <EtiquetaSeccion>{seccion.etiqueta}</EtiquetaSeccion>
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {seccion.carpetas.map((c) => (
@@ -137,7 +138,7 @@ export function Portal() {
             />
           )}
 
-          <section className="rounded-xl border border-border bg-card p-4">
+          <PanelFotos as="section" denso>
             <h2 className="mb-3 font-medium text-foreground">Comentarios</h2>
 
             <HiloComentarios
@@ -147,7 +148,7 @@ export function Portal() {
               ramaCerrada={data.ramaCerrada}
               portal
             />
-          </section>
+          </PanelFotos>
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">
