@@ -60,6 +60,24 @@ export class TareaController {
     return this.tareas.crear(usuario, carpetaId, dto);
   }
 
+  /**
+   * Quién puede ser responsable (§13). Hermana de `tarea/:id` y declarada
+   * ANTES, para que `asignables` no caiga en el parámetro `:id`.
+   */
+  @Get('tarea-asignables')
+  asignables() {
+    return this.tareas.asignables();
+  }
+
+  /** Las fotos de una tarea (§15). */
+  @Get('tarea/:id/foto')
+  fotosDeTarea(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.tareas.fotosDe(usuario, id);
+  }
+
   @Get('tarea/:id')
   detalle(
     @UsuarioActual() usuario: UsuarioAutenticado,

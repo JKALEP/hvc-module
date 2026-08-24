@@ -112,9 +112,42 @@ export class ExportacionService {
     });
   }
 
-  /** Sin caracteres que peleen con el nombre de archivo. */
+  /**
+   * Deja un nombre de archivo seguro: solo letras ASCII, dígitos, `_` y `-`.
+   *
+   * ⚠️ **No es cosmético, es la defensa de la cabecera HTTP.** El nombre
+   * acaba dentro de `Content-Disposition: attachment; filename="…"`, y hasta
+   * ahora solo se aplicaba a la ruta de Equipos (`deDocumento`); la ruta
+   * genérica pasaba `nombreArchivo` tal cual. Con Costos no se notó porque
+   * sus nombres son códigos ASCII (`requerimiento-001-000106`), pero Fotos
+   * mete NOMBRES DE CARPETA, que los escribe cualquiera. Una carpeta llamada
+   * `mala"; evil=1` producía:
+   *
+   *     attachment; filename="historial-mala"; evil=1.xlsx"
+   *
+   * —la comilla cierra el `filename` y lo que sigue queda como parámetro
+   * suelto de la cabecera, con lo que se controla el nombre y la extensión
+   * del archivo que descarga quien pulsa el botón—. Reproducido contra la
+   * API antes de escribir esto. (Un salto de línea no llega tan lejos: Node
+   * rechaza `
+
+` en un valor de cabecera.)
+   *
+   * Los acentos se pliegan a ASCII antes de filtrar, así que «Pabellón 1» da
+   * `Pabellon_1` y no `Pabell_n_1`. Eso también mejora los nombres de
+   * Equipos, que ya pasaban por aquí.
+   */
   private limpiarNombre(nombre: string): string {
-    return nombre.replace(/[^\w-]+/g, '_');
+    return (
+      nombre
+        // NFD separa la letra de su tilde, y \p{Diacritic} borra la tilde
+        // suelta que queda. Así «Pabellón» da `Pabellon` y no `Pabell_n`.
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[^\w-]+/g, '_')
+        // Sin `_` de sobra al principio ni al final: son ruido puro.
+        .replace(/^_+|_+$/g, '') || 'archivo'
+    );
   }
 
   // ── Documentos ──
@@ -218,7 +251,7 @@ export class ExportacionService {
 
     return {
       buffer: Buffer.from(await libro.xlsx.writeBuffer()),
-      nombreArchivo: `${t.nombreArchivo}.xlsx`,
+      nombreArchivo: `${this.limpiarNombre(t.nombreArchivo)}.xlsx`,
     };
   }
 
@@ -237,7 +270,7 @@ export class ExportacionService {
       pdf.on('end', () =>
         resolver({
           buffer: Buffer.concat(trozos),
-          nombreArchivo: `${t.nombreArchivo}.pdf`,
+          nombreArchivo: `${this.limpiarNombre(t.nombreArchivo)}.pdf`,
         }),
       );
       pdf.on('error', rechazar);

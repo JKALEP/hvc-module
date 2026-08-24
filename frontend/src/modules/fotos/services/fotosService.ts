@@ -1,6 +1,6 @@
 import { api } from '@/shared/services/api';
 import type { RespuestaLogin } from '@/modules/auth/types';
-import type { EventoFotos, Plantilla, PlantillaResumen, NodoPlantillaNuevo, PreviaImportacion, DecisionImportacion, Album, Bandeja, DestinoFotos, Comentario, EntidadComentable, EstadoTarea, NuevaTarea, Tarea, AutorDeCarpeta, BusquedaDeEquipos, CarpetaCompartible, CarpetaListada, ContenidoCarpeta, EquipoDeCatalogo, FiltrosGaleria, Galeria, InvitacionAbierta, ListaCompartidos, Orden, OrganizacionDeCatalogo, PermisoCarpeta, UbicacionDeCatalogo, ResultadoCompartir, ResultadoSubida } from '@/modules/fotos/types';
+import type { ColoresDeCarpeta, CampoEquipo, CampoDeCarpeta, Persona, FotoDeTarea, EventoFotos, Plantilla, PlantillaResumen, NodoPlantillaNuevo, PreviaImportacion, DecisionImportacion, Album, Bandeja, DestinoFotos, Comentario, EntidadComentable, EstadoTarea, NuevaTarea, Tarea, AutorDeCarpeta, CarpetaCompartible, CarpetaListada, ContenidoCarpeta, FiltrosGaleria, Galeria, InvitacionAbierta, ListaCompartidos, Orden, PermisoCarpeta, ResultadoCompartir, ResultadoSubida } from '@/modules/fotos/types';
 
 // Módulo Fotos v3. Un recurso, un nombre: las carpetas se leen y se
 // escriben en `/fotos/carpeta`. La `/fotos/sede` de v2 desapareció —creaba
@@ -90,6 +90,25 @@ export async function subirFotos(
   return data;
 }
 
+/**
+ * Corrige la descripción de una foto ya subida.
+ *
+ * Lo ÚNICO que se puede cambiar de una foto: la imagen no se reemplaza
+ * —eso permitiría cambiar la prueba de una inspección sin que se note— y su
+ * sitio se mueve por otra ruta.
+ */
+export async function editarDescripcionFoto(
+  fotoId: number,
+  descripcion: string | null,
+): Promise<{ ok: boolean; id: number; descripcion: string | null }> {
+  const { data } = await api.patch<{
+    ok: boolean;
+    id: number;
+    descripcion: string | null;
+  }>(`/fotos/foto/${fotoId}`, { descripcion });
+  return data;
+}
+
 export async function eliminarFoto(fotoId: number): Promise<void> {
   await api.delete(`/fotos/foto/${fotoId}`);
 }
@@ -111,9 +130,20 @@ export async function descargarFoto(
 export async function crearCarpeta(payload: {
   nombre: string;
   parentId: number | null;
-  /** `EQUIPO` obliga a mandar `equipoId` (§12); por defecto, `CARPETA`. */
+  /**
+   * `CARPETA` por defecto.
+   *
+   * ⚠️ `EQUIPO` ya NO lleva `equipoId`: desde la Fase 1a de «Gestión de
+   * contenido» no hay enlace con el catálogo de Gestión de Equipos.
+   */
   tipo?: 'CARPETA' | 'EQUIPO';
-  equipoId?: number;
+  /**
+   * Los campos configurables del equipo, por CLAVE (Fase 1b). Solo con
+   * `tipo = 'EQUIPO'`. Van en la misma llamada —y en la misma transacción
+   * del servidor— que la carpeta: crear y rellenar en dos pasos deja una
+   * carpeta a medias si el segundo falla, que en obra es el que se pierde.
+   */
+  valores?: Record<string, unknown>;
 }) {
   const { data } = await api.post('/fotos/carpeta', payload);
   return data as { id: number; nombre: string };
@@ -139,59 +169,143 @@ export async function eliminarCarpeta(id: number): Promise<void> {
   await api.delete(`/fotos/carpeta/${id}`);
 }
 
-// ── Catálogo de equipos (§12) ──
-// Puerta de solo lectura al catálogo de Gestión de equipos, más el atajo de
-// registro. Fotos no administra equipos: los referencia.
+// ── Catálogo de equipos — RETIRADO ──
+//
+// Aquí vivían `organizacionesDeCatalogo`, `ubicacionesDeCatalogo`,
+// `buscarEquipos` y `crearEquipoDesdeFotos`: las cuatro llamadas a
+// `/fotos/catalogo-equipos`, que era la puerta autorizada de Fotos al
+// catálogo de Gestión de Equipos (§12). Se retiraron enteras en la Fase 1a
+// de «Gestión de contenido», junto con el controller del backend, el
+// selector de tres pasos y el atajo «Registrar y elegir».
 
-export async function organizacionesDeCatalogo(): Promise<
-  OrganizacionDeCatalogo[]
-> {
-  const { data } = await api.get<OrganizacionDeCatalogo[]>(
-    '/fotos/catalogo-equipos/organizacion',
-  );
+// ── Color por tipo de carpeta (Fase 1c) ──
+
+export async function coloresDeCarpeta(): Promise<ColoresDeCarpeta> {
+  const { data } = await api.get<ColoresDeCarpeta>('/fotos/configuracion/color');
   return data;
 }
 
-export async function ubicacionesDeCatalogo(
-  organizacionId: number,
-): Promise<UbicacionDeCatalogo[]> {
-  const { data } = await api.get<UbicacionDeCatalogo[]>(
-    `/fotos/catalogo-equipos/organizacion/${organizacionId}/ubicacion`,
-  );
-  return data;
-}
-
-export async function buscarEquipos(
-  organizacionId: number,
-  q: string,
-): Promise<BusquedaDeEquipos> {
-  const { data } = await api.get<BusquedaDeEquipos>(
-    `/fotos/catalogo-equipos/organizacion/${organizacionId}/equipo`,
-    { params: { ...(q.trim() ? { q: q.trim() } : {}) } },
-  );
-  return data;
-}
-
-/**
- * El atajo de §12: registra un equipo sin salir de Fotos.
- *
- * `valores` va indexado por la clave del campo dinámico, igual que lo espera
- * Gestión de equipos — este atajo llama a su mismo service.
- */
-export async function crearEquipoDesdeFotos(payload: {
-  organizacionId: number;
-  nodoId: number;
-  codigoInterno?: string;
-  valores?: Record<string, string>;
-}): Promise<EquipoDeCatalogo> {
-  const { data } = await api.post<EquipoDeCatalogo>(
-    '/fotos/catalogo-equipos/equipo',
+/** De ADMIN_GLOBAL. Devuelve el mapa completo ya actualizado. */
+export async function cambiarColorDeCarpeta(payload: {
+  tipo: 'CARPETA' | 'EQUIPO';
+  color: string;
+}): Promise<ColoresDeCarpeta> {
+  const { data } = await api.patch<ColoresDeCarpeta>(
+    '/fotos/configuracion/color',
     payload,
   );
   return data;
 }
 
-// ── Compartir ──
+// ── Campos configurables del EQUIPO (Fase 1b) ──
+//
+// Dos grupos con dos permisos: las DEFINICIONES las administra un
+// ADMIN_GLOBAL y son globales al módulo; los VALORES los rellena quien
+// tiene EDICION en la carpeta. Por eso unas cuelgan de `/fotos/campo` y
+// los otros de `/fotos/carpeta/:id/campo`.
+
+export async function listarCamposEquipo(
+  soloActivos = false,
+): Promise<CampoEquipo[]> {
+  const { data } = await api.get<CampoEquipo[]>('/fotos/campo', {
+    params: soloActivos ? { activos: 'true' } : {},
+  });
+  return data;
+}
+
+export async function crearCampoEquipo(payload: {
+  nombre: string;
+  tipo: string;
+  orden?: number;
+  opciones?: string[];
+}): Promise<CampoEquipo> {
+  const { data } = await api.post<CampoEquipo>('/fotos/campo', payload);
+  return data;
+}
+
+/** Renombrar, reordenar y activar/desactivar. El `tipo` no se puede cambiar. */
+export async function editarCampoEquipo(
+  id: number,
+  payload: { nombre?: string; orden?: number; activo?: boolean },
+): Promise<CampoEquipo> {
+  const { data } = await api.patch<CampoEquipo>(`/fotos/campo/${id}`, payload);
+  return data;
+}
+
+export async function eliminarCampoEquipo(id: number) {
+  const { data } = await api.delete<{ ok: boolean }>(`/fotos/campo/${id}`);
+  return data;
+}
+
+export async function agregarOpcionCampo(
+  id: number,
+  etiqueta: string,
+): Promise<CampoEquipo> {
+  const { data } = await api.post<CampoEquipo>(`/fotos/campo/${id}/opcion`, {
+    etiqueta,
+  });
+  return data;
+}
+
+export async function eliminarOpcionCampo(
+  opcionId: number,
+): Promise<CampoEquipo> {
+  const { data } = await api.delete<CampoEquipo>(
+    `/fotos/campo/opcion/${opcionId}`,
+  );
+  return data;
+}
+
+/** La ficha del equipo: cada campo con lo que tenga rellenado. */
+export async function camposDeCarpeta(
+  carpetaId: number,
+): Promise<CampoDeCarpeta[]> {
+  const { data } = await api.get<CampoDeCarpeta[]>(
+    `/fotos/carpeta/${carpetaId}/campo`,
+  );
+  return data;
+}
+
+/**
+ * Guarda los campos indicados.
+ *
+ * ⚠️ Es PARCIAL, no un reemplazo: una clave ausente se deja como está y
+ * una con `null` se vacía. Un campo FOTO no viaja aquí —el backend lo
+ * rechaza— porque una imagen no cabe en un JSON.
+ */
+export async function guardarCamposDeCarpeta(
+  carpetaId: number,
+  valores: Record<string, unknown>,
+): Promise<CampoDeCarpeta[]> {
+  const { data } = await api.put<CampoDeCarpeta[]>(
+    `/fotos/carpeta/${carpetaId}/campo`,
+    { valores },
+  );
+  return data;
+}
+
+export async function subirImagenDeCampo(
+  carpetaId: number,
+  campoId: number,
+  archivo: File,
+) {
+  const form = new FormData();
+  form.append('foto', archivo);
+  const { data } = await api.post<{ url: string; urlMiniatura: string }>(
+    `/fotos/carpeta/${carpetaId}/campo/${campoId}/imagen`,
+    form,
+  );
+  return data;
+}
+
+export async function quitarImagenDeCampo(carpetaId: number, campoId: number) {
+  const { data } = await api.delete<{ ok: boolean }>(
+    `/fotos/carpeta/${carpetaId}/campo/${campoId}/imagen`,
+  );
+  return data;
+}
+
+// ── Compartir ──// ── Compartir ──
 // Correo primero, carpetas después: un solo paso, sin tener que navegar
 // hasta cada carpeta para compartirla desde dentro.
 
@@ -305,7 +419,11 @@ export async function verGaleriaPortal(
   filtros: FiltrosGaleria,
   cursor?: number,
 ): Promise<Galeria> {
-  const { data } = await api.get<Galeria>(`/portal/carpeta/${sedeId}/foto`, {
+  // ⚠️ `/album`, no `/foto`. Pedía `/foto` y el backend expone
+  // `carpeta/:id/album`, así que la galería del portal devolvía 404 y el
+  // cliente veía CERO fotos, en silencio. No se detectó antes porque la
+  // carpeta con la que se probó el portal no tenía ninguna.
+  const { data } = await api.get<Galeria>(`/portal/carpeta/${sedeId}/album`, {
     params: {
       ...(cursor !== undefined ? { cursor } : {}),
       ...(filtros.desde ? { desde: filtros.desde } : {}),
@@ -428,6 +546,17 @@ export async function editarAlbum(
   return data;
 }
 
+/**
+ * Elimina un álbum VACÍO. El backend rechaza con 400 uno que tenga fotos.
+ *
+ * No hay «borrar el álbum con todo lo de dentro»: las fotos se borran una a
+ * una —cada una con su permiso— y al irse la última el álbum se retira solo.
+ */
+export async function eliminarAlbum(id: number): Promise<{ ok: boolean }> {
+  const { data } = await api.delete<{ ok: boolean }>(`/fotos/album/${id}`);
+  return data;
+}
+
 // ── Subir a cualquiera de los cuatro destinos (§15-§18) ──
 
 /**
@@ -472,9 +601,21 @@ export async function verBandeja(): Promise<Bandeja> {
   return data;
 }
 
+/** Traduce el destino tipado a los ids sueltos que espera el cuerpo JSON. */
+function idsDeDestino(destino: DestinoFotos) {
+  return {
+    ...(destino.tipo === 'carpeta' ? { carpetaId: destino.carpetaId } : {}),
+    ...(destino.tipo === 'album' ? { albumId: destino.albumId } : {}),
+    ...(destino.tipo === 'tarea' ? { tareaId: destino.tareaId } : {}),
+    ...(destino.tipo === 'bandeja' ? { bandeja: true } : {}),
+  };
+}
+
 export async function clasificarFotos(
   fotoIds: number[],
   destino: DestinoFotos,
+  /** Del álbum que se crea al clasificar en una CARPETA. Opcional (§17). */
+  album: { nombre?: string; descripcion?: string } = {},
 ): Promise<{ clasificadas: number; albumId: number | null }> {
   if (destino.tipo === 'bandeja')
     throw new Error('Clasificar es sacarlas de la bandeja, no devolverlas.');
@@ -483,11 +624,31 @@ export async function clasificarFotos(
     '/fotos/bandeja/clasificar',
     {
       fotoIds,
-      ...(destino.tipo === 'carpeta' ? { carpetaId: destino.carpetaId } : {}),
-      ...(destino.tipo === 'album' ? { albumId: destino.albumId } : {}),
-      ...(destino.tipo === 'tarea' ? { tareaId: destino.tareaId } : {}),
+      ...idsDeDestino(destino),
+      ...(album.nombre?.trim() ? { nombre: album.nombre.trim() } : {}),
+      ...(album.descripcion?.trim()
+        ? { descripcion: album.descripcion.trim() }
+        : {}),
     },
   );
+  return data;
+}
+
+/**
+ * Mover UNA foto de sitio.
+ *
+ * El servidor exige EDICION en origen Y en destino: no basta con poder
+ * escribir en uno de los dos.
+ */
+export async function moverFoto(
+  fotoId: number,
+  destino: DestinoFotos,
+): Promise<{ ok: boolean; id: number; sinCambios: boolean }> {
+  const { data } = await api.post<{
+    ok: boolean;
+    id: number;
+    sinCambios: boolean;
+  }>(`/fotos/foto/${fotoId}/mover`, idsDeDestino(destino));
   return data;
 }
 
@@ -612,5 +773,58 @@ export async function confirmarImportacion(
     omitido: { tareas: number; albumes: number };
     actualizado: { tareas: number; albumes: number };
   }>(`/fotos/importacion/carpeta/${carpetaId}/confirmar`, form);
+  return data;
+}
+
+// ── Tareas completas (§13) — 9b ──
+
+/** Quién puede ser responsable. Solo id y nombre: sin correos. */
+export async function verAsignables(): Promise<Persona[]> {
+  const { data } = await api.get<Persona[]>('/fotos/tarea-asignables');
+  return data;
+}
+
+/**
+ * Las fotos de una tarea (§15).
+ *
+ * Sin paginar: son las de UN trabajo concreto, no las del proyecto entero.
+ */
+export async function verFotosDeTarea(
+  tareaId: number,
+): Promise<FotoDeTarea[]> {
+  const { data } = await api.get<FotoDeTarea[]>(`/fotos/tarea/${tareaId}/foto`);
+  return data;
+}
+
+// ── Portal: tareas y comentarios en solo lectura (§22) ──
+//
+// Funciones gemelas de las internas, como ya lo son `verCarpetaPortal` y
+// `verGaleriaPortal`. Se prefiere eso a una bandera porque lo que cambia no
+// es un parámetro sino el CONJUNTO de rutas: el portal no tiene escrituras,
+// así que no hay una función «crear tarea del portal» que pudiera existir.
+
+export async function verTareasPortal(carpetaId: number): Promise<Tarea[]> {
+  const { data } = await api.get<Tarea[]>(
+    `/portal/carpeta/${carpetaId}/tarea`,
+  );
+  return data;
+}
+
+export async function verFotosDeTareaPortal(
+  tareaId: number,
+): Promise<FotoDeTarea[]> {
+  const { data } = await api.get<FotoDeTarea[]>(
+    `/portal/tarea/${tareaId}/foto`,
+  );
+  return data;
+}
+
+export async function verComentariosPortal(
+  entidad: EntidadComentable,
+  entidadId: number,
+): Promise<Comentario[]> {
+  const { data } = await api.get<Comentario[]>(
+    `/portal/comentario/${entidad}/${entidadId}`,
+  );
   return data;
 }

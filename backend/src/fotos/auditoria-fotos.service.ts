@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AccesoService } from './acceso.service';
 import type { AccionFotos, EntidadFotos } from '../../generated/prisma/enums';
 import type { UsuarioAutenticado } from '../auth/tipos';
 
@@ -49,7 +50,10 @@ export interface EventoFotosNuevo {
 
 @Injectable()
 export class AuditoriaFotosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly acceso: AccesoService,
+  ) {}
 
   /**
    * Escribe un evento.
@@ -130,7 +134,28 @@ export class AuditoriaFotosService {
    * esto es una carpeta viva, donde lo que se consulta es «qué ha pasado
    * últimamente».
    */
-  async deCarpeta(carpetaId: number, limite = 200) {
+  async deCarpeta(
+    usuario: UsuarioAutenticado,
+    carpetaId: number,
+    limite = 200,
+  ) {
+    // ⚠️ Pide LECTURA sobre la carpeta, y no un nivel global, por dos
+    // razones. La primera es que el hilo de §23 es para quien trabaja
+    // dentro: «¿qué ha pasado aquí últimamente?» es la pregunta del
+    // supervisor, no la del administrador.
+    //
+    // La segunda es la que importa: sin esta línea la bitácora era un
+    // CANAL LATERAL que rodeaba la regla central del módulo. Un supervisor
+    // recibía 404 «no existe o no tienes acceso» en `GET /fotos/carpeta/152`
+    // y, pidiendo `GET /fotos/auditoria/carpeta/152`, leía su historia
+    // entera —quién la creó, qué se subió, a quién se le compartió—. Se
+    // reprodujo contra la API con una cuenta real antes de escribir esto.
+    //
+    // Delegando en `exigirPermiso` la negativa vuelve a ser el MISMO 404
+    // del resto del módulo, sin escribir aquí un segundo texto que se
+    // quedaría corto el día que cambie el otro.
+    await this.acceso.exigirPermiso(usuario, carpetaId, 'LECTURA');
+
     return this.prisma.eventoFotos.findMany({
       where: { carpetaId },
       orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
@@ -154,15 +179,30 @@ export class AuditoriaFotosService {
    * cuándo», que es la pregunta que §23 dice que HVC necesita contestar—.
    * Pagina por cursor, como la galería: la bitácora solo crece.
    */
-  async consultar(filtros: {
-    usuarioId?: number;
-    accion?: AccionFotos;
-    entidad?: EntidadFotos;
-    desde?: string;
-    hasta?: string;
-    cursor?: number;
-    limite?: number;
-  }) {
+  async consultar(
+    usuario: UsuarioAutenticado,
+    filtros: {
+      usuarioId?: number;
+      accion?: AccionFotos;
+      entidad?: EntidadFotos;
+      desde?: string;
+      hasta?: string;
+      cursor?: number;
+      limite?: number;
+    },
+  ) {
+    // La consulta general NO cuelga de ninguna carpeta: barre el módulo
+    // entero, así que no hay permiso de carpeta que pueda acotarla y el
+    // mínimo tiene que ser un nivel global. ADMIN_GLOBAL y no LECTURA_GLOBAL
+    // porque §23 la describe como la herramienta del administrador, es el
+    // mismo mínimo que ya exige administrar plantillas en este mismo
+    // controller, y es lo que el frontend viene afirmando desde siempre en
+    // `esAdminFotos`. Antes no exigía NADA: bastaba tener el módulo.
+    if (!this.acceso.tieneNivelMinimo(usuario, 'ADMIN_GLOBAL'))
+      throw new ForbiddenException(
+        'Solo un administrador de Fotos puede consultar la bitácora del módulo.',
+      );
+
     const limite = Math.min(filtros.limite ?? 50, 200);
 
     const where = {

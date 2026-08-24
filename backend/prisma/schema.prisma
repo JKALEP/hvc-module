@@ -243,12 +243,25 @@ enum PermisoCarpeta {
   SIN_ACCESO
 }
 
-/// Una carpeta corriente o una que representa un EQUIPO del catálogo (§12).
+/// Una carpeta corriente o una que representa un EQUIPO.
 ///
 /// Es un tipo en la misma tabla y no un modelo aparte porque, para
 /// navegar, un equipo es una carpeta más: tiene madre, tiene ruta, se
-/// comparte igual y cuelga de ella lo mismo. Lo único que añade es a qué
-/// equipo del catálogo apunta.
+/// comparte igual y cuelga de ella lo mismo.
+///
+/// ⚠️ **Ya no apunta al catálogo de Gestión de Equipos.** Hasta la Fase 1a
+/// de «Gestión de contenido» esto llevaba un `equipoId` con FK al catálogo
+/// —§12 de la especificación de Fotos— y un CHECK que exigía el par
+/// (`tipo = EQUIPO`) ⇔ (`equipoId` no nulo). Se retiró entero: el flujo
+/// cruzado (elegir organización → buscar equipo → elegir) generaba
+/// fricción real en obra, y se verificó contra las dos bases que NINGUNA
+/// carpeta llegó a enlazarse. La información del equipo pasa a ser propia
+/// de Fotos y configurable — ver §5 de
+/// `docs/FOTOS_GESTION_CONTENIDO_REQUERIMIENTOS.md`.
+///
+/// Hoy `EQUIPO` es, por tanto, solo un marcador: cambia el icono en el
+/// explorador y es lo único donde §13 admite crear tareas. Los campos
+/// configurables llegan en la Fase 1b.
 enum TipoCarpetaFotos {
   CARPETA
   EQUIPO
@@ -270,19 +283,6 @@ model CarpetaFotos {
 
   tipo TipoCarpetaFotos @default(CARPETA)
 
-  /// A qué equipo del catálogo de Gestión de Equipos representa esta
-  /// carpeta. Va con `tipo = EQUIPO` y solo con él, y eso lo hace cumplir
-  /// un CHECK que añade la migración a mano —`carpetas_fotos_equipo_segun_tipo_chk`—
-  /// porque Prisma no sabe declarar condiciones entre columnas. Nada en
-  /// este archivo delata que el CHECK existe: está aquí escrito.
-  ///
-  /// Es una FK y NO una copia de sus datos: el equipo del que se
-  /// fotografía una inspección es el mismo que ya está registrado allá.
-  /// Fotos nunca crea equipos por su cuenta —los referencia— y por eso
-  /// el borrado es Restrict: dar de baja un equipo que tiene fotos
-  /// documentadas tiene que fallar, no llevárselas por delante.
-  equipoId Int?
-
   /// Quien la creó (§6). Obligatorio y con borrado Restrict: es uno de
   /// los seis escalones de §25, y una carpeta sin dueño dejaría ese
   /// escalón sin respuesta.
@@ -300,7 +300,6 @@ model CarpetaFotos {
 
   padre        CarpetaFotos?       @relation("CarpetaFotosJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
   hijas        CarpetaFotos[]      @relation("CarpetaFotosJerarquia")
-  equipo       Equipo?             @relation("CarpetasDeEquipo", fields: [equipoId], references: [id], onDelete: Restrict)
   propietario  Usuario             @relation("CarpetasFotosPropias", fields: [propietarioId], references: [id], onDelete: Restrict)
   albumes      AlbumFotos[]
   tareas       TareaFotos[]
@@ -308,14 +307,212 @@ model CarpetaFotos {
   invitaciones InvitacionCarpeta[]
   comentarios  ComentarioFotos[]
   eventos      EventoFotos[]
+  /// Los valores de los campos configurables, cuando es de tipo EQUIPO.
+  valoresCampo ValorCampoFotos[]
 
   // Sin dos hermanas con el mismo nombre bajo la misma madre.
   @@unique([parentId, nombre])
   @@index([parentId])
   @@index([ruta])
-  @@index([equipoId])
   @@index([propietarioId])
   @@map("carpetas_fotos")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Campos configurables de una carpeta de tipo EQUIPO (Fase 1b)
+//
+// Sustituyen al enlace con el catálogo de Gestión de Equipos: la
+// información del equipo es ahora PROPIA de Fotos y la define un
+// ADMIN_GLOBAL sin tocar código, igual que los catálogos de Costos.
+//
+// Es un EAV, y eso es una decisión con coste: consultar «todos los equipos
+// marca X» exige pasar por `valores_campo_fotos` en vez de por una columna.
+// Se acepta porque el requerimiento es explícito —los campos los añade
+// quien administra, no un programador— y porque este módulo NUNCA consulta
+// equipos por sus atributos: navega por el árbol de carpetas.
+//
+// El molde es `DefinicionCampo` + `ValorCampoEquipo` de Gestión de Equipos,
+// que funciona. Con DOS diferencias deliberadas:
+//
+//   · **Sin `organizacionId`.** Fotos no tiene organizaciones —es justo lo
+//     que se acaba de quitar—, así que las definiciones son globales al
+//     módulo: un solo juego de campos para todas las carpetas de equipo.
+//     Por eso `clave` es única a secas y no por organización.
+//
+//   · **Sin `obligatorio`.** En Equipos existe; aquí NO, a propósito: un
+//     campo obligatorio puede trabar la creación de una carpeta de equipo
+//     en obra, con el móvil en la mano y sin el dato a mano. Todos los
+//     campos son siempre opcionales. No es un olvido — es la regla.
+// ─────────────────────────────────────────────────────────────
+
+/// Los siete tipos de campo, y son SIETE a propósito.
+///
+/// Gestión de Equipos tiene quince; aquí se tomó el subconjunto que HVC
+/// pidió, porque cada tipo cuesta su rama de validación y su control en el
+/// formulario. Añadir uno es ampliar este enum Y `valor-campo-fotos.service`,
+/// que hace un `switch` exhaustivo sobre él —así el compilador obliga a
+/// decidir cómo se valida antes de que el tipo exista en la base—.
+///
+/// `NUMERO` es uno solo y no el par entero/decimal de Equipos: allí la
+/// distinción evita que un NUMERO_ENTERO viva en una columna con decimales,
+/// y aquí no hay ningún caso que la pida.
+enum TipoCampoFotos {
+  TEXTO
+  TEXTO_LARGO
+  NUMERO
+  FECHA
+  BOOLEANO
+  LISTA
+  /// Una imagen suelta —la placa del equipo, su identificación—, NO una
+  /// fila de `Foto`. Es la decisión importante de este bloque: una `Foto`
+  /// es EVIDENCIA de trabajo y por eso vive en la galería, se comenta,
+  /// cuenta en «12 fotos» y se etiqueta. Esto no es evidencia: es un dato
+  /// del equipo que da la casualidad de ser una imagen. Guardarlo como
+  /// `Foto` lo habría metido en todo lo anterior sin quererlo.
+  FOTO
+}
+
+/// Un campo que el ADMIN_GLOBAL definió para las carpetas de tipo EQUIPO.
+model DefinicionCampoFotos {
+  id     Int            @id @default(autoincrement())
+  nombre String
+  /// Slug estable ("numero_de_serie"). Sobrevive a que se renombre el campo
+  /// visible, así que quien guardó una referencia a la clave no se rompe.
+  clave  String         @unique
+  tipo   TipoCampoFotos
+  orden  Int            @default(0)
+
+  /// Visibilidad, NO borrado. Un campo inactivo deja de pedirse en el
+  /// formulario, pero sus valores ya capturados siguen mostrándose en la
+  /// ficha del equipo: son datos que alguien tomó en obra.
+  ///
+  /// Es lo que hace que borrar de verdad sea excepcional —solo cuando
+  /// nadie lo usa— y no la vía normal. Mismo criterio que `EstadoCatalogo`
+  /// en Costos y que `DefinicionCampo.activo` en Equipos.
+  activo Boolean        @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  opciones OpcionCampoFotos[]
+  valores  ValorCampoFotos[]
+
+  @@index([orden])
+  @@map("definiciones_campo_fotos")
+}
+
+/// Un valor posible de un campo de tipo LISTA.
+model OpcionCampoFotos {
+  id           Int     @id @default(autoincrement())
+  definicionId Int
+  etiqueta     String
+  orden        Int     @default(0)
+  activo       Boolean @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  definicion DefinicionCampoFotos @relation(fields: [definicionId], references: [id], onDelete: Cascade)
+  /// Restrict: una opción elegida por alguna carpeta no se borra —dejaría
+  /// el valor apuntando al vacío—. Para retirarla del formulario está
+  /// `activo`, igual que en la definición.
+  elegidaEn  ValorCampoFotos[]    @relation("OpcionElegidaFotos")
+
+  @@unique([definicionId, etiqueta])
+  @@index([definicionId, orden])
+  @@map("opciones_campo_fotos")
+}
+
+/// Lo que UNA carpeta de tipo EQUIPO tiene rellenado en UN campo.
+model ValorCampoFotos {
+  id           Int @id @default(autoincrement())
+  carpetaId    Int
+  definicionId Int
+
+  /// Columnas TIPADAS y no un `String` para todo: así la base sigue
+  /// validando lo que guarda —una fecha es una fecha— y se puede indexar
+  /// por el tipo que toca. Es el mismo reparto de `ValorCampoEquipo`.
+  valorTexto    String?
+  /// (14,4) para cubrir cualquier magnitud del catálogo sin decidir ahora
+  /// si el campo es dinero, potencia o un número de serie numérico.
+  valorNumero   Decimal?  @db.Decimal(14, 4)
+  /// `@db.Date`: es un día de calendario —fecha de instalación, de última
+  /// revisión—, no un instante. Regla del proyecto, se compara en UTC.
+  valorFecha    DateTime? @db.Date
+  valorBooleano Boolean?
+  /// Solo para LISTA.
+  opcionId      Int?
+
+  /// Solo para FOTO: las claves en R2, NUNCA una URL firmada — el bucket
+  /// es privado y los enlaces caducan en minutos. Van las dos juntas o
+  /// ninguna, y lo valida el service.
+  ///
+  /// UNA sola imagen por campo: por eso son dos columnas aquí y no una
+  /// tabla aparte. Si hicieran falta varias, el `@@unique` de abajo es lo
+  /// primero que habría que romper.
+  claveImagen    String?
+  claveMiniatura String?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  /// Cascade: los valores son datos DE la carpeta, no contenido colgado de
+  /// ella —a diferencia de álbumes e hijas, que la bloquean con Restrict—.
+  /// ⚠️ Pero un valor de tipo FOTO tiene objetos en R2, y la base no sabe
+  /// borrarlos: `CarpetaService.eliminar` los retira ANTES de borrar la
+  /// carpeta. Sin eso, cada equipo eliminado dejaría dos huérfanos.
+  carpeta    CarpetaFotos         @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  definicion DefinicionCampoFotos @relation(fields: [definicionId], references: [id], onDelete: Cascade)
+  opcion     OpcionCampoFotos?    @relation("OpcionElegidaFotos", fields: [opcionId], references: [id], onDelete: Restrict)
+
+  /// Un valor por campo y por carpeta. Es lo que hace del EAV una fuente de
+  /// verdad y no una bitácora de intentos.
+  @@unique([carpetaId, definicionId])
+  @@index([definicionId, valorTexto])
+  @@index([definicionId, valorNumero])
+  @@index([definicionId, valorFecha])
+  @@index([definicionId, opcionId])
+  @@map("valores_campo_fotos")
+}
+
+/// Los colores que puede llevar un tipo de carpeta en el explorador.
+///
+/// Enum y no texto libre a propósito. «Configurable» aquí significa que el
+/// administrador elige QUÉ color usa cada tipo sin tocar código —eso vive en
+/// `ConfiguracionColorCarpeta`—, pero el conjunto de colores POSIBLES no
+/// puede ser abierto: Tailwind solo genera las clases que ve escritas en el
+/// código, así que un `bg-${loQueDigaLaBase}` sencillamente no existiría en
+/// el CSS compilado. Con un enum, la base valida lo que guarda y el `Record`
+/// del frontend no compila hasta que el color nuevo tenga su clase.
+///
+/// Añadir un color son TRES sitios y los tres los vigila el compilador:
+/// este enum, sus cuatro tokens en `index.css` y el mapa de clases del
+/// frontend.
+enum ColorCarpetaFotos {
+  AMARILLO
+  CELESTE
+}
+
+/// Qué color lleva cada tipo de carpeta. Dos filas, y son configuración.
+///
+/// Tabla propia y tipada en vez de un `clave/valor` genérico porque la clave
+/// es un ENUM: añadir un tipo de carpeta obliga a decidir su color, igual
+/// que un `Record` completo en TypeScript. Un k/v de texto no puede
+/// expresarlo.
+///
+/// ⚠️ Es un valor por TIPO, no por carpeta. No hay override individual a
+/// propósito: el color sirve para distinguir de un vistazo un equipo de una
+/// carpeta entre muchas, y si cada una pudiera llevar el suyo dejaría de
+/// significar nada. Si algún día hace falta, es una columna en
+/// `CarpetaFotos` y una regla de precedencia — no un cambio de esta tabla.
+model ConfiguracionColorCarpeta {
+  id    Int               @id @default(autoincrement())
+  tipo  TipoCarpetaFotos  @unique
+  color ColorCarpetaFotos
+
+  actualizadoEn DateTime @updatedAt
+
+  @@map("configuracion_color_carpeta")
 }
 
 /// Un álbum de fotos dentro de una carpeta (§16).
@@ -681,10 +878,14 @@ enum EntidadFotos {
   INVITACION
   PLANTILLA
   IMPORTACION
-  /// El atajo de §12: un equipo creado DESDE Fotos. La fila vive en el
-  /// catálogo de Gestión de Equipos, que no tiene por qué registrar de
-  /// dónde vino; el hecho es del flujo de Fotos y lo anota Fotos.
+  /// ⚠️ Del atajo de §12 —un equipo creado DESDE Fotos en el catálogo de
+  /// Gestión de Equipos—, retirado en la Fase 1a. El valor se conserva
+  /// porque hay filas históricas que lo usan; nada nuevo lo escribe.
   EQUIPO
+  /// Una DEFINICIÓN de campo configurable (Fase 1b): el catálogo que el
+  /// ADMIN_GLOBAL configura, no el valor que rellena un supervisor. Los
+  /// valores se auditan como EDICION de su CARPETA, que es donde se leen.
+  CAMPO_EQUIPO
 }
 
 enum AccionFotos {
@@ -1371,13 +1572,6 @@ model Equipo {
   ordenesCompra OrdenCompra[]
   historial     EventoHistorial[]
 
-  // Relación inversa del módulo Fotos (§12): las carpetas de tipo EQUIPO
-  // que apuntan a este equipo. Es la ÚNICA huella de Fotos en este
-  // modelo, y va en un solo sentido —Fotos referencia, jamás crea ni
-  // edita—. El Restrict está del otro lado: borrar un equipo con fotos
-  // documentadas falla en vez de llevárselas por delante.
-  carpetasFotos CarpetaFotos[] @relation("CarpetasDeEquipo")
-
   @@unique([organizacionId, codigoInterno])
   @@index([organizacionId, nodoId])
   @@index([nodoId])
@@ -1518,8 +1712,14 @@ model Cotizacion {
   ordenesCompra OrdenCompra[]
 
   @@index([organizacionId, estado])
-  @@index([equipoId])
   @@index([incidenciaId])
+  // Declarado tarde: el índice YA EXISTE en la base desde
+  // `20260813170000_lineas_cotizacion_oc`, pero nunca se escribió aquí.
+  // Se detectó al generar la migración de «Fotos independiente de
+  // Equipos», donde Prisma quiso BORRARLO por creerlo drift. La
+  // convención del repo es `@@index` en cada FK, así que la base tenía
+  // razón y el que mentía era este archivo.
+  @@index([equipoId])
   @@map("cotizaciones")
 }
 

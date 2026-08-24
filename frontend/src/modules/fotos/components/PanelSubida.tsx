@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { UploadIcon, XIcon } from 'lucide-react';
 
 import { Card, CardContent } from '@/shared/ui/card';
@@ -15,24 +15,42 @@ function formatPeso(bytes: number): string {
 }
 
 /**
- * Subir fotos a una carpeta.
+ * Subir fotos a una carpeta (crea un álbum nuevo automáticamente).
  *
- * No hay paso previo de crear ni nombrar nada: subir ES la acción, y el
- * lote se crea solo. La descripción es del lote entero — en obra se
- * documenta un momento, no cada imagen — y la etiqueta lo dice para que
- * nadie busque un campo por foto que no existe.
+ * Ahora con PREVIEW real: cada archivo elegido se ve como miniatura, no
+ * solo como texto «foto1111.png». Cada miniatura tiene su propia X para
+ * quitarla antes de subir, sin tener que vaciar la selección entera.
  */
 export function PanelSubida({ sedeId }: { sedeId: number }) {
   const subir = useSubirFotos();
   const [archivos, setArchivos] = useState<File[]>([]);
   const [descripcion, setDescripcion] = useState('');
-  // El <input type="file"> no se puede vaciar por estado: se limpia por ref.
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Una URL de objeto por archivo, para la miniatura. Se recrean solo
+  // cuando cambia la lista, y se liberan al desmontar / reemplazar.
+  const [previews, setPreviews] = useState<string[]>([]);
+  useEffect(() => {
+    const urls = archivos.map((f) => URL.createObjectURL(f));
+    setPreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [archivos]);
 
   const limpiar = () => {
     setArchivos([]);
     setDescripcion('');
     if (inputRef.current) inputRef.current.value = '';
+  };
+
+  const quitarUno = (index: number) => {
+    setArchivos((prev) => prev.filter((_, i) => i !== index));
+    // El input nativo no sabe que quitamos uno de su FileList: si se vuelve
+    // a soltar los mismos archivos después, hay que limpiar su valor.
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  const agregarMas = (nuevos: File[]) => {
+    setArchivos((prev) => [...prev, ...nuevos]);
   };
 
   const enviar = () => {
@@ -53,7 +71,7 @@ export function PanelSubida({ sedeId }: { sedeId: number }) {
               type="file"
               multiple
               accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
-              onChange={(e) => setArchivos(Array.from(e.target.files ?? []))}
+              onChange={(e) => agregarMas(Array.from(e.target.files ?? []))}
               className="block w-full cursor-pointer rounded-lg border border-input bg-background text-sm text-muted-foreground file:mr-3 file:cursor-pointer file:border-0 file:bg-muted file:px-3 file:py-2 file:text-sm file:font-medium file:text-foreground"
             />
             <p className="text-xs text-muted-foreground">
@@ -81,6 +99,37 @@ export function PanelSubida({ sedeId }: { sedeId: number }) {
           </div>
         </div>
 
+        {/* Preview real, no solo el nombre del archivo. Cada miniatura
+            tiene su propia X para quitarla antes de subir. */}
+        {archivos.length > 0 && (
+          <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6">
+            {archivos.map((f, i) => (
+              <div
+                key={`${f.name}-${f.lastModified}-${i}`}
+                className="group relative aspect-square overflow-hidden rounded-lg border border-border bg-muted"
+              >
+                <img
+                  src={previews[i]}
+                  alt={f.name}
+                  className="size-full object-cover"
+                />
+                <button
+                  type="button"
+                  aria-label={`Quitar ${f.name}`}
+                  title={`Quitar ${f.name}`}
+                  onClick={() => quitarUno(i)}
+                  className="absolute top-1 right-1 flex size-5 items-center justify-center rounded-full bg-black/60 text-white opacity-0 outline-none transition-opacity hover:bg-destructive group-hover:opacity-100 focus-visible:opacity-100"
+                >
+                  <XIcon className="size-3" />
+                </button>
+                <span className="absolute inset-x-0 bottom-0 truncate bg-black/50 px-1 py-0.5 text-[10px] text-white">
+                  {formatPeso(f.size)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
           <p className="text-sm text-muted-foreground tabular-nums">
             {archivos.length === 0
@@ -93,7 +142,7 @@ export function PanelSubida({ sedeId }: { sedeId: number }) {
             {archivos.length > 0 && !subir.isPending && (
               <Button variant="ghost" size="sm" onClick={limpiar}>
                 <XIcon />
-                Quitar
+                Quitar todo
               </Button>
             )}
             <Button

@@ -230,8 +230,8 @@ export function DialogoImportar({
                   )}
 
                   {h.problemas.length > 0 && (
-                    <div className="flex items-start gap-2 rounded-md bg-amber-50 px-2.5 py-2 dark:bg-amber-500/10">
-                      <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-500" />
+                    <div className="flex items-start gap-2 rounded-md bg-warning-soft px-2.5 py-2">
+                      <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-warning" />
                       <div className="space-y-0.5 text-xs whitespace-normal text-muted-foreground">
                         {h.problemas.slice(0, 5).map((p) => (
                           <p key={`${p.fila}-${p.motivo}`}>
@@ -315,7 +315,7 @@ export function DialogoImportar({
                 className="space-y-1 rounded-lg border border-border p-3"
               >
                 <p className="flex items-center gap-2 font-medium text-foreground">
-                  <CheckCircle2Icon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                  <CheckCircle2Icon className="size-4 text-success" />
                   {r.hoja}
                 </p>
                 <p className="text-sm text-muted-foreground">
@@ -325,7 +325,7 @@ export function DialogoImportar({
                     ` · ${r.personasOmitidas.length} omitida(s)`}
                 </p>
                 {r.filasConProblema.length > 0 && (
-                  <div className="space-y-0.5 text-xs whitespace-normal text-amber-700 dark:text-amber-500">
+                  <div className="space-y-0.5 text-xs whitespace-normal text-warning-soft-foreground">
                     {r.filasConProblema.map((p) => (
                       <p key={`${p.fila}-${p.motivo}`}>
                         Fila {p.fila}: {p.motivo}

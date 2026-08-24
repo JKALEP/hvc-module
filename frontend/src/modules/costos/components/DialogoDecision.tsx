@@ -11,9 +11,9 @@ import {
 } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
 import { Spinner } from '@/shared/ui/spinner';
-import { CLASES_TEXTAREA } from './Campo';
 import { formatPrecio } from '@/shared/lib/format';
 import type { DecisionAprobacion } from '@/modules/costos/types';
+import { Textarea } from '@/shared/ui/textarea';
 
 /** Lo mínimo que hay que escribir cuando el motivo es obligatorio. */
 const MINIMO_MOTIVO = 10;
@@ -143,12 +143,11 @@ export function DialogoDecision({
             {cfg.etiquetaMotivo}
             {cfg.exigeMotivo && <span className="text-destructive"> *</span>}
           </label>
-          <textarea
+          <Textarea
             value={comentario}
             onChange={(e) => setComentario(e.target.value)}
             rows={4}
             autoFocus
-            className={CLASES_TEXTAREA}
           />
           <p className="text-xs text-muted-foreground">
             {cfg.exigeMotivo && !valido

@@ -258,7 +258,7 @@ export function Invitacion() {
                     text-2xl
                     font-bold
                     tracking-tight
-                    text-blue-950
+                    text-auth
                   "
                 >
                   Invitación no disponible
@@ -291,9 +291,9 @@ export function Invitacion() {
                 mt-6
                 h-11
                 w-full
-                bg-blue-950
+                bg-auth
                 text-base
-                hover:bg-blue-900
+                hover:bg-auth-hover
               "
               onClick={() => navegar('/login')}
             >
@@ -412,7 +412,7 @@ export function Invitacion() {
                     text-2xl
                     font-bold
                     tracking-tight
-                    text-blue-950
+                    text-auth
                   "
                 >
                   Bienvenido a HVC
@@ -442,8 +442,8 @@ export function Invitacion() {
                 mt-6
                 rounded-xl
                 border
-                border-blue-100
-                bg-blue-50/70
+                border-auth-soft
+                bg-auth-soft/70
                 px-4
                 py-3.5
               "
@@ -460,8 +460,8 @@ export function Invitacion() {
                     items-center
                     justify-center
                     rounded-lg
-                    bg-blue-100
-                    text-blue-900
+                    bg-auth-soft
+                    text-auth-hover
                   "
                 >
                   <ShieldCheckIcon className="size-4" />
@@ -474,7 +474,7 @@ export function Invitacion() {
                     className="
                       text-sm
                       font-semibold
-                      text-blue-950
+                      text-auth
                     "
                   >
                     Tienes una invitación
@@ -485,7 +485,7 @@ export function Invitacion() {
                       mt-0.5
                       text-xs
                       leading-5
-                      text-blue-900/70
+                      text-auth-hover/70
                     "
                   >
                     {datos.invitadoPor} compartió{' '}
@@ -499,7 +499,7 @@ export function Invitacion() {
                     className="
                       mt-1
                       text-xs
-                      text-blue-900/60
+                      text-auth-hover/60
                     "
                   >
                     Esta invitación caduca el{' '}
@@ -726,7 +726,7 @@ export function Invitacion() {
                         gap-1.5
                         text-xs
                         font-medium
-                        text-red-600
+                        text-destructive
                       "
                     >
                       <TriangleAlertIcon className="size-3.5" />
@@ -804,9 +804,9 @@ export function Invitacion() {
                       ${
                         passwordsNoCoinciden
                           ? `
-                            border-red-500
-                            focus-visible:border-red-500
-                            focus-visible:ring-red-500/20
+                            border-destructive
+                            focus-visible:border-destructive
+                            focus-visible:ring-destructive/20
                           `
                           : ''
                       }
@@ -862,7 +862,7 @@ export function Invitacion() {
                       gap-1.5
                       text-xs
                       font-medium
-                      text-red-600
+                      text-destructive
                     "
                   >
 
@@ -883,7 +883,7 @@ export function Invitacion() {
                     className="
                       text-xs
                       font-medium
-                      text-green-600
+                      text-success
                     "
                   >
                     Las contraseñas coinciden.
@@ -904,9 +904,9 @@ export function Invitacion() {
                   mt-2
                   h-11
                   w-full
-                  bg-blue-950
+                  bg-auth
                   text-base
-                  hover:bg-blue-900
+                  hover:bg-auth-hover
                 "
                 disabled={
                   faltaAlgo ||
@@ -943,7 +943,7 @@ export function Invitacion() {
                 block
                 text-sm
                 font-medium
-                text-blue-900
+                text-auth-hover
                 underline-offset-4
                 hover:underline
               "

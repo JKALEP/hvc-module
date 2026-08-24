@@ -141,6 +141,7 @@ export function FilaFicha({
             variant="ghost"
             size="icon-sm"
             aria-label="Duplicar fila"
+            title="Duplicar fila"
             onClick={() => onDuplicar(ficha.id)}
           >
             <CopyIcon />
@@ -149,6 +150,7 @@ export function FilaFicha({
             variant="ghost"
             size="icon-sm"
             aria-label="Eliminar fila"
+            title="Eliminar fila"
             onClick={() => onEliminar(ficha.id)}
           >
             <Trash2Icon />

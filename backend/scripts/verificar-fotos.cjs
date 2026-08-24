@@ -184,34 +184,31 @@ async function fase1(db, token) {
 
   titulo('FASE 1 · los CHECK que Prisma no declara');
 
-  const sinEquipo = await debeFallar(
-    db,
-    `INSERT INTO carpetas_fotos (nombre,ruta,tipo,"propietarioId","actualizadoEn")
-     VALUES ('__test__','999999','EQUIPO',1,NOW())`,
+  // ⚠️ El módulo pasó de TRES CHECK a DOS en la Fase 1a de «Gestión de
+  // contenido». Aquí había tres comprobaciones más sobre
+  // `carpetas_fotos_equipo_segun_tipo_chk` —EQUIPO sin equipo, CARPETA con
+  // equipo, y la FK contra un equipo inexistente—, y se fueron con él al
+  // deshacerse el enlace con Gestión de Equipos.
+  //
+  // En su lugar se comprueba lo contrario, que es lo que ahora hay que
+  // sostener: que el CHECK YA NO ESTÁ y que una carpeta de tipo EQUIPO se
+  // inserta sin necesitar ninguna otra columna. Sin esto, una migración que
+  // lo devolviera por descuido pasaría inadvertida.
+  const checkRetirado = await db.query(
+    `SELECT 1 FROM pg_constraint WHERE conname='carpetas_fotos_equipo_segun_tipo_chk'`,
   );
   check(
-    'carpeta EQUIPO sin equipoId se rechaza',
-    sinEquipo !== null && /equipo_segun_tipo/.test(sinEquipo),
+    'el CHECK carpetas_fotos_equipo_segun_tipo_chk se retiró',
+    checkRetirado.rowCount === 0,
   );
 
-  const conEquipoDeMas = await debeFallar(
-    db,
-    `INSERT INTO carpetas_fotos (nombre,ruta,tipo,"equipoId","propietarioId","actualizadoEn")
-     VALUES ('__test__','999999','CARPETA',1,1,NOW())`,
+  const columnaRetirada = await db.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_name='carpetas_fotos' AND column_name='equipoId'`,
   );
   check(
-    'carpeta CARPETA con equipoId se rechaza',
-    conEquipoDeMas !== null && /equipo_segun_tipo/.test(conEquipoDeMas),
-  );
-
-  const equipoFantasma = await debeFallar(
-    db,
-    `INSERT INTO carpetas_fotos (nombre,ruta,tipo,"equipoId","propietarioId","actualizadoEn")
-     VALUES ('__test__','999999','EQUIPO',999999,1,NOW())`,
-  );
-  check(
-    'carpeta EQUIPO apuntando a un equipo inexistente se rechaza',
-    equipoFantasma !== null && /equipoId_fkey/.test(equipoFantasma),
+    'la columna carpetas_fotos.equipoId se retiró',
+    columnaRetirada.rowCount === 0,
   );
 
   const comentarioHuerfano = await debeFallar(
@@ -262,7 +259,6 @@ async function fase1(db, token) {
     `ruta=${fila.ruta}`,
   );
   check('tipo por defecto CARPETA', fila.tipo === 'CARPETA');
-  check('equipoId null en una carpeta corriente', fila.equipoId === null);
 
   const hija = await api('POST', '/fotos/carpeta', token, {
     nombre: 'Frente 1',
@@ -302,70 +298,22 @@ async function fase1(db, token) {
 
 const CLAVE_PRUEBA = 'Verificar-Fase2!';
 
-const CODIGO_EQUIPO_PRUEBA = '__VERIF-CHILLER';
-const MARCA_EQUIPO_PRUEBA = '__VerifCarrier';
-
-/**
- * Un equipo real en el catálogo, para que la Fase 4 pruebe el enlace.
- *
- * Se crea por la ruta del propio módulo de Equipos (`@SoloSuperAdmin`), no
- * por la puerta de Fotos: aquí solo hace falta que EXISTA. La organización
- * necesita al menos un campo configurado para admitir equipos, así que se
- * añade uno de texto si no tiene ninguno.
- *
- * Devuelve null si no se pudo —una organización sin ubicaciones, por
- * ejemplo—, y entonces las comprobaciones que lo necesitan se anuncian como
- * omitidas en vez de pasar en falso.
- */
-async function sembrarEquipoDePrueba(tokenAdmin, organizacionId) {
-  // Se REUTILIZA si ya está: `codigoInterno` es único por organización, así
-  // que sembrarlo dos veces choca. Y no se borra al final —la carpeta
-  // enlazada lo bloquea por el Restrict, que es justo lo que se prueba—, de
-  // modo que queda UNA fila en el catálogo entre corridas, no una por vez.
-  const yaEsta = await api(
-    'GET',
-    `/equipos/organizacion/${organizacionId}/equipo?q=${CODIGO_EQUIPO_PRUEBA}`,
-    tokenAdmin,
-  );
-  const previo = (yaEsta.datos?.equipos ?? []).find(
-    (e) => e.codigoInterno === CODIGO_EQUIPO_PRUEBA,
-  );
-  if (previo) return { id: previo.id };
-
-  const estructura = await api(
-    'GET',
-    `/equipos/organizacion/${organizacionId}/estructura`,
-    tokenAdmin,
-  );
-  const nodo = (estructura.datos ?? [])[0];
-  if (!nodo) return null;
-
-  const campos = await api(
-    'GET',
-    `/equipos/organizacion/${organizacionId}/campo`,
-    tokenAdmin,
-  );
-  let clave = (campos.datos ?? [])[0]?.clave;
-  if (!clave) {
-    const creado = await api('POST', '/equipos/campo', tokenAdmin, {
-      organizacionId,
-      nombre: 'Marca',
-      clave: 'marca',
-      tipo: 'TEXTO',
-      orden: 0,
-    });
-    clave = creado.datos?.clave;
-    if (!clave) return null;
-  }
-
-  const equipo = await api('POST', '/equipos/equipo', tokenAdmin, {
-    organizacionId,
-    nodoId: nodo.id,
-    codigoInterno: CODIGO_EQUIPO_PRUEBA,
-    valores: { [clave]: MARCA_EQUIPO_PRUEBA },
-  });
-  return equipo.datos?.id ? { id: equipo.datos.id } : null;
-}
+// ⚠️ Aquí vivía `sembrarEquipoDePrueba`, con sus dos constantes
+// (`__VERIF-CHILLER`, `__VerifCarrier`).
+//
+// Creaba un equipo REAL en el catálogo de Gestión de Equipos —por la ruta
+// `@SoloSuperAdmin` de ese módulo— para que la Fase 4 probara el enlace de
+// §12, y las fases 5, 6 y 8 lo reutilizaban para poder tener una carpeta de
+// tipo EQUIPO. No se borraba al terminar: la carpeta enlazada lo bloqueaba
+// por el `Restrict`, que era justo una de las cosas que se comprobaban.
+//
+// Se retiró en la **Fase 1a de «Gestión de contenido»** junto con el enlace.
+// Y la corrida sale ganando por partida doble: ya no queda una fila
+// permanente en el catálogo de otro módulo entre corrida y corrida, y las
+// fases que necesitan una carpeta de equipo dejan de depender de que ese
+// catálogo tenga una organización con ubicaciones y campos configurados
+// —una precondición externa que, si no se cumplía, hacía que la Fase 5 se
+// OMITIERA en silencio y §13 se quedara sin probar—.
 
 /** Crea (o reutiliza) una cuenta de prueba y devuelve su token e id. */
 async function cuentaDePrueba(tokenAdmin, sufijo, permisos) {
@@ -1179,272 +1127,759 @@ async function fase3(db, tokenAdmin) {
 // ═════════════════════════════════════════════════════════════
 // FASE 4 — enlace de solo lectura con el catálogo de Equipos (§12)
 // ═════════════════════════════════════════════════════════════
-async function fase4(db, tokenAdmin) {
-  titulo('FASE 4 · la puerta al catálogo, y lo que NO abre');
+/** Sube UN archivo al campo `foto` (la subida de un campo de tipo FOTO). */
+async function subirUnaImagen(ruta, token, buffer) {
+  const form = new FormData();
+  form.append('foto', new Blob([buffer], { type: 'image/jpeg' }), 'campo.jpg');
+  const r = await fetch(`${API}${ruta}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  let datos = null;
+  try {
+    datos = await r.json();
+  } catch {
+    /* sin cuerpo */
+  }
+  return { estado: r.status, datos };
+}
 
+/**
+ * FASE 4 · los campos configurables del EQUIPO (Fase 1b).
+ *
+ * ⚠️ Este hueco lo ocupaban 18 comprobaciones sobre `/fotos/catalogo-equipos`,
+ * la puerta de Fotos al catálogo de Gestión de Equipos (§12). Se retiraron
+ * con el enlace en la Fase 1a y el número de fase se dejó libre a propósito
+ * para lo que ahora ocupa su sitio: la información del equipo, que pasó a
+ * ser PROPIA de Fotos y configurable sin tocar código.
+ *
+ * Las definiciones son GLOBALES al módulo —no cuelgan de ninguna carpeta—,
+ * así que esta fase limpia las suyas al terminar o quedarían en la
+ * configuración real. Y se limpian DESPUÉS de las carpetas: un campo con
+ * valores no se puede borrar, que es justo una de las reglas que se prueba.
+ */
+async function fase4(db, tokenAdmin) {
+  titulo('FASE 4 · campos configurables del equipo — definiciones');
+
+  const admin = await cuentaDePrueba(tokenAdmin, 'f4admin', [
+    { modulo: 'FOTOS', nivelFotos: 'ADMIN_GLOBAL' },
+  ]);
   const editorG = await cuentaDePrueba(tokenAdmin, 'f4editor', [
     { modulo: 'FOTOS', nivelFotos: 'EDITOR_GLOBAL' },
   ]);
   const supervisor = await cuentaDePrueba(tokenAdmin, 'f4super', [
     { modulo: 'FOTOS' },
   ]);
-  if (!editorG || !supervisor) return;
+  if (!admin || !editorG || !supervisor) return;
 
-  const orgs = await api(
-    'GET',
-    '/fotos/catalogo-equipos/organizacion',
-    supervisor.token,
-  );
+  const camposCreados = [];
+  const marca = Date.now();
+
+  // Configurar los campos es de ADMIN_GLOBAL; usarlos, no.
+  const porEditor = await api('POST', '/fotos/campo', editorG.token, {
+    nombre: `NoDebe ${marca}`,
+    tipo: 'TEXTO',
+  });
   check(
-    'un supervisor de Fotos SÍ lista organizaciones por la puerta nueva',
-    orgs.estado === 200 && Array.isArray(orgs.datos),
-    `HTTP ${orgs.estado} · ${orgs.datos?.length ?? '?'} organizaciones`,
+    'un EDITOR_GLOBAL no configura campos: es administrar el módulo',
+    porEditor.estado === 403,
+    `HTTP ${porEditor.estado}`,
   );
+  const porSupervisor = await api('POST', '/fotos/campo', supervisor.token, {
+    nombre: `NoDebe2 ${marca}`,
+    tipo: 'TEXTO',
+  });
   check(
-    'y llegan solo id y nombre, no la fila entera',
-    (orgs.datos ?? []).every(
-      (o) => Object.keys(o).sort().join(',') === 'id,nombre',
-    ),
-    orgs.datos?.[0] ? Object.keys(orgs.datos[0]).join(',') : '(vacío)',
+    'un supervisor tampoco',
+    porSupervisor.estado === 403,
+    `HTTP ${porSupervisor.estado}`,
   );
 
-  // Lo que NO se abrió: el módulo de Equipos sigue cerrado a Fotos.
-  for (const [metodo, ruta, nombre] of [
-    ['GET', '/equipos/organizacion', 'listar organizaciones'],
-    ['POST', '/equipos/equipo', 'crear equipo'],
-    ['GET', '/equipos/organizacion/1/equipo', 'listar equipos'],
+  // Pero LEER la lista sí: hace falta para pintar el formulario.
+  const leeSupervisor = await api('GET', '/fotos/campo', supervisor.token);
+  check(
+    'un supervisor SÍ lista los campos: los necesita para el formulario',
+    leeSupervisor.estado === 200 && Array.isArray(leeSupervisor.datos),
+    `HTTP ${leeSupervisor.estado}`,
+  );
+
+  const tipoMalo = await api('POST', '/fotos/campo', admin.token, {
+    nombre: `Malo ${marca}`,
+    tipo: 'COLOR',
+  });
+  check(
+    'un tipo inventado se rechaza nombrando los válidos',
+    tipoMalo.estado === 400 && /TEXTO/.test(tipoMalo.datos?.message ?? ''),
+    `HTTP ${tipoMalo.estado}`,
+  );
+
+  const listaSinOpciones = await api('POST', '/fotos/campo', admin.token, {
+    nombre: `Lista vacia ${marca}`,
+    tipo: 'LISTA',
+  });
+  check(
+    'una LISTA sin opciones se rechaza: no habría nada que elegir',
+    listaSinOpciones.estado === 400,
+    `HTTP ${listaSinOpciones.estado}`,
+  );
+
+  const textoConOpciones = await api('POST', '/fotos/campo', admin.token, {
+    nombre: `Texto raro ${marca}`,
+    tipo: 'TEXTO',
+    opciones: ['a', 'b'],
+  });
+  check(
+    'un TEXTO con opciones se rechaza: no lleva',
+    textoConOpciones.estado === 400,
+    `HTTP ${textoConOpciones.estado}`,
+  );
+
+  // Los siete tipos, uno por uno.
+  const definiciones = {};
+  for (const [tipo, nombre] of [
+    ['TEXTO', `Marca ${marca}`],
+    ['TEXTO_LARGO', `Observaciones ${marca}`],
+    ['NUMERO', `Potencia ${marca}`],
+    ['FECHA', `Instalado ${marca}`],
+    ['BOOLEANO', `Operativo ${marca}`],
+    ['FOTO', `Placa ${marca}`],
   ]) {
-    // Sin body en GET: `fetch` lo rechaza en vez de ignorarlo.
-    const r = await api(
-      metodo,
-      ruta,
-      supervisor.token,
-      metodo === 'POST' ? {} : undefined,
-    );
+    const r = await api('POST', '/fotos/campo', admin.token, { nombre, tipo });
+    if (r.estado === 201) {
+      definiciones[tipo] = r.datos;
+      camposCreados.push(r.datos.id);
+    }
     check(
-      `${ruta} (${nombre}) sigue cerrado al supervisor de Fotos`,
-      r.estado === 403,
+      `se crea un campo de tipo ${tipo}`,
+      r.estado === 201,
       `HTTP ${r.estado}`,
     );
   }
 
-  const org = (orgs.datos ?? [])[0];
-  if (!org) {
-    console.log('  (sin organizaciones: el resto de la Fase 4 se omite)');
-    for (const c of [editorG, supervisor])
-      await api('DELETE', `/usuario/${c.id}`, tokenAdmin);
-    return;
+  const lista = await api('POST', '/fotos/campo', admin.token, {
+    nombre: `Refrigerante ${marca}`,
+    tipo: 'LISTA',
+    opciones: ['R-410A', 'R-32', 'R-22'],
+  });
+  if (lista.estado === 201) {
+    definiciones.LISTA = lista.datos;
+    camposCreados.push(lista.datos.id);
   }
-
-  // La Fase 4 se siembra sola: sin un equipo real se saltaban justo las
-  // comprobaciones del núcleo —el enlace y el Restrict— y la corrida daba
-  // todo en verde sin haber probado lo que importa.
-  const sembrado = await sembrarEquipoDePrueba(tokenAdmin, org.id);
-
-  const busca = await api(
-    'GET',
-    `/fotos/catalogo-equipos/organizacion/${org.id}/equipo?q=`,
-    supervisor.token,
-  );
   check(
-    'busca equipos dentro de una organización',
-    busca.estado === 200 && 'equipos' in (busca.datos ?? {}),
-    `HTTP ${busca.estado} · ${busca.datos?.total ?? '?'} equipos`,
+    'se crea una LISTA con sus tres opciones',
+    lista.estado === 201 && lista.datos?.opciones?.length === 3,
+    `HTTP ${lista.estado} · ${lista.datos?.opciones?.length} opcion(es)`,
   );
+
   check(
-    'y devuelve las columnas EAV para pintar la tabla',
-    Array.isArray(busca.datos?.columnas),
-    `${busca.datos?.columnas?.length ?? '?'} columnas`,
+    'la clave se deriva del nombre, sin tildes ni espacios',
+    /^[a-z0-9_]+$/.test(definiciones.TEXTO?.clave ?? ''),
+    definiciones.TEXTO?.clave,
   );
 
-  // La afirmación central de §12: no hizo falta búsqueda nueva porque la de
-  // Equipos ya mira el código Y los valores de texto. Se prueba por los dos
-  // caminos, porque marca y modelo NO son columnas: son EAV.
-  const porCodigo = await api(
-    'GET',
-    `/fotos/catalogo-equipos/organizacion/${org.id}/equipo?q=${CODIGO_EQUIPO_PRUEBA}`,
-    supervisor.token,
-  );
+  const repetido = await api('POST', '/fotos/campo', admin.token, {
+    nombre: `Marca ${marca}`,
+    tipo: 'TEXTO',
+  });
   check(
-    'busca por código interno',
-    (porCodigo.datos?.equipos ?? []).length > 0,
-    `${porCodigo.datos?.equipos?.length ?? 0} resultados`,
+    'dos campos con la misma clave se rechazan con 409',
+    repetido.estado === 409,
+    `HTTP ${repetido.estado}`,
   );
 
-  const porEav = await api(
-    'GET',
-    `/fotos/catalogo-equipos/organizacion/${org.id}/equipo?q=${MARCA_EQUIPO_PRUEBA}`,
-    supervisor.token,
-  );
-  check(
-    'y por un valor EAV (marca), que no es columna',
-    (porEav.datos?.equipos ?? []).length > 0,
-    `${porEav.datos?.equipos?.length ?? 0} resultados`,
-  );
-
-  const sinCoincidencia = await api(
-    'GET',
-    `/fotos/catalogo-equipos/organizacion/${org.id}/equipo?q=__nada__`,
-    supervisor.token,
-  );
-  check(
-    'y no inventa resultados',
-    (sinCoincidencia.datos?.equipos ?? []).length === 0,
-    `${sinCoincidencia.datos?.equipos?.length ?? 0} resultados`,
-  );
-
-  titulo('FASE 4 · el atajo de crear equipo, y su techo de nivel');
-
-  const sinNivel = await api(
-    'POST',
-    '/fotos/catalogo-equipos/equipo',
-    supervisor.token,
-    { organizacionId: org.id, nodoId: 1 },
-  );
-  check(
-    'sin nivel global NO se puede crear equipo desde Fotos',
-    sinNivel.estado === 403,
-    `HTTP ${sinNivel.estado}`,
-  );
-
-  // El EDITOR_GLOBAL sí pasa el techo de nivel. Si falla después, es por el
-  // contenido del equipo (nodo o campos), no por el permiso — y eso es lo
-  // que se comprueba: que la negativa YA no sea 403.
-  const conNivel = await api(
-    'POST',
-    '/fotos/catalogo-equipos/equipo',
-    editorG.token,
-    { organizacionId: org.id, nodoId: 999999 },
-  );
-  check(
-    'un EDITOR_GLOBAL pasa el permiso (falla por los datos, no por 403)',
-    conNivel.estado !== 403,
-    `HTTP ${conNivel.estado} · ${String(conNivel.datos?.message ?? '').slice(0, 70)}`,
-  );
-
-  titulo('FASE 4 · carpeta de tipo EQUIPO');
+  titulo('FASE 4 · rellenarlos es OTRO permiso, y solo en un EQUIPO');
 
   const raiz = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: `__verif_f4 ${Date.now()}`,
+    nombre: `__verif_f4 ${marca}`,
   });
   pendientesDeLimpiar.unshift(raiz.datos.id);
 
-  const sinEquipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: 'Equipo sin equipo',
+  const corriente = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Carpeta corriente',
+    parentId: raiz.datos.id,
+  });
+  pendientesDeLimpiar.unshift(corriente.datos.id);
+
+  const equipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Chiller 01',
     parentId: raiz.datos.id,
     tipo: 'EQUIPO',
   });
+  pendientesDeLimpiar.unshift(equipo.datos.id);
+  const equipoId = equipo.datos.id;
+
+  const cTexto = definiciones.TEXTO?.clave;
+  const cNumero = definiciones.NUMERO?.clave;
+  const cFecha = definiciones.FECHA?.clave;
+  const cBool = definiciones.BOOLEANO?.clave;
+  const cLista = definiciones.LISTA?.clave;
+  const cLargo = definiciones.TEXTO_LARGO?.clave;
+  const cFoto = definiciones.FOTO?.clave;
+
+  const enCorriente = await api(
+    'PUT',
+    `/fotos/carpeta/${corriente.datos.id}/campo`,
+    tokenAdmin,
+    { valores: { [cTexto]: 'Carrier' } },
+  );
   check(
-    'tipo EQUIPO sin equipoId se rechaza con mensaje, no con un CHECK crudo',
-    sinEquipo.estado === 400 && /apuntar a un equipo/.test(sinEquipo.datos?.message ?? ''),
-    `HTTP ${sinEquipo.estado} · ${sinEquipo.datos?.message ?? ''}`,
+    'una carpeta CORRIENTE no lleva campos de equipo',
+    enCorriente.estado === 400,
+    `HTTP ${enCorriente.estado}`,
   );
 
-  const carpetaConEquipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: 'Carpeta con equipo',
-    parentId: raiz.datos.id,
-    equipoId: 1,
-  });
+  const guardado = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+    {
+      valores: {
+        [cTexto]: 'Carrier',
+        [cLargo]: 'Ruido anormal en el compresor',
+        [cNumero]: '12.5',
+        [cFecha]: '2026-03-15',
+        [cBool]: true,
+        [cLista]: definiciones.LISTA?.opciones?.[0]?.id,
+      },
+    },
+  );
   check(
-    'tipo CARPETA con equipoId se rechaza',
-    carpetaConEquipo.estado === 400,
-    `HTTP ${carpetaConEquipo.estado}`,
+    'se guardan los seis campos de una vez',
+    guardado.estado === 200,
+    `HTTP ${guardado.estado}`,
   );
 
-  const equipoFantasma = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: 'Equipo fantasma',
-    parentId: raiz.datos.id,
-    tipo: 'EQUIPO',
-    equipoId: 999999,
-  });
+  const porClave = (ficha, clave) =>
+    (ficha ?? []).find((c) => c.clave === clave);
+
+  const ficha = await api(
+    'GET',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+  );
   check(
-    'un equipo que no está en el catálogo se rechaza con 404 legible',
-    equipoFantasma.estado === 404 &&
-      /catálogo de Gestión de equipos/.test(equipoFantasma.datos?.message ?? ''),
-    `HTTP ${equipoFantasma.estado}`,
+    'y se leen de vuelta con el tipo que les toca',
+    porClave(ficha.datos, cTexto)?.valor === 'Carrier' &&
+      porClave(ficha.datos, cNumero)?.valor === 12.5 &&
+      porClave(ficha.datos, cBool)?.valor === true,
+    JSON.stringify([
+      porClave(ficha.datos, cTexto)?.valor,
+      porClave(ficha.datos, cNumero)?.valor,
+      porClave(ficha.datos, cBool)?.valor,
+    ]),
   );
 
-  const tipoInventado = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: 'Tipo raro',
-    parentId: raiz.datos.id,
-    tipo: 'PROYECTO',
-  });
+  // ⚠️ La fecha es `@db.Date` y se lee en UTC: si se serializara como
+  // instante saldría el día anterior a partir de cierta hora en Lima.
   check(
-    'un tipo inventado se rechaza',
-    tipoInventado.estado === 400,
-    `HTTP ${tipoInventado.estado}`,
+    'una FECHA vuelve como AAAA-MM-DD, sin correrse de día',
+    porClave(ficha.datos, cFecha)?.valor === '2026-03-15',
+    String(porClave(ficha.datos, cFecha)?.valor),
   );
 
-  // Con un equipo real, si la organización de la demo tiene alguno.
-  const alguno =
-    (busca.datos?.equipos ?? []).find((e) => e.id === sembrado?.id) ??
-    (busca.datos?.equipos ?? [])[0];
-  if (alguno) {
-    const enlazada = await api('POST', '/fotos/carpeta', tokenAdmin, {
-      nombre: `Equipo ${alguno.codigoInterno ?? alguno.id}`,
-      parentId: raiz.datos.id,
-      tipo: 'EQUIPO',
-      equipoId: alguno.id,
+  check(
+    'una LISTA guarda la opción elegida, no su texto',
+    porClave(ficha.datos, cLista)?.valor ===
+      definiciones.LISTA?.opciones?.[0]?.id,
+    String(porClave(ficha.datos, cLista)?.valor),
+  );
+
+  titulo('FASE 4 · cada tipo valida lo suyo');
+
+  for (const [clave, valor, queEs] of [
+    [cNumero, 'mucha', 'un NUMERO con texto'],
+    [cFecha, '15/03/2026', 'una FECHA en otro formato'],
+    [cBool, 'quiza', 'un BOOLEANO que no es sí ni no'],
+    [cLista, 999999, 'una opción que no es de esa lista'],
+  ]) {
+    const r = await api('PUT', `/fotos/carpeta/${equipoId}/campo`, tokenAdmin, {
+      valores: { [clave]: valor },
     });
-    check(
-      'se crea una carpeta enlazada a un equipo real',
-      enlazada.estado === 201,
-      `HTTP ${enlazada.estado}`,
-    );
-    if (enlazada.datos?.id) {
-      pendientesDeLimpiar.unshift(enlazada.datos.id);
-
-      const dentro = await api(
-        'GET',
-        `/fotos/carpeta/${raiz.datos.id}`,
-        tokenAdmin,
-      );
-      const tarjeta = (dentro.datos?.secciones ?? [])
-        .flatMap((s) => s.carpetas)
-        .find((c) => c.id === enlazada.datos.id);
-      check(
-        'la navegación devuelve tipo EQUIPO y el equipo enlazado',
-        tarjeta?.tipo === 'EQUIPO' && tarjeta?.equipo?.id === alguno.id,
-        `tipo=${tarjeta?.tipo} equipo=${JSON.stringify(tarjeta?.equipo)}`,
-      );
-
-      // La FK es Restrict: borrar el equipo con una carpeta colgando falla.
-      const borrar = await api(
-        'DELETE',
-        `/equipos/equipo/${alguno.id}`,
-        tokenAdmin,
-      );
-
-      const sobrevive = await api(
-        'GET',
-        `/fotos/catalogo-equipos/organizacion/${org.id}/equipo?q=${CODIGO_EQUIPO_PRUEBA}`,
-        supervisor.token,
-      );
-      check(
-        'borrar un equipo con una carpeta enlazada NO lo borra (FK Restrict)',
-        (sobrevive.datos?.equipos ?? []).some((e) => e.id === alguno.id),
-        `el borrado contestó HTTP ${borrar.estado}`,
-      );
-      // El P2003 se traduce en `EquipoService.traducirEnUso`: el Restrict
-      // ya protegía el dato, pero llegaba como un 500 sin texto.
-      check(
-        'y el Restrict llega traducido, no como un 500 crudo',
-        borrar.estado === 400 &&
-          /carpetas de Fotos enlazadas/.test(borrar.datos?.message ?? ''),
-        `HTTP ${borrar.estado}`,
-      );
-    }
-  } else {
-    console.log('  (la organización no tiene equipos: enlace real omitido)');
+    check(`${queEs} se rechaza`, r.estado === 400, `HTTP ${r.estado}`);
   }
 
-  for (const c of [editorG, supervisor])
+  const claveInventada = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+    { valores: { no_existe_este_campo: 'x' } },
+  );
+  check(
+    'una clave que no es de ningún campo se rechaza',
+    claveInventada.estado === 400,
+    `HTTP ${claveInventada.estado}`,
+  );
+
+  // ⚠️ Una imagen no cabe en un JSON. Se RECHAZA en vez de ignorarla: que
+  // un valor mandado no se guarde sin decir nada es peor que un 400.
+  const fotoEnJson = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+    { valores: { [cFoto]: 'https://algo.jpg' } },
+  );
+  check(
+    'un campo FOTO no se manda en el JSON, y el error dice por dónde va',
+    fotoEnJson.estado === 400 && /imagen/i.test(fotoEnJson.datos?.message ?? ''),
+    fotoEnJson.datos?.message,
+  );
+
+  titulo('FASE 4 · guardar es PARCIAL, no reemplaza en bloque');
+
+  const soloUno = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+    { valores: { [cTexto]: 'Trane' } },
+  );
+  const tras = await api('GET', `/fotos/carpeta/${equipoId}/campo`, tokenAdmin);
+  check(
+    'mandar un campo NO borra los demás',
+    soloUno.estado === 200 &&
+      porClave(tras.datos, cTexto)?.valor === 'Trane' &&
+      porClave(tras.datos, cNumero)?.valor === 12.5,
+    `texto=${porClave(tras.datos, cTexto)?.valor} numero=${porClave(tras.datos, cNumero)?.valor}`,
+  );
+
+  await api('PUT', `/fotos/carpeta/${equipoId}/campo`, tokenAdmin, {
+    valores: { [cNumero]: null },
+  });
+  const trasVaciar = await api(
+    'GET',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+  );
+  check(
+    'mandar null vacía ESE campo y deja el resto',
+    porClave(trasVaciar.datos, cNumero)?.valor === null &&
+      porClave(trasVaciar.datos, cTexto)?.valor === 'Trane',
+    `numero=${porClave(trasVaciar.datos, cNumero)?.valor}`,
+  );
+
+  titulo('FASE 4 · el permiso es el de la carpeta');
+
+  const sinAcceso = await api(
+    'GET',
+    `/fotos/carpeta/${equipoId}/campo`,
+    supervisor.token,
+  );
+  check(
+    'quien no ve la carpeta no ve sus campos — el 404 uniforme',
+    sinAcceso.estado === 404,
+    `HTTP ${sinAcceso.estado}`,
+  );
+
+  await api('POST', '/fotos/compartir', tokenAdmin, {
+    email: supervisor.email,
+    carpetaIds: [equipoId],
+    permiso: 'LECTURA',
+  });
+  const leeConLectura = await api(
+    'GET',
+    `/fotos/carpeta/${equipoId}/campo`,
+    supervisor.token,
+  );
+  check(
+    'con LECTURA ve la ficha del equipo',
+    leeConLectura.estado === 200,
+    `HTTP ${leeConLectura.estado}`,
+  );
+  const escribeConLectura = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    supervisor.token,
+    { valores: { [cTexto]: 'No debería' } },
+  );
+  check(
+    'pero con LECTURA no los cambia: escribir es EDICION',
+    escribeConLectura.estado === 403,
+    `HTTP ${escribeConLectura.estado}`,
+  );
+
+  // Una rama archivada queda de solo lectura también aquí, y sin ninguna
+  // regla nueva: escribir pasa por `exigirPermiso`.
+  await api('POST', `/fotos/carpeta/${raiz.datos.id}/archivar`, tokenAdmin);
+  const enArchivada = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+    { valores: { [cTexto]: 'En archivada' } },
+  );
+  check(
+    'en una rama archivada no se escriben campos, ni el administrador',
+    enArchivada.estado === 403,
+    `HTTP ${enArchivada.estado}`,
+  );
+  await api('POST', `/fotos/carpeta/${raiz.datos.id}/reabrir`, tokenAdmin);
+
+  titulo('FASE 4 · crear el equipo con sus datos, en una sola llamada');
+
+  const conValores = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Chiller 02',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    valores: { [cTexto]: 'York', [cNumero]: '8' },
+  });
+  if (conValores.estado === 201)
+    pendientesDeLimpiar.unshift(conValores.datos.id);
+  const fichaNueva =
+    conValores.estado === 201
+      ? await api(
+          'GET',
+          `/fotos/carpeta/${conValores.datos.id}/campo`,
+          tokenAdmin,
+        )
+      : { datos: [] };
+  check(
+    'se crea con los campos ya rellenados',
+    conValores.estado === 201 &&
+      porClave(fichaNueva.datos, cTexto)?.valor === 'York',
+    `HTTP ${conValores.estado} · ${porClave(fichaNueva.datos, cTexto)?.valor}`,
+  );
+
+  const corrienteConValores = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'No debería tener campos',
+    parentId: raiz.datos.id,
+    valores: { [cTexto]: 'X' },
+  });
+  check(
+    'una carpeta corriente con valores se rechaza',
+    corrienteConValores.estado === 400,
+    `HTTP ${corrienteConValores.estado}`,
+  );
+
+  // ⚠️ Si el valor no vale, la carpeta NO se crea a medias: van en la misma
+  // transacción.
+  const cuentaHijas = async () => {
+    const r = await api('GET', `/fotos/carpeta/${raiz.datos.id}`, tokenAdmin);
+    return (r.datos?.secciones ?? []).reduce(
+      (t, s) => t + s.carpetas.length,
+      0,
+    );
+  };
+  const antesDeFallar = await cuentaHijas();
+  const valorMalo = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Chiller roto',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    valores: { [cNumero]: 'no es número' },
+  });
+  const despuesDeFallar = await cuentaHijas();
+  check(
+    'un valor inválido deshace la carpeta entera: no queda a medias',
+    valorMalo.estado === 400 && antesDeFallar === despuesDeFallar,
+    `HTTP ${valorMalo.estado} · ${antesDeFallar} → ${despuesDeFallar}`,
+  );
+
+  titulo('FASE 4 · desactivar en vez de borrar');
+
+  const conValor = await api(
+    'DELETE',
+    `/fotos/campo/${definiciones.TEXTO.id}`,
+    admin.token,
+  );
+  check(
+    'un campo con valores no se borra, y el error ofrece desactivarlo',
+    conValor.estado === 400 && /esact[ií]v/.test(conValor.datos?.message ?? ''),
+    conValor.datos?.message,
+  );
+
+  const desactivado = await api(
+    'PATCH',
+    `/fotos/campo/${definiciones.TEXTO.id}`,
+    admin.token,
+    { activo: false },
+  );
+  check(
+    'desactivarlo sí se puede',
+    desactivado.estado === 200 && desactivado.datos?.activo === false,
+    `HTTP ${desactivado.estado}`,
+  );
+
+  const fichaTrasDesactivar = await api(
+    'GET',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+  );
+  check(
+    'y lo ya capturado se sigue viendo: `activo` retira del formulario, no borra',
+    porClave(fichaTrasDesactivar.datos, cTexto)?.valor === 'Trane',
+    String(porClave(fichaTrasDesactivar.datos, cTexto)?.valor),
+  );
+
+  const escribirDesactivado = await api(
+    'PUT',
+    `/fotos/carpeta/${equipoId}/campo`,
+    tokenAdmin,
+    { valores: { [cTexto]: 'Otro' } },
+  );
+  check(
+    'pero ya no se puede rellenar: no está entre los activos',
+    escribirDesactivado.estado === 400,
+    `HTTP ${escribirDesactivado.estado}`,
+  );
+
+  await api('PATCH', `/fotos/campo/${definiciones.TEXTO.id}`, admin.token, {
+    activo: true,
+  });
+
+  // Una opción elegida por alguien se desactiva en vez de borrarse.
+  const opcionElegida = definiciones.LISTA?.opciones?.[0];
+  const trasBorrarOpcion = await api(
+    'DELETE',
+    `/fotos/campo/opcion/${opcionElegida.id}`,
+    admin.token,
+  );
+  const opcionAhora = (trasBorrarOpcion.datos?.opciones ?? []).find(
+    (o) => o.id === opcionElegida.id,
+  );
+  check(
+    'una opción ya elegida se DESACTIVA en vez de borrarse',
+    trasBorrarOpcion.estado === 200 &&
+      !!opcionAhora &&
+      opcionAhora.activo === false,
+    `existe=${!!opcionAhora} activo=${opcionAhora?.activo}`,
+  );
+
+  const eligeDesactivada = await api(
+    'PUT',
+    `/fotos/carpeta/${conValores.datos?.id ?? equipoId}/campo`,
+    tokenAdmin,
+    { valores: { [cLista]: opcionElegida.id } },
+  );
+  check(
+    'y ya no se puede elegir de nuevo',
+    eligeDesactivada.estado === 400,
+    `HTTP ${eligeDesactivada.estado}`,
+  );
+
+  const opcionLibre = definiciones.LISTA?.opciones?.[2];
+  const borraLibre = await api(
+    'DELETE',
+    `/fotos/campo/opcion/${opcionLibre.id}`,
+    admin.token,
+  );
+  check(
+    'una opción que nadie eligió sí se borra de verdad',
+    borraLibre.estado === 200 &&
+      !(borraLibre.datos?.opciones ?? []).some((o) => o.id === opcionLibre.id),
+    `HTTP ${borraLibre.estado}`,
+  );
+
+  titulo('FASE 4 · el color por tipo de carpeta (Fase 1c)');
+
+  const colores = await api('GET', '/fotos/configuracion/color', supervisor.token);
+  check(
+    'cualquiera con el módulo lee los colores: los necesita para el explorador',
+    colores.estado === 200 &&
+      colores.datos?.CARPETA === 'AMARILLO' &&
+      colores.datos?.EQUIPO === 'CELESTE',
+    JSON.stringify(colores.datos),
+  );
+
+  const cambioSupervisor = await api(
+    'PATCH',
+    '/fotos/configuracion/color',
+    supervisor.token,
+    { tipo: 'EQUIPO', color: 'AMARILLO' },
+  );
+  check(
+    'pero cambiarlos es de ADMIN_GLOBAL: es configuración del módulo',
+    cambioSupervisor.estado === 403,
+    `HTTP ${cambioSupervisor.estado}`,
+  );
+
+  const colorInventado = await api(
+    'PATCH',
+    '/fotos/configuracion/color',
+    admin.token,
+    { tipo: 'EQUIPO', color: 'FUCSIA' },
+  );
+  check(
+    'un color fuera de la paleta se rechaza nombrando los válidos',
+    colorInventado.estado === 400 &&
+      /AMARILLO/.test(colorInventado.datos?.message ?? ''),
+    `HTTP ${colorInventado.estado}`,
+  );
+
+  const cambio = await api('PATCH', '/fotos/configuracion/color', admin.token, {
+    tipo: 'EQUIPO',
+    color: 'AMARILLO',
+  });
+  check(
+    'el administrador sí lo cambia, y vuelve el mapa completo',
+    cambio.estado === 200 &&
+      cambio.datos?.EQUIPO === 'AMARILLO' &&
+      cambio.datos?.CARPETA === 'AMARILLO',
+    JSON.stringify(cambio.datos),
+  );
+
+  const persistido = await db.query(
+    `SELECT color FROM configuracion_color_carpeta WHERE tipo = 'EQUIPO'`,
+  );
+  check(
+    'y queda guardado en la base: es un dato, no una constante del código',
+    persistido.rows[0]?.color === 'AMARILLO',
+    persistido.rows[0]?.color,
+  );
+
+  // Se devuelve a como estaba: esta tabla es configuración REAL del
+  // módulo, no datos de prueba que se puedan dejar cambiados.
+  await api('PATCH', '/fotos/configuracion/color', admin.token, {
+    tipo: 'EQUIPO',
+    color: 'CELESTE',
+  });
+  const restaurado = await api('GET', '/fotos/configuracion/color', admin.token);
+  check(
+    'la fase deja el color como estaba',
+    restaurado.datos?.EQUIPO === 'CELESTE',
+    JSON.stringify(restaurado.datos),
+  );
+
+  titulo('FASE 4 · el campo de tipo FOTO');
+
+  const r2Configurado = !!process.env.R2_ACCESS_KEY_ID;
+  if (!r2Configurado) {
+    console.log('  (R2 no está configurado: se omiten las que suben bytes)');
+  } else {
+    const img = await imagenDePrueba(60, 40);
+    const noEsFoto = await subirUnaImagen(
+      `/fotos/carpeta/${equipoId}/campo/${definiciones.NUMERO.id}/imagen`,
+      tokenAdmin,
+      img,
+    );
+    check(
+      'subir una imagen a un campo que no es FOTO se rechaza',
+      noEsFoto.estado === 400,
+      `HTTP ${noEsFoto.estado}`,
+    );
+
+    const subida = await subirUnaImagen(
+      `/fotos/carpeta/${equipoId}/campo/${definiciones.FOTO.id}/imagen`,
+      tokenAdmin,
+      img,
+    );
+    check(
+      'se sube la imagen del campo y vuelve firmada',
+      subida.estado === 201 && /^https?:\/\//.test(subida.datos?.url ?? ''),
+      `HTTP ${subida.estado}`,
+    );
+
+    const conFoto = await api(
+      'GET',
+      `/fotos/carpeta/${equipoId}/campo`,
+      tokenAdmin,
+    );
+    const campoFoto = porClave(conFoto.datos, cFoto);
+    check(
+      'la ficha la devuelve con URL firmada y miniatura',
+      campoFoto?.valor === true &&
+        !!campoFoto?.imagen?.url &&
+        !!campoFoto?.imagen?.urlMiniatura,
+      `valor=${campoFoto?.valor}`,
+    );
+
+    // ⚠️ NO es una fila de `Foto`: no entra en la galería ni en los
+    // contadores de la carpeta. Es la decisión del modelo.
+    const galeria = await api(
+      'GET',
+      `/fotos/carpeta/${equipoId}/album`,
+      tokenAdmin,
+    );
+    check(
+      'la imagen de un campo NO aparece en la galería: no es evidencia',
+      galeria.estado === 200 && (galeria.datos?.albumes ?? []).length === 0,
+      `${(galeria.datos?.albumes ?? []).length} álbum(es)`,
+    );
+
+    const sinPermiso = await subirUnaImagen(
+      `/fotos/carpeta/${equipoId}/campo/${definiciones.FOTO.id}/imagen`,
+      supervisor.token,
+      img,
+    );
+    check(
+      'con LECTURA no se sube la imagen del campo',
+      sinPermiso.estado === 403,
+      `HTTP ${sinPermiso.estado}`,
+    );
+
+    const quitada = await api(
+      'DELETE',
+      `/fotos/carpeta/${equipoId}/campo/${definiciones.FOTO.id}/imagen`,
+      tokenAdmin,
+    );
+    check(
+      'se quita la imagen del campo',
+      quitada.estado === 200,
+      `HTTP ${quitada.estado}`,
+    );
+
+    const otraVez = await api(
+      'DELETE',
+      `/fotos/carpeta/${equipoId}/campo/${definiciones.FOTO.id}/imagen`,
+      tokenAdmin,
+    );
+    check(
+      'quitarla dos veces contesta 404, no un 500',
+      otraVez.estado === 404,
+      `HTTP ${otraVez.estado}`,
+    );
+  }
+
+  titulo('FASE 4 · borrar el equipo se lleva sus valores');
+
+  const aBorrar = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Chiller desechable',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    valores: { [cLargo]: 'se va a borrar' },
+  });
+  const filasAntes = await db.query(
+    'SELECT count(*)::int AS n FROM valores_campo_fotos WHERE "carpetaId" = $1',
+    [aBorrar.datos.id],
+  );
+  const borrada = await api(
+    'DELETE',
+    `/fotos/carpeta/${aBorrar.datos.id}`,
+    tokenAdmin,
+  );
+  const filasDespues = await db.query(
+    'SELECT count(*)::int AS n FROM valores_campo_fotos WHERE "carpetaId" = $1',
+    [aBorrar.datos.id],
+  );
+  check(
+    'los valores se van con la carpeta (Cascade), sin bloquear el borrado',
+    borrada.estado === 200 &&
+      filasAntes.rows[0].n === 1 &&
+      filasDespues.rows[0].n === 0,
+    `HTTP ${borrada.estado} · ${filasAntes.rows[0].n} → ${filasDespues.rows[0].n}`,
+  );
+
+  // ── Limpieza ──
+  // Las carpetas las borra `limpiar()` al final; las definiciones son
+  // GLOBALES y no cuelgan de ninguna, así que hay que retirarlas aquí o
+  // quedarían en la configuración real del módulo. Van DESPUÉS de sus
+  // carpetas: un campo con valores no se deja borrar, que es la regla que
+  // se acaba de comprobar.
+  for (const id of [equipoId, conValores.datos?.id])
+    if (id) await api('DELETE', `/fotos/carpeta/${id}`, tokenAdmin);
+
+  let sobran = 0;
+  for (const id of camposCreados) {
+    const r = await api('DELETE', `/fotos/campo/${id}`, admin.token);
+    if (r.estado !== 200) sobran += 1;
+  }
+  check(
+    'la fase limpia sus definiciones: no deja campos en la configuración real',
+    sobran === 0,
+    `${sobran} sin borrar de ${camposCreados.length}`,
+  );
+
+  for (const c of [admin, editorG, supervisor])
     await api('DELETE', `/usuario/${c.id}`, tokenAdmin);
 }
 
-// ═════════════════════════════════════════════════════════════
-// FASE 5 — tareas (§13) y comentarios (§14)
-// ═════════════════════════════════════════════════════════════
 async function fase5(db, tokenAdmin) {
   titulo('FASE 5 · siembra: un equipo con su carpeta');
 
@@ -1459,20 +1894,12 @@ async function fase5(db, tokenAdmin) {
   ]);
   if (!editorG || !lectorG || !ajeno) return;
 
-  const orgs = await api(
-    'GET',
-    '/fotos/catalogo-equipos/organizacion',
-    tokenAdmin,
-  );
-  const org = (orgs.datos ?? [])[0];
-  if (!org) {
-    console.log('  (sin organizaciones: la Fase 5 se omite)');
-    for (const c of [editorG, lectorG, ajeno])
-      await api('DELETE', `/usuario/${c.id}`, tokenAdmin);
-    return;
-  }
-  const sembrado = await sembrarEquipoDePrueba(tokenAdmin, org.id);
-
+  // ⚠️ Desde la Fase 1a de «Gestión de contenido» esto NO necesita el
+  // catálogo de Gestión de Equipos. Antes había que buscar una
+  // organización, sembrar un equipo y enlazarlo, y si el catálogo estaba
+  // vacío la fase entera se OMITÍA en silencio —una precondición externa
+  // que podía dejar sin probar §13 sin que nadie lo notara—. Ahora una
+  // carpeta de equipo es una carpeta con `tipo: 'EQUIPO'` y ya está.
   const raiz = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: `__verif_f5 ${Date.now()}`,
   });
@@ -1487,10 +1914,9 @@ async function fase5(db, tokenAdmin) {
   pendientesDeLimpiar.unshift(corriente.datos.id);
 
   const equipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: `Equipo ${sembrado?.codigoInterno ?? '?'}`,
+    nombre: 'Equipo de prueba',
     parentId: raiz.datos.id,
     tipo: 'EQUIPO',
-    equipoId: sembrado?.id,
   });
   if (equipo.estado !== 201) {
     console.log(`  (no se pudo crear la carpeta de equipo: HTTP ${equipo.estado})`);
@@ -2000,33 +2426,23 @@ async function fase6(db, tokenAdmin) {
     `albumId=${aAlbum.datos?.albumId} (esperado ${albumId})`,
   );
 
-  // Una carpeta de tipo EQUIPO para poder tener tarea.
-  const orgs = await api(
-    'GET',
-    '/fotos/catalogo-equipos/organizacion',
-    tokenAdmin,
-  );
-  const org = (orgs.datos ?? [])[0];
-  const sembrado = org ? await sembrarEquipoDePrueba(tokenAdmin, org.id) : null;
-
+  // Una carpeta de tipo EQUIPO para poder tener tarea. Desde la Fase 1a no
+  // hace falta ningún equipo del catálogo: basta el `tipo`.
   let tareaId = null;
-  if (sembrado) {
-    const carpetaEquipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
-      nombre: `Equipo ${sembrado.codigoInterno}`,
-      parentId: carpetaId,
-      tipo: 'EQUIPO',
-      equipoId: sembrado.id,
-    });
-    if (carpetaEquipo.datos?.id) {
-      pendientesDeLimpiar.unshift(carpetaEquipo.datos.id);
-      const tarea = await api(
-        'POST',
-        `/fotos/carpeta/${carpetaEquipo.datos.id}/tarea`,
-        tokenAdmin,
-        { titulo: 'Inspección' },
-      );
-      tareaId = tarea.datos?.id ?? null;
-    }
+  const carpetaEquipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo para fotos de tarea',
+    parentId: carpetaId,
+    tipo: 'EQUIPO',
+  });
+  if (carpetaEquipo.datos?.id) {
+    pendientesDeLimpiar.unshift(carpetaEquipo.datos.id);
+    const tarea = await api(
+      'POST',
+      `/fotos/carpeta/${carpetaEquipo.datos.id}/tarea`,
+      tokenAdmin,
+      { titulo: 'Inspección' },
+    );
+    tareaId = tarea.datos?.id ?? null;
   }
 
   if (tareaId) {
@@ -2043,6 +2459,56 @@ async function fase6(db, tokenAdmin) {
       aTarea.datos?.albumId === null,
       `albumId=${aTarea.datos?.albumId}`,
     );
+
+    // ── Borrar UNA foto de la tarea (puerta abierta en la Fase 2a) ──
+    //
+    // El endpoint es el mismo `DELETE /fotos/foto/:id` de siempre —
+    // `exigirSobreFoto` resuelve los tres casos y el de tarea es uno—, pero
+    // hasta la Fase 2a ninguna pantalla lo llamaba para éstas: la única
+    // salida era borrar la tarea entera, que además el backend rechaza si
+    // tiene fotos. Se comprueba aquí que la puerta lleva a alguna parte.
+    const antesDeBorrar = await api('GET', `/fotos/tarea/${tareaId}/foto`, tokenAdmin);
+    const fotoDeTarea = (antesDeBorrar.datos ?? [])[0];
+
+    const conFotos = await api('DELETE', `/fotos/tarea/${tareaId}`, tokenAdmin);
+    check(
+      'una tarea CON fotos no se borra: la evidencia no se va por delante',
+      conFotos.estado === 400,
+      `HTTP ${conFotos.estado}`,
+    );
+
+    // La subió el SuperAdmin, así que para `otro` —un ADMIN_GLOBAL— es
+    // AJENA, y §5 pide TOTAL para ésas. Su nivel se lo da sobre todo el
+    // árbol, así que debe poder: es la mitad de la regla que el botón de
+    // la rejilla hace cumplir en la pantalla.
+    const borradaDeTarea = await api(
+      'DELETE',
+      `/fotos/foto/${fotoDeTarea?.id}`,
+      otro.token,
+    );
+    const despues = await api('GET', `/fotos/tarea/${tareaId}/foto`, tokenAdmin);
+    check(
+      'se borra UNA foto de la tarea sin tocar la tarea (ajena, con TOTAL)',
+      borradaDeTarea.estado === 200 && (despues.datos ?? []).length === 0,
+      `HTTP ${borradaDeTarea.estado} · quedan ${(despues.datos ?? []).length}`,
+    );
+
+    // ⚠️ Y la tarea NO desaparece al quedarse sin fotos: al revés que un
+    // álbum, que hoy sí se retira solo (eso lo cambia la Fase 2b).
+    const sigueViva = await api('GET', `/fotos/tarea/${tareaId}`, tokenAdmin);
+    check(
+      'la tarea sigue existiendo aunque se quede sin fotos',
+      sigueViva.estado === 200,
+      `HTTP ${sigueViva.estado}`,
+    );
+
+    const yaVacia = await api('DELETE', `/fotos/tarea/${tareaId}`, tokenAdmin);
+    check(
+      'y ya vacía sí se puede borrar',
+      yaVacia.estado === 200,
+      `HTTP ${yaVacia.estado}`,
+    );
+    tareaId = null;
   }
 
   titulo('FASE 6 · bandeja: subir sin asignar (§17)');
@@ -2790,22 +3256,15 @@ async function fase8(db, tokenAdmin) {
     `${archivado.length} evento(s)`,
   );
 
-  // Tareas: hacen falta un equipo y su carpeta.
-  const orgs = await api('GET', '/fotos/catalogo-equipos/organizacion', tokenAdmin);
-  const org = (orgs.datos ?? [])[0];
-  const sembrado = org ? await sembrarEquipoDePrueba(tokenAdmin, org.id) : null;
-
-  let equipoCarpetaId = null;
-  if (sembrado) {
-    const ce = await api('POST', '/fotos/carpeta', tokenAdmin, {
-      nombre: `Equipo ${sembrado.codigoInterno}`,
-      parentId: destino,
-      tipo: 'EQUIPO',
-      equipoId: sembrado.id,
-    });
-    equipoCarpetaId = ce.datos?.id ?? null;
-    if (equipoCarpetaId) pendientesDeLimpiar.unshift(equipoCarpetaId);
-  }
+  // Tareas: hace falta una carpeta de tipo EQUIPO. Desde la Fase 1a no hay
+  // que sembrar nada en el catálogo de Gestión de Equipos.
+  const ce = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo para bitácora',
+    parentId: destino,
+    tipo: 'EQUIPO',
+  });
+  const equipoCarpetaId = ce.datos?.id ?? null;
+  if (equipoCarpetaId) pendientesDeLimpiar.unshift(equipoCarpetaId);
 
   let tareaId = null;
   if (equipoCarpetaId) {
@@ -3223,6 +3682,570 @@ async function fase8(db, tokenAdmin) {
 // ═════════════════════════════════════════════════════════════
 // REGRESIÓN — los módulos que Fotos no debe tocar
 // ═════════════════════════════════════════════════════════════
+/**
+ * Fase 9 · lo que el frontend descubrió y el backend tuvo que cerrar.
+ *
+ * El único hallazgo con código detrás: un álbum VACÍO no se podía retirar por
+ * ninguna vía —salió al limpiar una prueba por API, y además bloqueaba el
+ * borrado de su carpeta porque la FK es `Restrict`—. Se cubre aquí y no en la
+ * Fase 6 porque la 6 ya está cerrada y verificada; mezclarlo allí haría que
+ * su cuenta de comprobaciones dejara de coincidir con lo que se reportó.
+ */
+async function fase9(db, token) {
+  titulo('FASE 9 · Eliminar un álbum (§16)');
+
+  const raiz = await api('POST', '/fotos/carpeta', token, {
+    nombre: `Fase9 albumes ${Date.now()}`,
+  });
+  check('Carpeta de prueba creada', raiz.estado === 201, `HTTP ${raiz.estado}`);
+  if (raiz.estado !== 201) return;
+  pendientesDeLimpiar.push(raiz.datos.id);
+
+  // 1 · el vacío se va
+  const vacio = await api('POST', `/fotos/album/carpeta/${raiz.datos.id}`, token, {
+    nombre: 'Vacío',
+  });
+  check('Álbum vacío creado', vacio.estado === 201, `HTTP ${vacio.estado}`);
+  const borrado = await api('DELETE', `/fotos/album/${vacio.datos.id}`, token);
+  check('Un álbum vacío se elimina', borrado.estado === 200, `HTTP ${borrado.estado}`);
+
+  // 2 · el que tiene fotos NO se va, y lo dice
+  const lleno = await api('POST', `/fotos/album/carpeta/${raiz.datos.id}`, token, {
+    nombre: 'Con fotos',
+  });
+  const img = await imagenDePrueba();
+  const sub = await subirFotos(`/fotos/album/${lleno.datos.id}/foto`, token, [img]);
+  check('Foto subida al álbum', sub.datos?.subidas === 1, JSON.stringify(sub.datos));
+
+  const rechazo = await api('DELETE', `/fotos/album/${lleno.datos.id}`, token);
+  check(
+    'Un álbum CON fotos se rechaza con 400',
+    rechazo.estado === 400,
+    `HTTP ${rechazo.estado}`,
+  );
+  check(
+    'El mensaje dice cuántas fotos lo impiden',
+    /1 foto/.test(rechazo.datos?.message ?? ''),
+    rechazo.datos?.message,
+  );
+  check(
+    'y ya NO promete que el álbum se retire solo al vaciarlo',
+    !/se retirará solo/.test(rechazo.datos?.message ?? ''),
+    rechazo.datos?.message,
+  );
+
+  // 3 · la descripción de una foto se corrige (Fase 2b)
+  const g = await api('GET', `/fotos/carpeta/${raiz.datos.id}/album`, token);
+  const foto = (g.datos?.albumes ?? []).flatMap((a) => a.fotos ?? [])[0];
+
+  // ⚠️ La galería NO devolvía la descripción por foto hasta la Fase 2b, y
+  // sin eso no hay nada que corregir en la pantalla.
+  check(
+    'La galería devuelve la descripción de cada foto',
+    foto !== undefined && 'descripcion' in foto,
+    JSON.stringify(Object.keys(foto ?? {})),
+  );
+
+  const editada = await api('PATCH', `/fotos/foto/${foto.id}`, token, {
+    descripcion: 'Compresor con fuga en la línea de succión',
+  });
+  check(
+    'Se corrige la descripción de una foto ya subida',
+    editada.estado === 200 &&
+      editada.datos?.descripcion === 'Compresor con fuga en la línea de succión',
+    `HTTP ${editada.estado} · ${editada.datos?.descripcion}`,
+  );
+
+  const gDesc = await api('GET', `/fotos/carpeta/${raiz.datos.id}/album`, token);
+  const fotoDesc = (gDesc.datos?.albumes ?? []).flatMap((a) => a.fotos ?? [])[0];
+  check(
+    'y se lee de vuelta en la galería',
+    fotoDesc?.descripcion === 'Compresor con fuga en la línea de succión',
+    String(fotoDesc?.descripcion),
+  );
+
+  // ⚠️ El rastro es lo que hace de esto una corrección y no una edición
+  // silenciosa: la bitácora guarda el valor ANTERIOR y el nuevo.
+  const hist = await api(
+    'GET',
+    `/fotos/auditoria/carpeta/${raiz.datos.id}`,
+    token,
+  );
+  check(
+    'y queda en la bitácora con el valor anterior y el nuevo',
+    (hist.datos?.eventos ?? hist.datos ?? []).some(
+      (e) =>
+        e.entidad === 'FOTO' &&
+        e.accion === 'EDICION' &&
+        /Compresor con fuga/.test(e.descripcion ?? ''),
+    ),
+    JSON.stringify(
+      (hist.datos?.eventos ?? hist.datos ?? [])
+        .filter((e) => e.entidad === 'FOTO')
+        .map((e) => e.descripcion),
+    ),
+  );
+
+  const vaciada = await api('PATCH', `/fotos/foto/${foto.id}`, token, {
+    descripcion: '',
+  });
+  check(
+    'vaciarla es una corrección válida y la deja en null',
+    vaciada.estado === 200 && vaciada.datos?.descripcion === null,
+    `HTTP ${vaciada.estado} · ${JSON.stringify(vaciada.datos?.descripcion)}`,
+  );
+
+  // ⚠️ Lo que NO se puede es reemplazar la IMAGEN: no hay ruta, y es a
+  // propósito —cambiar el archivo detrás de un registro ya existente
+  // permitiría alterar la prueba de una inspección sin que se note—.
+  const reemplazo = await subirFotos(`/fotos/foto/${foto.id}`, token, [img]);
+  check(
+    'no existe forma de reemplazar el ARCHIVO de una foto',
+    reemplazo.estado === 404,
+    `HTTP ${reemplazo.estado}`,
+  );
+
+  // 4 · al irse la última foto el álbum SE QUEDA, vacío (Fase 2b)
+  //
+  // ⚠️ Esta comprobación estaba INVERTIDA hasta la Fase 2b: el álbum se
+  // retiraba solo. Se escribió cuando un álbum solo podía nacer de una
+  // subida; desde §16 se crea vacío y CON NOMBRE, así que el auto-borrado
+  // destruía algo que alguien había titulado, y el nombre no se recupera.
+  await api('DELETE', `/fotos/foto/${foto.id}`, token);
+  const g2 = await api('GET', `/fotos/carpeta/${raiz.datos.id}/album`, token);
+  const sigue = (g2.datos?.albumes ?? []).find((a) => a.id === lleno.datos.id);
+  check(
+    'Al borrar la última foto el álbum SE QUEDA, vacío',
+    !!sigue && (sigue.fotos ?? []).length === 0,
+    `existe=${!!sigue} fotos=${(sigue?.fotos ?? []).length}`,
+  );
+
+  // Y la carpeta NO se puede borrar mientras ese álbum siga ahí: es el
+  // `Restrict` de siempre. Vaciar no es borrar, y esto lo demuestra.
+  const conAlbumVacio = await api(
+    'DELETE',
+    `/fotos/carpeta/${raiz.datos.id}`,
+    token,
+  );
+  check(
+    'y la carpeta sigue bloqueada por ese álbum vacío',
+    conAlbumVacio.estado === 400,
+    `HTTP ${conAlbumVacio.estado}`,
+  );
+
+  // 5 · borrar el álbum ya vacío es una decisión explícita
+  const borradoVacio = await api('DELETE', `/fotos/album/${lleno.datos.id}`, token);
+  check(
+    'el álbum vacío se elimina a mano, que es la vía que queda',
+    borradoVacio.estado === 200,
+    `HTTP ${borradoVacio.estado}`,
+  );
+
+  const dc = await api('DELETE', `/fotos/carpeta/${raiz.datos.id}`, token);
+  check('La carpeta ya sin álbumes se elimina', dc.estado === 200, `HTTP ${dc.estado}`);
+  if (dc.estado === 200)
+    pendientesDeLimpiar.splice(pendientesDeLimpiar.indexOf(raiz.datos.id), 1);
+
+  titulo('FASE 9 · mover una foto (Fase 2c)');
+
+  // Dos carpetas hermanas para poder mover ENTRE ellas, y una tarea.
+  const raizM = await api('POST', '/fotos/carpeta', token, {
+    nombre: `__verif_2c ${Date.now()}`,
+  });
+  pendientesDeLimpiar.unshift(raizM.datos.id);
+  const origenC = await api('POST', '/fotos/carpeta', token, {
+    nombre: 'Origen',
+    parentId: raizM.datos.id,
+  });
+  pendientesDeLimpiar.unshift(origenC.datos.id);
+  const destinoC = await api('POST', '/fotos/carpeta', token, {
+    nombre: 'Destino',
+    parentId: raizM.datos.id,
+    tipo: 'EQUIPO',
+  });
+  pendientesDeLimpiar.unshift(destinoC.datos.id);
+  const tareaM = await api(
+    'POST',
+    `/fotos/carpeta/${destinoC.datos.id}/tarea`,
+    token,
+    { titulo: 'Inspección 2c' },
+  );
+
+  const subidaM = await subirFotos(
+    `/fotos/carpeta/${origenC.datos.id}/album`,
+    token,
+    [img],
+    { descripcion: 'lote de origen' },
+  );
+  const albumOrigen = subidaM.datos?.albumId;
+  const gM = await api('GET', `/fotos/carpeta/${origenC.datos.id}/album`, token);
+  const fotoM = (gM.datos?.albumes ?? []).flatMap((a) => a.fotos ?? [])[0];
+
+  const sinDestino = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {});
+  check(
+    'mover sin decir a dónde se rechaza',
+    sinDestino.estado === 400,
+    `HTTP ${sinDestino.estado}`,
+  );
+
+  // 1 · a otra CARPETA: el servidor crea el álbum que la recoge.
+  const aCarpeta = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
+    carpetaId: destinoC.datos.id,
+  });
+  const gDestino = await api(
+    'GET',
+    `/fotos/carpeta/${destinoC.datos.id}/album`,
+    token,
+  );
+  check(
+    'se mueve a otra carpeta, y allí se le crea un álbum',
+    aCarpeta.estado === 201 &&
+      (gDestino.datos?.albumes ?? []).flatMap((a) => a.fotos ?? []).length === 1,
+    `HTTP ${aCarpeta.estado}`,
+  );
+
+  // ⚠️ Y el álbum de ORIGEN se queda, vacío: desde la Fase 2b vaciar no es
+  // borrar, y mover la última foto es vaciar.
+  const gOrigen = await api(
+    'GET',
+    `/fotos/carpeta/${origenC.datos.id}/album`,
+    token,
+  );
+  const albumSigue = (gOrigen.datos?.albumes ?? []).find(
+    (a) => a.id === albumOrigen,
+  );
+  check(
+    'el álbum de origen se queda vacío, no se borra',
+    !!albumSigue && (albumSigue.fotos ?? []).length === 0,
+    `existe=${!!albumSigue}`,
+  );
+
+  // 2 · a una TAREA.
+  const aTareaM = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
+    tareaId: tareaM.datos.id,
+  });
+  const fotosT = await api('GET', `/fotos/tarea/${tareaM.datos.id}/foto`, token);
+  check(
+    'se mueve a una tarea',
+    aTareaM.estado === 201 && (fotosT.datos ?? []).length === 1,
+    `HTTP ${aTareaM.estado} · ${(fotosT.datos ?? []).length}`,
+  );
+
+  // 3 · mover a donde ya está no escribe ni ensucia la bitácora.
+  const mismoSitio = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
+    tareaId: tareaM.datos.id,
+  });
+  check(
+    'moverla a donde ya está se contesta sin cambios',
+    mismoSitio.estado === 201 && mismoSitio.datos?.sinCambios === true,
+    `HTTP ${mismoSitio.estado} · sinCambios=${mismoSitio.datos?.sinCambios}`,
+  );
+
+  // 4 · el rastro de §23, con origen y destino legibles.
+  const histM = await api(
+    'GET',
+    `/fotos/auditoria/carpeta/${destinoC.datos.id}`,
+    token,
+  );
+  const evsM = (histM.datos?.eventos ?? histM.datos ?? []).filter(
+    (e) => e.accion === 'MOVIMIENTO' && e.entidad === 'FOTO',
+  );
+  check(
+    'cada movimiento queda en la bitácora diciendo de dónde a dónde',
+    evsM.length >= 1 && /→/.test(evsM[0].descripcion ?? ''),
+    evsM[0]?.descripcion,
+  );
+
+  // 5 · el permiso es de los DOS lados.
+  const ajenoM = await cuentaDePrueba(token, 'f9mover', [{ modulo: 'FOTOS' }]);
+  if (ajenoM) {
+    const sinNinguno = await api(
+      'POST',
+      `/fotos/foto/${fotoM.id}/mover`,
+      ajenoM.token,
+      { carpetaId: origenC.datos.id },
+    );
+    check(
+      'quien no ve la foto no la mueve — el 404 uniforme',
+      sinNinguno.estado === 404,
+      `HTTP ${sinNinguno.estado}`,
+    );
+
+    // Se le comparte SOLO el origen: puede leer y escribir donde está la
+    // foto, pero no en el destino. Debe fallar igual.
+    await api('POST', '/fotos/compartir', token, {
+      email: ajenoM.email,
+      carpetaIds: [destinoC.datos.id],
+      permiso: 'EDICION',
+    });
+    const sinDestinoPermiso = await api(
+      'POST',
+      `/fotos/foto/${fotoM.id}/mover`,
+      ajenoM.token,
+      { carpetaId: origenC.datos.id },
+    );
+    check(
+      'con permiso solo en el ORIGEN, mover al destino se rechaza',
+      sinDestinoPermiso.estado === 404 || sinDestinoPermiso.estado === 403,
+      `HTTP ${sinDestinoPermiso.estado}`,
+    );
+
+    // ⚠️ Y no puede mandar a su bandeja una foto que no subió: la bandeja
+    // de §18 es privada de quien sube, así que ahí desaparecería para todos
+    // menos para su autor.
+    const aBandejaAjena = await api(
+      'POST',
+      `/fotos/foto/${fotoM.id}/mover`,
+      ajenoM.token,
+      { bandeja: true },
+    );
+    check(
+      'nadie manda a «sin clasificar» una foto que no subió',
+      aBandejaAjena.estado === 400,
+      `HTTP ${aBandejaAjena.estado}`,
+    );
+
+    await api('DELETE', `/usuario/${ajenoM.id}`, token);
+  }
+
+  // 6 · su autor SÍ la devuelve a la bandeja.
+  const aBandejaM = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
+    bandeja: true,
+  });
+  const bandejaM = await api('GET', '/fotos/bandeja', token);
+  check(
+    'su autor sí la devuelve a «sin clasificar»',
+    aBandejaM.estado === 201 &&
+      (bandejaM.datos?.fotos ?? []).some((f) => f.id === fotoM.id),
+    `HTTP ${aBandejaM.estado}`,
+  );
+
+  titulo('FASE 9 · crear el álbum CON NOMBRE desde la bandeja (Fase 2c)');
+
+  // ⚠️ Hasta la Fase 2c el álbum que recogía el lote nacía SIN nombre, y no
+  // había forma de ponérselo al clasificar: había que clasificar y luego ir
+  // a editar el álbum, que es el paso de más que §18 quiere evitar.
+  const clasM = await api('POST', '/fotos/bandeja/clasificar', token, {
+    fotoIds: [fotoM.id],
+    carpetaId: origenC.datos.id,
+    nombre: 'Revisión del 23',
+    descripcion: 'Lo que se encontró al bajar de la obra',
+  });
+  const gNombre = await api(
+    'GET',
+    `/fotos/carpeta/${origenC.datos.id}/album`,
+    token,
+  );
+  const albumNombrado = (gNombre.datos?.albumes ?? []).find(
+    (a) => a.id === clasM.datos?.albumId,
+  );
+  check(
+    'clasificar en una carpeta crea el álbum CON el nombre indicado',
+    clasM.estado === 201 &&
+      albumNombrado?.nombre === 'Revisión del 23' &&
+      albumNombrado?.descripcion === 'Lo que se encontró al bajar de la obra',
+    `HTTP ${clasM.estado} · ${albumNombrado?.nombre}`,
+  );
+
+  // ⚠️ Hacia un álbum que YA existe el nombre se rechaza: sería renombrarlo
+  // por la puerta de atrás, y para eso está `PATCH /fotos/album/:id`.
+  await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, { bandeja: true });
+  const nombreAAlbum = await api('POST', '/fotos/bandeja/clasificar', token, {
+    fotoIds: [fotoM.id],
+    albumId: albumNombrado.id,
+    nombre: 'Otro nombre',
+  });
+  check(
+    'pero hacia un álbum existente el nombre se rechaza: no es renombrar',
+    nombreAAlbum.estado === 400,
+    `HTTP ${nombreAAlbum.estado}`,
+  );
+
+  // Sin nombre sigue funcionando: la captura rápida de §17 clasifica sin
+  // escribir nada, y entonces el álbum nace sin título como siempre.
+  const sinNombre = await api('POST', '/fotos/bandeja/clasificar', token, {
+    fotoIds: [fotoM.id],
+    albumId: albumNombrado.id,
+  });
+  check(
+    'y sin nombre clasifica igual, como hasta ahora',
+    sinNombre.estado === 201 && sinNombre.datos?.clasificadas === 1,
+    `HTTP ${sinNombre.estado}`,
+  );
+
+  // Limpieza de esta sección: la foto y los álbumes, para que las carpetas
+  // se puedan borrar (el `Restrict` de siempre).
+  await api('DELETE', `/fotos/foto/${fotoM.id}`, token);
+  for (const c of [origenC.datos.id, destinoC.datos.id]) {
+    const g = await api('GET', `/fotos/carpeta/${c}/album`, token);
+    for (const a of g.datos?.albumes ?? [])
+      await api('DELETE', `/fotos/album/${a.id}`, token);
+  }
+  await api('DELETE', `/fotos/tarea/${tareaM.datos.id}`, token);
+
+  // 5 · «no existe» y «no la ves» contestan lo mismo
+  const fantasma = await api('DELETE', '/fotos/album/99999999', token);
+  check(
+    'Un álbum inexistente contesta 404 con el texto uniforme',
+    fantasma.estado === 404 && /no existe o no tienes acceso/.test(fantasma.datos?.message ?? ''),
+    `HTTP ${fantasma.estado} · ${fantasma.datos?.message}`,
+  );
+}
+
+/**
+ * Fase 10 · exportaciones (§69) y el candado que le faltaba a la bitácora.
+ *
+ * Las dos mitades van juntas a propósito: exportar la auditoría sin haber
+ * cerrado antes quién puede leerla habría sido ampliar el agujero, no
+ * cerrarlo.
+ */
+async function fase10(db, tokenAdmin) {
+  titulo('FASE 10 · la bitácora ya no es un canal lateral');
+
+  const sup = await cuentaDePrueba(tokenAdmin, 'f10sup', [{ modulo: 'FOTOS' }]);
+  const lector = await cuentaDePrueba(tokenAdmin, 'f10lec', [
+    { modulo: 'FOTOS', nivelFotos: 'LECTURA_GLOBAL' },
+  ]);
+  if (!sup || !lector) return;
+
+  // Una carpeta que el supervisor NO puede ver.
+  const oculta = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: `Fase10 oculta ${Date.now()}`,
+  });
+  if (oculta.estado !== 201) {
+    check('Carpeta de prueba creada', false, `HTTP ${oculta.estado}`);
+    return;
+  }
+  pendientesDeLimpiar.push(oculta.datos.id);
+  const cid = oculta.datos.id;
+
+  // La premisa: no la ve.
+  const ve = await api('GET', `/fotos/carpeta/${cid}`, sup.token);
+  check('El supervisor NO ve la carpeta (404)', ve.estado === 404, `HTTP ${ve.estado}`);
+
+  // ⚠️ Esto es lo que estaba roto: la bitácora la enseñaba igual.
+  const hilo = await api('GET', `/fotos/auditoria/carpeta/${cid}`, sup.token);
+  check(
+    'Y tampoco ve su historial — mismo 404, no un 200 con los eventos',
+    hilo.estado === 404,
+    `HTTP ${hilo.estado}`,
+  );
+
+  const global = await api('GET', '/fotos/auditoria', sup.token);
+  check(
+    'La bitácora del módulo le contesta 403',
+    global.estado === 403,
+    `HTTP ${global.estado}`,
+  );
+
+  // Un LECTURA_GLOBAL sí ve el hilo de la carpeta (tiene LECTURA sobre todo)
+  // pero NO la consulta general, que es de ADMIN_GLOBAL.
+  const hiloLector = await api('GET', `/fotos/auditoria/carpeta/${cid}`, lector.token);
+  check(
+    'Un LECTURA_GLOBAL sí ve el historial de la carpeta',
+    hiloLector.estado === 200,
+    `HTTP ${hiloLector.estado}`,
+  );
+  const globalLector = await api('GET', '/fotos/auditoria', lector.token);
+  check(
+    '…pero la consulta general sigue siendo de ADMIN_GLOBAL',
+    globalLector.estado === 403,
+    `HTTP ${globalLector.estado}`,
+  );
+
+  const admin = await api('GET', '/fotos/auditoria', tokenAdmin);
+  check('El administrador la sigue consultando', admin.estado === 200, `HTTP ${admin.estado}`);
+
+  titulo('FASE 10 · exportaciones (§69)');
+
+  const descargar = async (ruta, token) => {
+    const r = await fetch(API + ruta, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    const buf = Buffer.from(await r.arrayBuffer());
+    return {
+      estado: r.status,
+      buffer: buf,
+      nombre: r.headers.get('content-disposition') ?? '',
+      tipo: r.headers.get('content-type') ?? '',
+    };
+  };
+  const esXlsx = (b) => b.slice(0, 2).toString('hex') === '504b';
+  const esPdf = (b) => b.slice(0, 4).toString() === '%PDF';
+
+  for (const [ruta, etiqueta] of [
+    [`/fotos/carpeta/${cid}/tarea/exportar`, 'Tareas'],
+    ['/fotos/auditoria/exportar', 'Auditoría del módulo'],
+    [`/fotos/auditoria/carpeta/${cid}/exportar`, 'Historial de carpeta'],
+  ]) {
+    const x = await descargar(`${ruta}?formato=excel`, tokenAdmin);
+    check(
+      `${etiqueta} · Excel se genera y es un XLSX de verdad`,
+      x.estado === 200 && esXlsx(x.buffer) && x.buffer.length > 1000,
+      `HTTP ${x.estado} · ${x.buffer.length} bytes`,
+    );
+    const p = await descargar(`${ruta}?formato=pdf`, tokenAdmin);
+    check(
+      `${etiqueta} · PDF se genera y es un PDF de verdad`,
+      p.estado === 200 && esPdf(p.buffer) && p.buffer.length > 1000,
+      `HTTP ${p.estado} · ${p.buffer.length} bytes`,
+    );
+  }
+
+  const malo = await api('GET', '/fotos/auditoria/exportar?formato=word', tokenAdmin);
+  check('Un formato inválido se rechaza con 400', malo.estado === 400, `HTTP ${malo.estado}`);
+
+  // El permiso de exportar es el del service que lee, no uno propio.
+  const expSup = await descargar(`/fotos/carpeta/${cid}/tarea/exportar`, sup.token);
+  check(
+    'Exportar las tareas de una carpeta que no ve → 404',
+    expSup.estado === 404,
+    `HTTP ${expSup.estado}`,
+  );
+  const audSup = await descargar('/fotos/auditoria/exportar', sup.token);
+  check(
+    'Exportar la bitácora sin ser administrador → 403',
+    audSup.estado === 403,
+    `HTTP ${audSup.estado}`,
+  );
+
+  // ⚠️ El nombre de archivo va dentro de una cabecera HTTP y lo escribe
+  // cualquiera: una carpeta con comillas rompía el `filename` y colaba
+  // parámetros sueltos en `Content-Disposition`.
+  const mala = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'ma"la; evil=1',
+  });
+  if (mala.estado === 201) {
+    pendientesDeLimpiar.push(mala.datos.id);
+    const x = await descargar(
+      `/fotos/auditoria/carpeta/${mala.datos.id}/exportar?formato=excel`,
+      tokenAdmin,
+    );
+    check(
+      'Un nombre con comillas NO inyecta parámetros en la cabecera',
+      !/evil=1/.test(x.nombre) && /^attachment; filename="[\w.-]+"$/.test(x.nombre),
+      x.nombre,
+    );
+  }
+
+  // Y los acentos se pliegan en vez de salir crudos en la cabecera.
+  const conTilde = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Pabellón ñandú',
+  });
+  if (conTilde.estado === 201) {
+    pendientesDeLimpiar.push(conTilde.datos.id);
+    const x = await descargar(
+      `/fotos/auditoria/carpeta/${conTilde.datos.id}/exportar?formato=excel`,
+      tokenAdmin,
+    );
+    check(
+      'Los acentos del nombre se pliegan a ASCII',
+      x.nombre.includes('Pabellon_nandu'),
+      x.nombre,
+    );
+  }
+}
+
 async function regresion(token) {
   titulo('REGRESIÓN · Costos, Equipos y Auth siguen respondiendo');
   const rutas = [
@@ -3274,6 +4297,8 @@ async function limpiar(token) {
     if (soloFase === null || soloFase === 6) await fase6(db, token);
     if (soloFase === null || soloFase === 7) await fase7(db, token);
     if (soloFase === null || soloFase === 8) await fase8(db, token);
+    if (soloFase === null || soloFase === 9) await fase9(db, token);
+    if (soloFase === null || soloFase === 10) await fase10(db, token);
     if (soloFase === null) await regresion(token);
   } finally {
     await limpiar(token);

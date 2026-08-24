@@ -136,14 +136,17 @@ export interface CarpetaMinima {
   cerrada: boolean;
   actualizadoEn: Date;
   /**
-   * OPCIONALES porque no todos los caminos los cargan: `carpetaPorId` sí
-   * —es la carpeta que se está abriendo—, pero `NavegacionService` construye
-   * las hijas con su propia consulta y no los necesita para decidir permisos.
-   * Nada de la cascada de §25 los mira; están para que quien abre una
-   * carpeta sepa si es un EQUIPO y pueda ofrecer las tareas de §13.
+   * OPCIONAL porque no todos los caminos lo cargan: `carpetaPorId` sí —es
+   * la carpeta que se está abriendo—, pero `NavegacionService` construye
+   * las hijas con su propia consulta y no lo necesita para decidir
+   * permisos. Nada de la cascada de §25 lo mira; está para que quien abre
+   * una carpeta sepa si es un EQUIPO y pueda ofrecer las tareas de §13.
+   *
+   * ⚠️ Aquí acompañaba un `equipo` con el código del catálogo de Gestión de
+   * Equipos. Se retiró en la Fase 1a de «Gestión de contenido» junto con la
+   * FK.
    */
   tipo?: TipoCarpetaFotos;
-  equipo?: { id: number; codigoInterno: string | null } | null;
 }
 
 /** Una carpeta ya resuelta: con el permiso efectivo de quien preguntó. */
@@ -345,12 +348,11 @@ export class AccesoService {
         parentId: true,
         cerrada: true,
         actualizadoEn: true,
-        // `tipo` y el equipo enlazado viajan con la carpeta desde la Fase 5:
-        // quien la abre necesita saber si es un EQUIPO para ofrecer las
-        // tareas de §13. Es una columna y un join por FK indexada, y esto se
-        // llama una vez por petición —las hijas las carga `conContadores`—.
+        // `tipo` viaja con la carpeta desde la Fase 5: quien la abre
+        // necesita saber si es un EQUIPO para ofrecer las tareas de §13.
+        // Es una columna más y esto se llama una vez por petición —las
+        // hijas las carga `conContadores`—.
         tipo: true,
-        equipo: { select: { id: true, codigoInterno: true } },
       },
     });
     if (!carpeta) throw new NotFoundException(NO_EXISTE_O_SIN_ACCESO);

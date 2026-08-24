@@ -93,6 +93,7 @@ export function TablaItems({
                         variant="outline"
                         size="icon-sm"
                         aria-label={`Editar ${item.descripcion}`}
+                        title={`Editar ${item.descripcion}`}
                         onClick={() => onEditar?.(item)}
                       >
                         <PencilIcon />
@@ -101,6 +102,7 @@ export function TablaItems({
                         variant="destructive"
                         size="icon-sm"
                         aria-label={`Eliminar ${item.descripcion}`}
+                        title={`Eliminar ${item.descripcion}`}
                         onClick={() => onEliminar?.(item)}
                       >
                         <Trash2Icon />

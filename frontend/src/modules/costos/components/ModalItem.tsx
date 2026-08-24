@@ -13,7 +13,8 @@ import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Select } from '@/shared/ui/select';
 import { Spinner } from '@/shared/ui/spinner';
-import { Campo, CLASES_TEXTAREA } from './Campo';
+import { Campo } from './Campo';
+import { Textarea } from '@/shared/ui/textarea';
 import type {
   GuardarItemPayload,
   OpcionCatalogo,
@@ -96,7 +97,7 @@ export function ModalItem({
         </DialogHeader>
 
         {yaCotizado && alteraLoPedido && (
-          <div className="flex gap-2.5 rounded-lg border border-amber-600/25 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <div className="flex gap-2.5 rounded-lg border border-warning/25 bg-warning-soft p-3 text-sm text-warning-soft-foreground">
             <AlertTriangleIcon className="mt-0.5 size-4 shrink-0" />
             <div className="space-y-1">
               <p className="font-medium">
@@ -156,12 +157,11 @@ export function ModalItem({
 
           <div className="sm:col-span-6">
             <Campo label="Detalle de observación">
-              <textarea
+              <Textarea
                 value={detalle}
                 onChange={(e) => setDetalle(e.target.value)}
                 rows={2}
                 placeholder="Para sellado de ductos."
-                className={CLASES_TEXTAREA}
               />
             </Campo>
           </div>

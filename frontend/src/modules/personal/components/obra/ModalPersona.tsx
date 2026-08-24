@@ -64,7 +64,7 @@ export function ModalPersona({
                 className={cn(
                   'flex flex-col items-center gap-0.5 rounded-lg border px-1 py-2 text-xs',
                   d.participo
-                    ? 'border-emerald-600/25 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+                    ? 'border-success/25 bg-success-soft'
                     : 'border-border bg-muted/30',
                 )}
               >
@@ -72,7 +72,7 @@ export function ModalPersona({
                   {fechaCorta(d.fecha)}
                 </span>
                 {d.participo ? (
-                  <CheckIcon className="size-4 text-emerald-600 dark:text-emerald-400" />
+                  <CheckIcon className="size-4 text-success" />
                 ) : (
                   <XIcon className="size-4 text-muted-foreground" />
                 )}

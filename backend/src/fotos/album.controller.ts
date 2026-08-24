@@ -113,6 +113,15 @@ export class AlbumController {
     return this.album.editarAlbum(usuario, id, dto ?? {});
   }
 
+  /** Elimina un álbum vacío (§16). Con fotos dentro se rechaza con 400. */
+  @Delete('album/:id')
+  eliminarAlbum(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.album.eliminarAlbum(usuario, id);
+  }
+
   /** Subir a un álbum que YA existe (§16). */
   @Post('album/:id/foto')
   @UseFilters(ErroresDeSubidaFilter)
@@ -198,6 +207,9 @@ export class AlbumController {
       carpetaId?: number;
       albumId?: number;
       tareaId?: number;
+      /** Para el álbum que se crea al clasificar en una carpeta (Fase 2c). */
+      nombre?: unknown;
+      descripcion?: unknown;
     },
   ) {
     // El cuerpo llega con ids sueltos —es lo natural en JSON— y aquí se
@@ -217,7 +229,10 @@ export class AlbumController {
         'Indica a dónde van las fotos: una tarea, un álbum o una carpeta.',
       );
 
-    return this.album.clasificar(usuario, dto?.fotoIds ?? [], destino);
+    return this.album.clasificar(usuario, dto?.fotoIds ?? [], destino, {
+      nombre: dto?.nombre,
+      descripcion: dto?.descripcion,
+    });
   }
 
   @Get('foto/:fotoId/descarga')
@@ -229,6 +244,62 @@ export class AlbumController {
   }
 
   /** Borra quien la subió (EDICION) o quien administra la carpeta (TOTAL). */
+  /**
+   * Corregir la descripción de una foto ya subida.
+   *
+   * `PATCH` de un solo campo y no un `PUT` del recurso: es lo ÚNICO que se
+   * puede cambiar de una foto. La imagen no se reemplaza —eso permitiría
+   * cambiar la prueba de una inspección sin que se note—, y su sitio se
+   * mueve por otra ruta.
+   */
+  @Patch('foto/:fotoId')
+  editarFoto(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('fotoId', ParseIntPipe) fotoId: number,
+    @Body() dto: { descripcion?: unknown },
+  ) {
+    return this.album.editarDescripcion(usuario, fotoId, dto?.descripcion);
+  }
+
+  /**
+   * Mover una foto (§1.2 de gestión de contenido).
+   *
+   * El destino llega igual que en `clasificar` —ids sueltos que aquí se
+   * traducen a la unión tipada—, y admite además `bandeja: true` para
+   * devolverla a «sin clasificar». Se exige EDICION en origen Y en destino;
+   * lo decide el service.
+   */
+  @Post('foto/:fotoId/mover')
+  moverFoto(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('fotoId', ParseIntPipe) fotoId: number,
+    @Body()
+    dto: {
+      carpetaId?: number;
+      albumId?: number;
+      tareaId?: number;
+      bandeja?: boolean;
+    },
+  ) {
+    const destino =
+      dto?.bandeja === true
+        ? ({ tipo: 'bandeja' } as const)
+        : dto?.tareaId !== undefined
+          ? ({ tipo: 'tarea', tareaId: Number(dto.tareaId) } as const)
+          : dto?.albumId !== undefined
+            ? ({ tipo: 'album', albumId: Number(dto.albumId) } as const)
+            : dto?.carpetaId !== undefined
+              ? ({ tipo: 'carpeta', carpetaId: Number(dto.carpetaId) } as const)
+              : null;
+
+    if (!destino)
+      throw new BadRequestException(
+        'Indica a dónde va la foto: una tarea, un álbum, una carpeta, o «sin clasificar».',
+      );
+
+    return this.album.mover(usuario, fotoId, destino);
+  }
+
   @Delete('foto/:fotoId')
   eliminarFoto(
     @UsuarioActual() usuario: UsuarioAutenticado,

@@ -228,7 +228,7 @@ export function MaestroCrud<T extends FilaMaestro>({
                             className={
                               activo
                                 ? 'text-muted-foreground'
-                                : 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-success'
                             }
                           />
                         </Button>

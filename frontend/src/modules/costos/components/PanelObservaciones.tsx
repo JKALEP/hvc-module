@@ -4,9 +4,9 @@ import { CheckCircle2Icon, MessageSquareWarningIcon } from 'lucide-react';
 import { Button } from '@/shared/ui/button';
 import { Badge } from '@/shared/ui/badge';
 import { Spinner } from '@/shared/ui/spinner';
-import { CLASES_TEXTAREA } from './Campo';
 import { formatFecha } from '@/shared/lib/format';
 import type { Observacion } from '@/modules/costos/types';
+import { Textarea } from '@/shared/ui/textarea';
 
 /**
  * Las observaciones del gestor y su confirmación (§27-29).
@@ -42,7 +42,7 @@ export function PanelObservaciones({
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2">
-        <MessageSquareWarningIcon className="size-4 text-amber-600 dark:text-amber-500" />
+        <MessageSquareWarningIcon className="size-4 text-warning" />
         <h2 className="text-sm font-semibold text-foreground">
           Observaciones del gestor
         </h2>
@@ -69,7 +69,7 @@ export function PanelObservaciones({
               className={
                 atendida
                   ? 'rounded-lg border border-border bg-muted/30 p-3'
-                  : 'rounded-lg border border-amber-600/25 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/10'
+                  : 'rounded-lg border border-warning/25 bg-warning-soft p-3'
               }
             >
               <div className="flex items-start justify-between gap-3">
@@ -101,14 +101,13 @@ export function PanelObservaciones({
 
               {!atendida && puedeConfirmar && (
                 <div className="mt-3 space-y-2">
-                  <textarea
+                  <Textarea
                     value={respuestas[o.id] ?? ''}
                     onChange={(e) =>
                       setRespuestas((r) => ({ ...r, [o.id]: e.target.value }))
                     }
                     rows={2}
                     placeholder="Qué corregiste (opcional)."
-                    className={CLASES_TEXTAREA}
                   />
                   <Button
                     size="sm"

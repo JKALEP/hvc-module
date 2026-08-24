@@ -81,7 +81,7 @@ export function HistorialRondas({
               className={cn(
                 'rounded-xl border p-4',
                 r.vigente && r.pendiente
-                  ? 'border-amber-600/30 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/5'
+                  ? 'border-warning/30 bg-warning-soft/50'
                   : 'border-border',
                 // Una ronda ya resuelta y superada se atenúa: sigue ahí
                 // para consultarla, pero no compite por la atención con

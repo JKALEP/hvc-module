@@ -19,12 +19,22 @@ import type { EstadoTarea, NuevaTarea } from '@/modules/fotos/types';
  */
 export function useTareas(
   carpetaId: number | null,
-  opciones: { estado?: EstadoTarea | ''; habilitado?: boolean } = {},
+  opciones: {
+    estado?: EstadoTarea | '';
+    habilitado?: boolean;
+    /** El portal del cliente pega a otras rutas y no filtra por estado. */
+    portal?: boolean;
+  } = {},
 ) {
-  const { estado = '', habilitado = true } = opciones;
+  const { estado = '', habilitado = true, portal = false } = opciones;
   return useQuery({
-    queryKey: QUERY_KEYS.tareas(carpetaId ?? 0, estado),
-    queryFn: () => fotos.verTareas(carpetaId!, estado || undefined),
+    queryKey: portal
+      ? QUERY_KEYS.portalTareas(carpetaId ?? 0)
+      : QUERY_KEYS.tareas(carpetaId ?? 0, estado),
+    queryFn: () =>
+      portal
+        ? fotos.verTareasPortal(carpetaId!)
+        : fotos.verTareas(carpetaId!, estado || undefined),
     enabled: habilitado && carpetaId !== null,
   });
 }
@@ -102,5 +112,40 @@ export function useEliminarTarea() {
     },
     onError: (error) =>
       toast.error(getErrorMessage(error, 'No se pudo eliminar la tarea')),
+  });
+}
+
+/**
+ * Quién puede ser responsable de una tarea (§13).
+ *
+ * Se pide una vez y se reutiliza: la lista no cambia mientras se rellena un
+ * formulario, y pedirla por cada tarea abierta serían N llamadas iguales.
+ */
+export function useAsignables(habilitado = true) {
+  return useQuery({
+    queryKey: QUERY_KEYS.asignablesFotos,
+    queryFn: fotos.verAsignables,
+    enabled: habilitado,
+    // Cambia cuando el SuperAdmin da de alta a alguien, no dentro de una
+    // sesión de trabajo en obra.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Las fotos que documentan una tarea (§15). */
+export function useFotosDeTarea(
+  tareaId: number | null,
+  habilitado = true,
+  portal = false,
+) {
+  return useQuery({
+    queryKey: portal
+      ? QUERY_KEYS.portalFotosDeTarea(tareaId ?? 0)
+      : QUERY_KEYS.fotosDeTarea(tareaId ?? 0),
+    queryFn: () =>
+      portal
+        ? fotos.verFotosDeTareaPortal(tareaId!)
+        : fotos.verFotosDeTarea(tareaId!),
+    enabled: habilitado && tareaId !== null,
   });
 }

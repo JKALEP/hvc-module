@@ -17,6 +17,9 @@ import { AuditoriaFotosService } from './auditoria-fotos.service';
 import { PlantillaService } from './plantilla.service';
 import type { GuardarPlantillaDto } from './plantilla.service';
 import { ImportacionFotosService } from './importacion.service';
+import { CampoFotosService } from './campo.service';
+import { ConfiguracionFotosService } from './configuracion.service';
+import type { GuardarCampoDto, EditarCampoDto } from './campo.service';
 import type { Decision } from './importacion.service';
 import { RequiereModulo, UsuarioActual } from '../auth/decoradores';
 import { Modulo } from '../../generated/prisma/enums';
@@ -46,6 +49,8 @@ export class AdministracionFotosController {
     private readonly auditoria: AuditoriaFotosService,
     private readonly plantillas: PlantillaService,
     private readonly importacion: ImportacionFotosService,
+    private readonly campos: CampoFotosService,
+    private readonly configuracion: ConfiguracionFotosService,
   ) {}
 
   // ── Auditoría (§23) ──
@@ -53,6 +58,7 @@ export class AdministracionFotosController {
   /** «Quién hizo qué y cuándo», con filtros. */
   @Get('auditoria')
   consultar(
+    @UsuarioActual() usuario: UsuarioAutenticado,
     @Query('usuarioId', new ParseIntPipe({ optional: true }))
     usuarioId?: number,
     @Query('accion') accion?: string,
@@ -61,7 +67,7 @@ export class AdministracionFotosController {
     @Query('hasta') hasta?: string,
     @Query('cursor', new ParseIntPipe({ optional: true })) cursor?: number,
   ) {
-    return this.auditoria.consultar({
+    return this.auditoria.consultar(usuario, {
       usuarioId,
       accion: accion as AccionFotos | undefined,
       entidad: entidad as EntidadFotos | undefined,
@@ -73,8 +79,93 @@ export class AdministracionFotosController {
 
   /** El hilo de una carpeta: todo lo que le ha pasado (§23). */
   @Get('auditoria/carpeta/:id')
-  deCarpeta(@Param('id', ParseIntPipe) id: number) {
-    return this.auditoria.deCarpeta(id);
+  deCarpeta(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.auditoria.deCarpeta(usuario, id);
+  }
+
+  // ── Colores del explorador (Fase 1c) ──
+  //
+  // El color por TIPO de carpeta es configuración del módulo, así que vive
+  // aquí. Leerlo es de cualquiera —lo necesita quien pinte el explorador, y
+  // «los equipos son celestes» no revela nada—; cambiarlo, de ADMIN_GLOBAL,
+  // y eso lo hace cumplir el service.
+
+  @Get('configuracion/color')
+  colores() {
+    return this.configuracion.colores();
+  }
+
+  @Patch('configuracion/color')
+  cambiarColor(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: { tipo?: unknown; color?: unknown },
+  ) {
+    return this.configuracion.cambiarColor(usuario, dto?.tipo, dto?.color);
+  }
+
+  // ── Campos configurables del EQUIPO (Fase 1b) ──
+  //
+  // Viven aquí y no en `CarpetaController` porque son CONFIGURACIÓN del
+  // módulo, no trabajo dentro de una carpeta: ninguna de estas rutas cuelga
+  // de un `carpeta/:id`. Es el mismo criterio que puso aquí las plantillas.
+  //
+  // El permiso lo decide `CampoFotosService`, no un decorador: escribir
+  // exige ADMIN_GLOBAL, pero LEER no —cualquiera con el módulo necesita la
+  // lista para pintar el formulario de un equipo, y son nombres de campo,
+  // no datos de nadie—. Un `@RequiereNivelFotos` en la clase habría cerrado
+  // también la lectura.
+
+  @Get('campo')
+  listarCampos(@Query('activos') activos?: string) {
+    return this.campos.listar(activos === 'true');
+  }
+
+  @Post('campo')
+  crearCampo(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: GuardarCampoDto,
+  ) {
+    return this.campos.crear(usuario, dto);
+  }
+
+  /** Renombrar, reordenar y activar/desactivar. El `tipo` no se toca. */
+  @Patch('campo/:id')
+  editarCampo(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EditarCampoDto,
+  ) {
+    return this.campos.editar(usuario, id, dto);
+  }
+
+  /** Solo si nadie lo usa; con valores, el service manda desactivarlo. */
+  @Delete('campo/:id')
+  eliminarCampo(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.campos.eliminar(usuario, id);
+  }
+
+  @Post('campo/:id/opcion')
+  agregarOpcion(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body('etiqueta') etiqueta: unknown,
+  ) {
+    return this.campos.agregarOpcion(usuario, id, etiqueta);
+  }
+
+  /** Elegida por alguien = se desactiva; si no, se borra. Lo decide el service. */
+  @Delete('campo/opcion/:opcionId')
+  eliminarOpcion(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('opcionId', ParseIntPipe) opcionId: number,
+  ) {
+    return this.campos.eliminarOpcion(usuario, opcionId);
   }
 
   // ── Plantillas de estructura (§20) ──

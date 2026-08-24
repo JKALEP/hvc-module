@@ -39,6 +39,61 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
+
+    /* Marca (§2.2 del design system). En este sistema `accent` NO es la
+       marca —es el fondo de hover de un item— y la marca vive aparte, en
+       `brand`. Confundirlos rompe el look entero. */
+    --color-brand: var(--brand);
+    --color-brand-foreground: var(--brand-foreground);
+    --color-brand-soft: var(--brand-soft);
+    --color-brand-soft-foreground: var(--brand-soft-foreground);
+
+    /* Estados semánticos, cada uno con su variante `soft` (§2.2). La
+       variante tenue es la NORMAL: los estados se pintan como pastillas de
+       fondo suave con texto oscuro del mismo matiz, no como bloques
+       saturados. */
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-success-soft: var(--success-soft);
+    --color-success-soft-foreground: var(--success-soft-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-warning-soft: var(--warning-soft);
+    --color-warning-soft-foreground: var(--warning-soft-foreground);
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-info-soft: var(--info-soft);
+    --color-info-soft-foreground: var(--info-soft-foreground);
+    /* Paleta del explorador de Fotos (Fase 1c). Ver `:root`. */
+    --color-amarillo: var(--amarillo);
+    --color-amarillo-foreground: var(--amarillo-foreground);
+    --color-amarillo-soft: var(--amarillo-soft);
+    --color-amarillo-soft-foreground: var(--amarillo-soft-foreground);
+    --color-celeste: var(--celeste);
+    --color-celeste-foreground: var(--celeste-foreground);
+    --color-celeste-soft: var(--celeste-soft);
+    --color-celeste-soft-foreground: var(--celeste-soft-foreground);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-destructive-soft: var(--destructive-soft);
+    --color-destructive-soft-foreground: var(--destructive-soft-foreground);
+
+    /* Borde de hover de elementos interactivos y pulgar del scrollbar. */
+    --color-border-strong: var(--border-strong);
+
+    /* Identidad de las pantallas de acceso (login e invitación). */
+    --color-auth: var(--auth);
+    --color-auth-hover: var(--auth-hover);
+    --color-auth-foreground: var(--auth-foreground);
+    --color-auth-soft: var(--auth-soft);
+    --color-auth-soft-foreground: var(--auth-soft-foreground);
+
+    /* Sombras (§5.2): el color NO es negro puro sino el mismo grafito frío
+       del texto, y las opacidades están a la mitad de las de Tailwind. Las
+       sombras insinúan, no dibujan: la separación la hace el borde. */
+    --shadow-xs: 0 1px 2px 0 rgb(15 18 24 / 0.04);
+    --shadow-sm: 0 1px 2px 0 rgb(15 18 24 / 0.04), 0 1px 1px 0 rgb(15 18 24 / 0.03);
+    --shadow-md: 0 4px 6px -1px rgb(15 18 24 / 0.05), 0 2px 4px -2px rgb(15 18 24 / 0.04);
+    --shadow-lg: 0 10px 15px -3px rgb(15 18 24 / 0.06), 0 4px 6px -4px rgb(15 18 24 / 0.04);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -49,32 +104,143 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
+    /* ============================================================
+       SUPERFICIES
+       ⚠️ El fondo NO es blanco puro: es un off-white CÁLIDO. Es la
+       decisión que más define el look. Con el fondo en blanco, las
+       cards (que sí son blanco puro) dejan de despegarse de él y se
+       pierde la profundidad — que en este sistema la da el contraste
+       card/fondo, no las sombras.
+       ============================================================ */
+    --background: hsl(30 12% 97%);
+    --foreground: hsl(220 16% 13%);
+    --card: hsl(0 0% 100%);
+    --card-foreground: hsl(220 16% 13%);
+    --popover: hsl(0 0% 100%);
+    --popover-foreground: hsl(220 16% 13%);
 
-    /* Color de marca: coral/naranja tomado del logo (llama HVC). */
-    --primary: oklch(0.58 0.19 35);
-    --primary-foreground: oklch(0.99 0 0);
+    /* ============================================================
+       INTERACTIVOS
+       ⚠️ El primario es GRAFITO, no la marca. El acento de marca se
+       usa con avaricia (foco, item activo, links) y nunca pinta un
+       botón primario ni un bloque grande. El coral de HVC no
+       desaparece: vive en `--brand`, más abajo, que es exactamente
+       el papel que este sistema reserva al color de marca.
+       ============================================================ */
+    --primary: hsl(220 16% 13%);
+    --primary-foreground: hsl(0 0% 100%);
 
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.5 0 0);
-    --accent: oklch(0.96 0.02 35);
-    --accent-foreground: oklch(0.35 0.12 35);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.914 0 0);
-    --input: oklch(0.914 0 0);
-    --ring: oklch(0.58 0.19 35 / 0.45);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --secondary: hsl(220 14% 96%);
+    --secondary-foreground: hsl(220 16% 18%);
+    --muted: hsl(220 14% 96%);
+    --muted-foreground: hsl(220 9% 46%);
+
+    /* ⚠️ `accent` aquí significa «fondo de hover de un item», NO
+       «color de acento de marca». Por eso es un gris neutro. */
+    --accent: hsl(220 14% 94%);
+    --accent-foreground: hsl(220 16% 18%);
+
+    /* ============================================================
+       MARCA — el coral de HVC, tomado del logo (la llama).
+       Se conserva su identidad; lo que cambia es su PAPEL: pasa de
+       pintar botones a ser el acento escaso del sistema.
+       ============================================================ */
+    --brand: oklch(0.58 0.19 35);
+    --brand-foreground: oklch(0.99 0 0);
+    --brand-soft: oklch(0.96 0.03 35);
+    --brand-soft-foreground: oklch(0.42 0.14 35);
+
+    /* ============================================================
+       ESTADOS SEMÁNTICOS
+       No son branding sino convención universal, así que se toman
+       tal cual del sistema de referencia. La variante `soft` es la
+       que se usa a diario; la sólida es excepcional.
+       ============================================================ */
+    --success: hsl(142 70% 32%);
+    --success-foreground: hsl(0 0% 100%);
+    --success-soft: hsl(142 50% 95%);
+    --success-soft-foreground: hsl(142 70% 22%);
+
+    --warning: hsl(32 90% 40%);
+    --warning-foreground: hsl(0 0% 100%);
+    --warning-soft: hsl(32 80% 95%);
+    --warning-soft-foreground: hsl(32 85% 28%);
+
+    --info: hsl(215 60% 38%);
+    --info-foreground: hsl(0 0% 100%);
+    --info-soft: hsl(215 70% 95%);
+    --info-soft-foreground: hsl(215 75% 28%);
+
+    --destructive: hsl(0 72% 45%);
+    --destructive-foreground: hsl(0 0% 100%);
+    --destructive-soft: hsl(0 70% 96%);
+    --destructive-soft-foreground: hsl(0 72% 38%);
+
+    /* ============================================================
+       PALETA DEL EXPLORADOR DE FOTOS (Fase 1c)
+       ============================================================
+       ⚠️ Estos DOS son la única familia del sistema nombrada por su
+       HUE y no por su significado (`success`, `warning`, `info`…), y
+       es deliberado: aquí el significado ES el color. Qué tipo de
+       carpeta usa cuál lo decide un administrador desde la base
+       (`configuracion_color_carpeta`), así que un nombre semántico
+       mentiría en cuanto alguien los intercambiara.
+
+       No se reutilizaron los que ya había porque ninguno es el color
+       pedido: `--warning` es un ámbar tostado, no amarillo, y
+       `--info` es azul OSCURO — justo lo que HVC descartó.
+
+       Se usan en variante `soft` sobre el icono de la tarjeta, NO
+       sobre el fondo: el mecanismo de profundidad del sistema es el
+       contraste entre el fondo cálido y la card blanca, y teñir la
+       card entera lo aplanaría.
+
+       Añadir un color a la paleta son TRES sitios, y los tres los
+       vigila el compilador: el enum `ColorCarpetaFotos`, estos
+       tokens, y `COLOR_A_CLASES` en el frontend. Tailwind solo
+       genera las clases que ve escritas, así que no vale componer el
+       nombre en tiempo de ejecución.
+       ============================================================ */
+    --amarillo: hsl(45 92% 42%);
+    --amarillo-foreground: hsl(45 100% 12%);
+    --amarillo-soft: hsl(45 95% 92%);
+    --amarillo-soft-foreground: hsl(38 85% 28%);
+
+    --celeste: hsl(198 85% 45%);
+    --celeste-foreground: hsl(0 0% 100%);
+    --celeste-soft: hsl(198 90% 93%);
+    --celeste-soft-foreground: hsl(200 80% 28%);
+
+    /* ============================================================
+       BORDES Y FOCO
+       ============================================================ */
+    --border: hsl(220 13% 91%);
+    --border-strong: hsl(220 13% 82%);
+    --input: hsl(220 13% 91%);
+    --ring: hsl(220 13% 60%);
+
+    /* ============================================================
+       PANTALLAS DE ACCESO — identidad propia, a propósito
+       Login e invitación NO usan la paleta de la aplicación: son la
+       cara externa del sistema, se ven sobre una fotografía a pantalla
+       completa y llevan el azul corporativo. Se decidió conservarlo.
+       Lo que sí cambia es que ahora vive en TOKENS y no repartido en
+       dos archivos como `blue-950` / `blue-900` / `blue-100`, así que
+       se cambia desde aquí y las dos pantallas se mueven juntas.
+       ============================================================ */
+    --auth: hsl(226 57% 21%);
+    --auth-hover: hsl(224 64% 33%);
+    --auth-foreground: hsl(0 0% 100%);
+    --auth-soft: hsl(214 95% 93%);
+    --auth-soft-foreground: hsl(224 64% 33%);
+
+    /* Paleta de gráficos: industrial y deliberadamente DESATURADA —
+       ninguna serie grita más que otra. */
+    --chart-1: hsl(188 78% 35%);
+    --chart-2: hsl(215 60% 45%);
+    --chart-3: hsl(32 85% 45%);
+    --chart-4: hsl(142 50% 38%);
+    --chart-5: hsl(280 30% 45%);
 
     --serie-programado: #2a78d6;
     --serie-ejecutado: #eb6834;
@@ -89,16 +255,22 @@
        están solo aquí en :root y NO se repiten dentro de .dark más
        abajo.
        ============================================================ */
-    --sidebar: oklch(0.205 0.025 258);
-    --sidebar-foreground: oklch(0.88 0.01 258);
-    --sidebar-muted: oklch(0.6 0.02 258);
-    --sidebar-border: oklch(1 0 0 / 8%);
-    --sidebar-hover: oklch(1 0 0 / 6%);
-    --sidebar-accent: color-mix(in oklch, var(--primary) 20%, var(--sidebar));
-    --sidebar-accent-foreground: oklch(0.97 0.01 35);
-    --sidebar-primary: var(--primary);
-    --sidebar-primary-foreground: var(--primary-foreground);
-    --sidebar-ring: var(--ring);
+    --sidebar: hsl(222 75% 10%);
+    --sidebar-foreground: hsl(220 15% 88%);
+    --sidebar-muted: hsl(220 12% 62%);
+    --sidebar-border: hsl(220 30% 18%);
+    --sidebar-hover: hsl(220 30% 14% / 60%);
+    --sidebar-accent: hsl(220 30% 14%);
+    --sidebar-accent-foreground: hsl(0 0% 100%);
+
+    /* ⚠️ El acento del sidebar es el MISMO matiz que `--brand`, pero
+       más luminoso para que funcione sobre fondo oscuro. Si algún día
+       cambia el matiz de marca, hay que cambiar los dos a la vez.
+       Aquí ya NO es `var(--primary)`: el primario pasó a ser grafito, y
+       apuntar a él dejaría el sidebar sin acento. */
+    --sidebar-primary: oklch(0.72 0.17 35);
+    --sidebar-primary-foreground: hsl(222 75% 10%);
+    --sidebar-ring: oklch(0.72 0.17 35);
 
     /* ============================================================
        SIDEBAR — TIPOGRAFÍA
@@ -137,31 +309,76 @@
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
+    /* Patrón del modo oscuro: los colores BASE suben en luminosidad para
+       seguir siendo legibles, los `-soft` bajan drásticamente (pasan a ser
+       fondos tenues oscuros) y los `-soft-foreground` suben. */
+    --background: hsl(220 18% 9%);
+    --foreground: hsl(220 14% 92%);
+    --card: hsl(220 18% 11%);
+    --card-foreground: hsl(220 14% 92%);
+    --popover: hsl(220 18% 11%);
+    --popover-foreground: hsl(220 14% 92%);
 
-    --primary: oklch(0.66 0.19 35);
-    --primary-foreground: oklch(0.145 0 0);
+    /* El primario se invierte: en oscuro, «grafito» es el claro. */
+    --primary: hsl(220 14% 92%);
+    --primary-foreground: hsl(220 18% 11%);
 
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.28 0.05 35);
-    --accent-foreground: oklch(0.9 0.05 35);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.66 0.19 35 / 0.5);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --secondary: hsl(220 18% 16%);
+    --secondary-foreground: hsl(220 14% 92%);
+    --muted: hsl(220 18% 16%);
+    --muted-foreground: hsl(220 10% 60%);
+    --accent: hsl(220 18% 18%);
+    --accent-foreground: hsl(220 14% 92%);
+
+    --brand: oklch(0.72 0.17 35);
+    --brand-foreground: oklch(0.16 0.02 35);
+    --brand-soft: oklch(0.3 0.08 35);
+    --brand-soft-foreground: oklch(0.86 0.09 35);
+
+    --success: hsl(142 60% 50%);
+    --success-foreground: hsl(220 18% 11%);
+    --success-soft: hsl(142 50% 14%);
+    --success-soft-foreground: hsl(142 60% 75%);
+
+    --warning: hsl(32 90% 60%);
+    --warning-foreground: hsl(220 18% 11%);
+    --warning-soft: hsl(32 60% 15%);
+    --warning-soft-foreground: hsl(32 90% 78%);
+
+    --info: hsl(215 75% 60%);
+    --info-foreground: hsl(220 18% 11%);
+    --info-soft: hsl(215 60% 16%);
+    --info-soft-foreground: hsl(215 80% 80%);
+
+    --destructive: hsl(0 72% 60%);
+    --destructive-foreground: hsl(220 18% 11%);
+    --destructive-soft: hsl(0 50% 16%);
+    --destructive-soft-foreground: hsl(0 80% 80%);
+
+    /* La paleta del explorador, redefinida entera: el `soft` pasa de
+       fondo claro con texto oscuro a fondo oscuro con texto claro,
+       igual que el resto de familias. Sin esto, el icono quedaría
+       como una mancha luminosa sobre la card oscura. */
+    --amarillo: hsl(45 92% 62%);
+    --amarillo-foreground: hsl(220 18% 11%);
+    --amarillo-soft: hsl(45 60% 15%);
+    --amarillo-soft-foreground: hsl(45 92% 76%);
+
+    --celeste: hsl(198 85% 62%);
+    --celeste-foreground: hsl(220 18% 11%);
+    --celeste-soft: hsl(198 55% 16%);
+    --celeste-soft-foreground: hsl(198 88% 78%);
+
+    --border: hsl(220 18% 18%);
+    --border-strong: hsl(220 18% 24%);
+    --input: hsl(220 18% 18%);
+    --ring: hsl(220 14% 60%);
+
+    --chart-1: hsl(188 78% 55%);
+    --chart-2: hsl(215 70% 60%);
+    --chart-3: hsl(32 90% 60%);
+    --chart-4: hsl(142 60% 50%);
+    --chart-5: hsl(280 40% 60%);
 
     --serie-programado: #3987e5;
     --serie-ejecutado: #d95926;
@@ -174,11 +391,95 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
+
+  html {
+    @apply font-sans antialiased;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
   body {
     @apply bg-background text-foreground;
-    }
-  html {
-    @apply font-sans;
-    }
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Todos los títulos llevan `font-semibold tracking-tight` POR DEFECTO.
+     Es parte de la firma: títulos compactos, nunca un `font-bold`
+     grandilocuente. Ponerlo aquí evita repetirlo en cada pantalla y evita
+     que a alguien se le escape un peso distinto. */
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-semibold tracking-tight text-foreground;
+    font-feature-settings: 'ss01', 'ss03';
+  }
+
+  code, kbd, samp, .font-mono {
+    font-feature-settings: 'ss01';
+  }
+
+  /* ============================================================
+     SCROLLBARS — finos, sin riel, pulgar redondeado con aire.
+     El truco de `border: 2px solid transparent` + `background-clip:
+     padding-box` hace que el pulgar se vea de 4px con 2px de aire a
+     cada lado; sin él queda un barrote pegado al contenido.
+     ============================================================ */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+  }
+
+  /* Variante clara para el sidebar, que es oscuro en ambos temas. */
+  [data-scope='sidebar'] *::-webkit-scrollbar-thumb {
+    background: rgb(255 255 255 / 0.14);
+  }
+  [data-scope='sidebar'] *::-webkit-scrollbar-thumb:hover {
+    background: rgb(255 255 255 / 0.28);
+  }
+}
+
+@layer utilities {
+  /* ============================================================
+     `.surface` — LA superficie del sistema.
+     Toda superficie elevada del proyecto es exactamente esto. No
+     existe una segunda forma de dibujar un panel: si algo parece
+     necesitar otra, es que no debía ser una superficie.
+     ============================================================ */
+  .surface {
+    @apply rounded-xl border border-border bg-card shadow-sm;
+  }
+
+  /* Fila u item que responde al puntero. */
+  .row-hover {
+    @apply transition-colors hover:bg-muted/40;
+  }
+
+  /* Label micro sobre un título o encima de una cifra. */
+  .eyebrow {
+    @apply text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground;
+  }
+
+  /* Texto técnico: códigos, identificadores, métricas. */
+  .text-tech {
+    @apply font-mono text-[0.78em] tracking-tight;
+    font-feature-settings: 'ss01', 'ss03';
+  }
+
+  /* Toda cifra del sistema va con cifras de ancho fijo, para que las
+     columnas de números no bailen al cambiar de valor. */
+  .tabular-nums, [data-tabular='true'] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
 }

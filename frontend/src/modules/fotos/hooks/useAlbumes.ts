@@ -5,6 +5,7 @@ import * as fotos from '@/modules/fotos/services/fotosService';
 import { getErrorMessage } from '@/shared/services/api';
 import { QUERY_KEYS } from '@/shared/lib/constants';
 import { useInvalidarFotos } from './useInvalidarFotos';
+import type { DestinoFotos } from '@/modules/fotos/types';
 import type { FiltrosGaleria, ResultadoSubida } from '@/modules/fotos/types';
 
 // Galería y fotos. Se pagina por LOTE: un lote son 10 fotos como
@@ -80,6 +81,48 @@ export function useSubirFotos() {
   });
 }
 
+/**
+ * Corregir la descripción de una foto.
+ *
+ * Invalida todo lo de Fotos: la descripción se ve en la galería y en las
+ * fotos de una tarea, que son dos consultas distintas sobre el mismo dato.
+ */
+export function useEditarDescripcionFoto() {
+  const invalidar = useInvalidarFotos();
+  return useMutation({
+    mutationFn: (vars: { fotoId: number; descripcion: string | null }) =>
+      fotos.editarDescripcionFoto(vars.fotoId, vars.descripcion),
+    onSuccess: () => {
+      invalidar();
+      toast.success('Descripción actualizada');
+    },
+    onError: (error) =>
+      toast.error(
+        getErrorMessage(error, 'No se pudo cambiar la descripción'),
+      ),
+  });
+}
+
+/**
+ * Mover una foto de sitio.
+ *
+ * Invalida todo lo de Fotos: la foto sale de una galería y entra en otra, y
+ * los contadores de las dos carpetas cambian.
+ */
+export function useMoverFoto() {
+  const invalidar = useInvalidarFotos();
+  return useMutation({
+    mutationFn: (vars: { fotoId: number; destino: DestinoFotos }) =>
+      fotos.moverFoto(vars.fotoId, vars.destino),
+    onSuccess: (r) => {
+      invalidar();
+      toast.success(r.sinCambios ? 'La foto ya estaba ahí' : 'Foto movida');
+    },
+    onError: (error) =>
+      toast.error(getErrorMessage(error, 'No se pudo mover la foto')),
+  });
+}
+
 export function useEliminarFoto() {
   const invalidar = useInvalidarFotos();
   return useMutation({
@@ -115,6 +158,21 @@ export function useCrearAlbum() {
     },
     onError: (error) =>
       toast.error(getErrorMessage(error, 'No se pudo crear el álbum')),
+  });
+}
+
+export function useEliminarAlbum() {
+  const invalidar = useInvalidarFotos();
+  return useMutation({
+    mutationFn: (id: number) => fotos.eliminarAlbum(id),
+    onSuccess: () => {
+      invalidar();
+      toast.success('Álbum eliminado');
+    },
+    // El mensaje del backend dice cuántas fotos lo impiden; reescribirlo aquí
+    // sería tener dos versiones de la misma regla.
+    onError: (error) =>
+      toast.error(getErrorMessage(error, 'No se pudo eliminar el álbum')),
   });
 }
 

@@ -12,9 +12,9 @@ import {
 import { Button } from '@/shared/ui/button';
 import { Badge } from '@/shared/ui/badge';
 import { Spinner } from '@/shared/ui/spinner';
-import { CLASES_TEXTAREA } from './Campo';
 import { formatPrecio } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
+import { Textarea } from '@/shared/ui/textarea';
 import type {
   CotizacionProveedor,
   EvaluacionCotizacion,
@@ -113,7 +113,7 @@ export function DialogoRecomendar({
         </DialogHeader>
 
         {elegibles.length === 0 ? (
-          <p className="rounded-lg border border-amber-600/25 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <p className="rounded-lg border border-warning/25 bg-warning-soft p-3 text-sm text-warning-soft-foreground">
             No hay ninguna cotización que se pueda recomendar: están
             descartadas o pendientes de revisar. Actualiza la que corresponda
             antes de seguir.
@@ -189,12 +189,11 @@ export function DialogoRecomendar({
           <label className="block text-sm font-medium text-foreground">
             Por qué ésa<span className="text-destructive"> *</span>
           </label>
-          <textarea
+          <Textarea
             value={justificacion}
             onChange={(e) => setJustificacion(e.target.value)}
             rows={5}
             placeholder="Ventajas frente a las otras, cómo se compararon y por qué se elige ésta. Ej.: es la más barata en los tres ítems principales y la única que entrega en 5 días; la de X es 3 % menor en total pero no cotizó el ítem 4."
-            className={CLASES_TEXTAREA}
           />
           <p className="text-xs text-muted-foreground">
             {limpia.length >= MINIMO_JUSTIFICACION

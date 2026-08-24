@@ -191,6 +191,7 @@ export function Equipos() {
                     variant="ghost"
                     size="icon-sm"
                     aria-label={`Renombrar ${o.nombre}`}
+                    title={`Renombrar ${o.nombre}`}
                     onClick={() =>
                       setDialogo({
                         tipo: 'renombrar-organizacion',
@@ -204,6 +205,7 @@ export function Equipos() {
                     variant="ghost"
                     size="icon-sm"
                     aria-label={`Eliminar ${o.nombre}`}
+                    title={`Eliminar ${o.nombre}`}
                     onClick={() =>
                       setDialogo({
                         tipo: 'borrar-organizacion',

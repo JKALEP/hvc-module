@@ -117,6 +117,7 @@ export function TablaLineas({
                         variant="ghost"
                         size="icon-sm"
                         aria-label={`Quitar la línea ${i + 1}`}
+                        title={`Quitar la línea ${i + 1}`}
                         onClick={() => quitar(i)}
                       >
                         <Trash2Icon />

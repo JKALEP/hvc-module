@@ -81,6 +81,7 @@ function Rama({
             variant="ghost"
             size="icon-sm"
             aria-label={`Agregar dentro de ${nodo.nombre}`}
+            title={`Agregar dentro de ${nodo.nombre}`}
             onClick={() => onAgregar(nodo.id)}
           >
             <PlusIcon />
@@ -89,6 +90,7 @@ function Rama({
             variant="ghost"
             size="icon-sm"
             aria-label={`Renombrar ${nodo.nombre}`}
+            title={`Renombrar ${nodo.nombre}`}
             onClick={() => onRenombrar(nodo)}
           >
             <PencilIcon />
@@ -97,6 +99,7 @@ function Rama({
             variant="ghost"
             size="icon-sm"
             aria-label={`Eliminar ${nodo.nombre}`}
+            title={`Eliminar ${nodo.nombre}`}
             onClick={() => onEliminar(nodo)}
           >
             <Trash2Icon />

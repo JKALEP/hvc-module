@@ -153,8 +153,8 @@ export function SelectorParticipantes({
         </div>
 
         {sinPersonal && (
-          <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2.5 dark:bg-amber-500/10">
-            <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-500" />
+          <div className="flex items-start gap-2 rounded-lg bg-warning-soft px-3 py-2.5">
+            <TriangleAlertIcon className="mt-0.5 size-4 shrink-0 text-warning" />
             <p className="text-sm whitespace-normal text-muted-foreground">
               No hay contratistas cargados para esta fecha. Importa la lista
               SCTR del mes en Gestión de personal.

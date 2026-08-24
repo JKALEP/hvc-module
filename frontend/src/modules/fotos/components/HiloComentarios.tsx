@@ -39,15 +39,23 @@ export function HiloComentarios({
   entidadId,
   permiso,
   ramaCerrada = false,
+  portal = false,
 }: {
   entidad: EntidadComentable;
   entidadId: number;
   permiso: PermisoCarpeta | null;
   /** En una rama archivada se lee pero no se escribe. */
   ramaCerrada?: boolean;
+  /** Portal del cliente (§22): lee por otras rutas y nunca escribe. */
+  portal?: boolean;
 }) {
   const { usuario } = useAuth();
-  const { data: comentarios, isError } = useComentarios(entidad, entidadId);
+  const { data: comentarios, isError } = useComentarios(
+    entidad,
+    entidadId,
+    true,
+    portal,
+  );
   const comentar = useComentar();
   const editar = useEditarComentario();
   const eliminar = useEliminarComentario();
@@ -56,8 +64,13 @@ export function HiloComentarios({
   const [editando, setEditando] = useState<number | null>(null);
   const [borrador, setBorrador] = useState('');
 
-  const puedeEscribir = alcanza(permiso, 'EDICION') && !ramaCerrada;
-  const puedeModerar = alcanza(permiso, 'TOTAL') && !ramaCerrada;
+  // ⚠️ En el portal la escritura se apaga SIEMPRE, no se deduce del grado.
+  // A un cliente se le puede compartir con EDICION (§10 lo permite), pero
+  // `PortalController` no tiene ni una ruta de escritura: pintarle un botón
+  // sería prometer algo que responde 404. El grado sigue mandando dentro del
+  // módulo interno; aquí manda el portal.
+  const puedeEscribir = !portal && alcanza(permiso, 'EDICION') && !ramaCerrada;
+  const puedeModerar = !portal && alcanza(permiso, 'TOTAL') && !ramaCerrada;
 
   const enviar = () => {
     const limpio = texto.trim();
@@ -86,6 +99,16 @@ export function HiloComentarios({
 
   return (
     <div className="space-y-3">
+      {/* Si la consulta falló, decirlo. Antes no se pintaba NADA —ni el
+          vacío, porque `comentarios` es undefined— y un hilo mudo parece un
+          hilo sin comentarios. Fue justo lo que escondió que el portal
+          llamaba a la ruta interna y recibía un 403. */}
+      {isError && (
+        <p className="text-sm text-muted-foreground">
+          No se pudieron cargar los comentarios.
+        </p>
+      )}
+
       {comentarios?.length === 0 && (
         <p className="text-sm text-muted-foreground">
           Sin comentarios todavía.
@@ -142,6 +165,7 @@ export function HiloComentarios({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={`Editar comentario de ${c.autorNombre}`}
+                    title={`Editar comentario de ${c.autorNombre}`}
                     onClick={() => {
                       setEditando(c.id);
                       setBorrador(c.texto);
@@ -156,6 +180,7 @@ export function HiloComentarios({
                     size="icon-sm"
                     variant="ghost"
                     aria-label={`Eliminar comentario de ${c.autorNombre}`}
+                    title={`Eliminar comentario de ${c.autorNombre}`}
                     onClick={() => eliminar.mutate(c.id)}
                   >
                     <Trash2Icon />

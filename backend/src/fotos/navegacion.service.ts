@@ -57,16 +57,17 @@ export interface CarpetaListada {
   actualizadoEn: Date;
   /** Lo que este usuario puede hacer aquí. Lo usa la UI para las acciones. */
   permiso: PermisoCarpeta;
-  tipo: TipoCarpetaFotos;
   /**
-   * El equipo del catálogo al que apunta, si es de tipo EQUIPO (§12).
+   * `CARPETA` o `EQUIPO`.
    *
-   * Solo el `codigoInterno`: los demás datos del equipo —marca, modelo—
-   * son EAV, y traerlos por tarjeta sería una consulta a
-   * `ValorCampoEquipo` por cada una. Quien quiera la ficha completa entra
-   * a Gestión de equipos, que es de donde salen.
+   * ⚠️ Aquí viajaba también un `equipo` con el código del catálogo de
+   * Gestión de Equipos. Se retiró en la Fase 1a de «Gestión de contenido»
+   * junto con la FK: Fotos ya no referencia ese módulo. Los campos propios
+   * del equipo llegan en la Fase 1b, y NO por aquí —son de la carpeta que
+   * se abre, no de cada tarjeta del listado, igual que `tipo` se carga en
+   * `carpetaPorId` y no para las hijas—.
    */
-  equipo: { id: number; codigoInterno: string | null } | null;
+  tipo: TipoCarpetaFotos;
 }
 
 /**
@@ -118,7 +119,6 @@ const CAMPOS_CARPETA = {
   cerrada: true,
   actualizadoEn: true,
   tipo: true,
-  equipo: { select: { id: true, codigoInterno: true } },
 } as const;
 
 interface FilaCarpeta {
@@ -128,7 +128,6 @@ interface FilaCarpeta {
   cerrada: boolean;
   actualizadoEn: Date;
   tipo: TipoCarpetaFotos;
-  equipo: { id: number; codigoInterno: string | null } | null;
 }
 
 /** Opciones de listado que vienen de la query string (§11). */
@@ -228,10 +227,8 @@ export class NavegacionService {
         cerrada: actual.cerrada,
         actualizadoEn: actual.actualizadoEn,
         // Desde la Fase 5: quien abre la carpeta necesita saber si es un
-        // EQUIPO para ofrecer las tareas de §13, y qué equipo del catálogo
-        // es para enseñar su código.
+        // EQUIPO para ofrecer las tareas de §13.
         tipo: actual.tipo ?? 'CARPETA',
-        equipo: actual.equipo ?? null,
       },
       permiso,
       puedeEscribir: this.acceso.alcanza(permiso, 'EDICION') && !ramaCerrada,
@@ -528,7 +525,6 @@ export class NavegacionService {
         actualizadoEn: c.actualizadoEn,
         permiso,
         tipo: c.tipo,
-        equipo: c.equipo,
       };
     });
   }

@@ -1,18 +1,15 @@
 import { Link } from 'react-router-dom';
-import { ChevronRightIcon } from 'lucide-react';
+import { ChevronRightIcon, HomeIcon } from 'lucide-react';
 
 import { cn } from '@/shared/lib/utils';
 import type { Ancestro } from '@/modules/fotos/types';
 
 /**
- * Camino de carpetas: "Fotos › UPN › UPN Villa › Pabellón 1".
+ * Camino de carpetas: "🏠 Fotos › UPN › UPN Villa › Pabellón 1".
  *
- * Quien no es administrador ve el camino ANCESTRAL COMPLETO como
- * contexto —para saber dónde encaja lo suyo dentro de la empresa— pero
- * los escalones por encima de lo que le compartieron llegan con
- * `navegable: false` y se pintan como texto, no como enlace: no tiene
- * acceso a su contenido. Los hermanos de esos escalones no existen en la
- * respuesta, así que no hay nada que ocultar aquí.
+ * REDISEÑO (solo visual): se agrega un icono de raíz para que el breadcrumb
+ * se lea como punto de partida, tal como en la referencia. La regla de
+ * `navegable: false` no cambia: sigue pintándose como texto sin enlace.
  */
 export function RutaSedes({
   ancestros,
@@ -23,7 +20,6 @@ export function RutaSedes({
 }: {
   ancestros: Ancestro[];
   actual: string | null;
-  /** El portal del cliente cuelga de otra raíz. */
   raiz?: string;
   etiquetaRaiz?: string;
   rutaCarpeta?: string;
@@ -36,12 +32,15 @@ export function RutaSedes({
       aria-label="Ruta de carpetas"
       className="flex flex-wrap items-center gap-0.5 text-sm text-muted-foreground"
     >
-      {/* Punto de vuelta al inicio. Sin él, quien tiene dos carpetas
-          compartidas no tendría forma de volver a la lista. */}
       <Link
         to={raiz}
-        className={cn(enlace, actual === null && 'font-medium text-foreground')}
+        className={cn(
+          enlace,
+          'flex items-center gap-1',
+          actual === null && 'font-medium text-foreground',
+        )}
       >
+        <HomeIcon className="size-3.5" />
         {etiquetaRaiz}
       </Link>
 
@@ -53,7 +52,6 @@ export function RutaSedes({
               {a.nombre}
             </Link>
           ) : (
-            // Contexto, no navegación: no tiene acceso a su contenido.
             <span
               className="px-1 py-0.5 text-muted-foreground/70"
               title="No tienes acceso a esta carpeta"

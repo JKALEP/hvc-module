@@ -86,7 +86,7 @@ export function TablaComparacion({
             Por proveedor
           </h3>
           {totalMasBajo === null && proveedores.length > 0 && (
-            <span className="text-xs text-amber-700 dark:text-amber-400">
+            <span className="text-xs text-warning-soft-foreground">
               Ninguna compite ahora mismo: están descartadas o pendientes de
               revisar.
             </span>
@@ -120,7 +120,7 @@ export function TablaComparacion({
                     key={p.cotizacionId}
                     className={cn(
                       destacada &&
-                        'bg-emerald-50/60 hover:bg-emerald-50 dark:bg-emerald-500/5 dark:hover:bg-emerald-500/10',
+                        'bg-success-soft/60 hover:bg-success-soft',
                       fuera && 'opacity-60',
                     )}
                   >
@@ -146,7 +146,7 @@ export function TablaComparacion({
                         )}
                       </div>
                       {p.requiereRevision && (
-                        <p className="mt-1 flex items-start gap-1 text-xs text-amber-700 dark:text-amber-400">
+                        <p className="mt-1 flex items-start gap-1 text-xs text-warning-soft-foreground">
                           <AlertTriangleIcon className="mt-0.5 size-3 shrink-0" />
                           <span>
                             Fuera de la comparación:{' '}
@@ -163,7 +163,7 @@ export function TablaComparacion({
                     <TableCell
                       className={cn(
                         'text-right font-semibold tabular-nums',
-                        destacada && 'text-emerald-700 dark:text-emerald-400',
+                        destacada && 'text-success-soft-foreground',
                       )}
                     >
                       {formatPrecio(p.total)}
@@ -172,7 +172,7 @@ export function TablaComparacion({
                       <span
                         className={cn(
                           p.itemsCubiertos < totalItemsPedidos &&
-                            'text-amber-700 dark:text-amber-400',
+                            'text-warning-soft-foreground',
                         )}
                       >
                         {p.itemsCubiertos}/{totalItemsPedidos}
@@ -263,7 +263,7 @@ export function TablaComparacion({
                             <span className="flex items-center gap-1.5 text-foreground">
                               {o.proveedor}
                               {esMejor && (
-                                <TrophyIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                                <TrophyIcon className="size-3.5 text-success" />
                               )}
                               {fuera && (
                                 <Badge variant="outline">descartada</Badge>

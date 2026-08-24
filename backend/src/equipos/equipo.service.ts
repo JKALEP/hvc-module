@@ -144,49 +144,26 @@ export class EquipoService {
     return error;
   }
 
-  /**
-   * Traduce el fallo de clave ajena al borrar.
-   *
-   * Las relaciones que este módulo conoce las corta antes por cascada o las
-   * cuenta para el resumen. La que NO conoce es `carpetas_fotos.equipoId`,
-   * que el módulo Fotos añadió con `Restrict` a propósito: una carpeta con
-   * fotos de inspección documentadas no puede quedarse apuntando al vacío,
-   * ni desaparecer porque alguien dé de baja el equipo.
-   *
-   * Sin esta traducción el `Restrict` cumplía su función —el equipo no se
-   * borraba— pero el error llegaba al usuario como un 500 sin texto. Aquí
-   * solo se le pone nombre: no se cambia qué se permite.
-   *
-   * ⚠️ **No es `P2003`.** Con Prisma 7 y el driver adapter de Postgres el
-   * error NO se mapea al código de clave ajena de Prisma: llega como
-   * `P2039` con el error crudo de la base dentro de
-   * `meta.driverAdapterError.cause`. De ahí se lee el `23001`
-   * (`restrict_violation`) y el nombre de la restricción. Buscar `P2003`
-   * —lo que parece razonable y es lo que dice la documentación clásica— no
-   * captura nada.
-   *
-   * Se admite también `23503` (`foreign_key_violation`): es el que sale si
-   * la FK llega a declararse `NO ACTION` en vez de `RESTRICT`.
-   */
-  private traducirEnUso(error: unknown, codigo: string | null) {
-    const cause = (
-      error as {
-        meta?: { driverAdapterError?: { cause?: { code?: string } } };
-      }
-    )?.meta?.driverAdapterError?.cause;
-    const codigoBd = cause?.code;
-    const esClaveAjena =
-      codigoBd === '23001' ||
-      codigoBd === '23503' ||
-      (error as { code?: string })?.code === 'P2003';
-    if (!esClaveAjena) return error;
-
-    const cual = codigo ? `El equipo "${codigo}"` : 'Este equipo';
-    return new BadRequestException(
-      `No se puede eliminar: ${cual} tiene carpetas de Fotos enlazadas. ` +
-        'Elimina o desvincula esas carpetas en el módulo Fotos antes de darlo de baja.',
-    );
-  }
+  // ⚠️ Aquí vivía `traducirEnUso`, y se retiró en la Fase 1a de «Gestión de
+  // contenido».
+  //
+  // Traducía el fallo de clave ajena de `carpetas_fotos.equipoId` —la FK
+  // con `Restrict` que el módulo Fotos añadió (§12)— a un 400 con texto en
+  // vez de un 500 crudo. Era la ÚNICA línea de lógica que Fotos había
+  // añadido a este módulo.
+  //
+  // Al deshacerse el enlace, esa FK ya no existe, así que ningún equipo
+  // puede tener «carpetas de Fotos enlazadas». Dejar el `catch` habría sido
+  // peor que quitarlo: seguiría capturando violaciones de clave ajena de
+  // OTRAS relaciones —cotizaciones, órdenes de compra, documentos— para
+  // contar una historia falsa y mandar a alguien a buscar en Fotos unas
+  // carpetas que no existen.
+  //
+  // Si algún día otro `Restrict` sobre `equipos` necesita mensaje propio,
+  // se escribe uno que nombre ESA relación. El molde para leer el código de
+  // la base con Prisma 7 —que llega como `P2039` con el error crudo dentro
+  // de `meta.driverAdapterError.cause`, y NO como `P2003`— está en
+  // `docs/` y en el historial de este archivo.
 
   async crear(usuario: UsuarioAutenticado, dto: GuardarEquipoDto) {
     const organizacionId = aId(
@@ -325,11 +302,7 @@ export class EquipoService {
     });
     if (!equipo) throw new NotFoundException('Ese equipo ya no existe.');
 
-    try {
-      await this.prisma.equipo.delete({ where: { id } });
-    } catch (error) {
-      throw this.traducirEnUso(error, equipo.codigoInterno);
-    }
+    await this.prisma.equipo.delete({ where: { id } });
     return {
       ok: true,
       id,

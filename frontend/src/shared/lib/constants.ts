@@ -2,8 +2,30 @@
 
 import type { FiltrosGaleria } from '@/modules/fotos/types';
 
-export const API_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:3000';
+/**
+ * La API a la que apunta este build, desde `VITE_API_URL`.
+ *
+ * ⚠️ **Sin valor por defecto en el código, y es deliberado.** Antes era
+ * `import.meta.env.VITE_API_URL || 'http://localhost:3000'`, y ese respaldo
+ * es exactamente lo que impide desplegar con confianza: Vite sustituye estas
+ * variables EN TIEMPO DE BUILD, así que un despliegue hecho sin la variable
+ * no fallaba —se publicaba un frontend que llamaba a `localhost:3000` desde
+ * el navegador del usuario, es decir a su propia máquina—. El síntoma serían
+ * errores de red inexplicables en producción, no un error de configuración.
+ *
+ * Ahora falta la variable → el build o el arranque se detienen y dicen qué
+ * falta. Mismo criterio que `FRONTEND_URL` en el backend.
+ */
+const API_CONFIGURADA = import.meta.env.VITE_API_URL?.trim();
+
+if (!API_CONFIGURADA)
+  throw new Error(
+    'Falta VITE_API_URL: la URL base de la API. ' +
+      'Ejemplo: VITE_API_URL=http://localhost:3000. Ver frontend/.env.example.',
+  );
+
+/** Sin barra final: todas las rutas del cliente empiezan por «/». */
+export const API_URL = API_CONFIGURADA.replace(/\/$/, '');
 
 export const QUERY_KEYS = {
   // Módulo Costos
@@ -115,14 +137,14 @@ export const QUERY_KEYS = {
   carpetasCompartibles: ['fotos', 'carpetas-compartibles'] as const,
   compartidos: (carpetaId: number | null) =>
     ['fotos', 'compartidos', carpetaId] as const,
-  // Catálogo de equipos visto desde Fotos (§12). Bajo la misma raíz: una
-  // mutación de Fotos lo refresca también, que es lo que hace falta tras
-  // registrar un equipo con el atajo.
-  catalogoOrganizaciones: ['fotos', 'catalogo-organizaciones'] as const,
-  catalogoUbicaciones: (organizacionId: number) =>
-    ['fotos', 'catalogo-ubicaciones', organizacionId] as const,
-  catalogoEquipos: (organizacionId: number, q = '') =>
-    ['fotos', 'catalogo-equipos', organizacionId, q] as const,
+  // Campos configurables del equipo (Fase 1b). Las DEFINICIONES son
+  // globales al módulo; los VALORES cuelgan de una carpeta.
+  // El color por tipo (Fase 1c). Cambia una vez cada mucho, así que la
+  // pantalla lo pide una vez y lo reutiliza.
+  coloresCarpeta: ['fotos', 'colores-carpeta'] as const,
+  camposEquipo: ['fotos', 'campos-equipo'] as const,
+  camposDeCarpeta: (carpetaId: number) =>
+    ['fotos', 'campos-carpeta', carpetaId] as const,
   // Tareas (§13) y comentarios (§14). Bajo la misma raíz 'fotos', así que
   // `useInvalidarFotos` las refresca sin tener que enumerarlas.
   tareas: (carpetaId: number, estado = '') =>
@@ -139,6 +161,21 @@ export const QUERY_KEYS = {
   plantillasFotos: (soloActivas: boolean) =>
     ['fotos', 'plantillas', soloActivas] as const,
   plantillaFotos: (id: number) => ['fotos', 'plantilla', id] as const,
+  // Tareas completas (§13). `asignables` no lleva parámetros: es la misma
+  // lista para todo el módulo.
+  asignablesFotos: ['fotos', 'asignables'] as const,
+  fotosDeTarea: (tareaId: number) => ['fotos', 'tarea-fotos', tareaId] as const,
+  // Las del portal (§22) van con `'portal'` en 2.ª posición, como
+  // `portalCarpeta` y `portalGaleria`. Clave distinta y no la misma con un
+  // parámetro: lo que devuelve el portal está ANONIMIZADO en la galería, así
+  // que compartir caché con la vista interna daría datos distintos bajo la
+  // misma clave según quién preguntara primero.
+  portalTareas: (carpetaId: number) =>
+    ['fotos', 'portal', 'tareas', carpetaId] as const,
+  portalComentarios: (entidad: string, entidadId: number) =>
+    ['fotos', 'portal', 'comentarios', entidad, entidadId] as const,
+  portalFotosDeTarea: (tareaId: number) =>
+    ['fotos', 'portal', 'tarea-fotos', tareaId] as const,
 };
 
 // Debounce de los buscadores (ms).

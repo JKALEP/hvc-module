@@ -247,7 +247,7 @@ export function Login() {
                   text-2xl
                   font-bold
                   tracking-tight
-                  text-blue-950
+                  text-auth
                 "
               >
                 Bienvenido
@@ -303,7 +303,7 @@ export function Login() {
                     -translate-y-1/2
                     ${
                       mostrarErrorEmail
-                        ? 'text-red-500'
+                        ? 'text-destructive'
                         : 'text-muted-foreground'
                     }
                   `}
@@ -335,9 +335,9 @@ export function Login() {
                     ${
                       mostrarErrorEmail
                         ? `
-                          border-red-500
-                          focus-visible:border-red-500
-                          focus-visible:ring-red-500/20
+                          border-destructive
+                          focus-visible:border-destructive
+                          focus-visible:ring-destructive/20
                         `
                         : ''
                     }
@@ -368,7 +368,7 @@ export function Login() {
                     gap-1.5
                     text-xs
                     font-medium
-                    text-red-600
+                    text-destructive
                   "
                 >
 
@@ -508,7 +508,7 @@ export function Login() {
                     size-4
                     rounded
                     border-input
-                    accent-blue-900
+                    accent-auth-hover
                   "
                 />
 
@@ -521,7 +521,7 @@ export function Login() {
                 to="/recuperar-contrasena"
                 className="
                   font-medium
-                  text-blue-900
+                  text-auth-hover
                   hover:underline
                 "
               >
@@ -545,11 +545,10 @@ export function Login() {
                   rounded-lg
                   border
                   border-destructive/25
-                  bg-red-50
+                  bg-destructive-soft
                   px-3
                   py-2
                   dark:border-destructive/30
-                  dark:bg-red-500/10
                 "
               >
 
@@ -558,8 +557,7 @@ export function Login() {
                     mt-0.5
                     size-4
                     shrink-0
-                    text-red-600
-                    dark:text-red-400
+                    text-destructive
                   "
                 />
 
@@ -588,9 +586,9 @@ export function Login() {
               className="
                 h-11
                 w-full
-                bg-blue-950
+                bg-auth
                 text-base
-                hover:bg-blue-900
+                hover:bg-auth-hover
               "
               size="lg"
               disabled={
@@ -650,7 +648,7 @@ export function Login() {
               border-input
               text-sm
               font-medium
-              text-blue-900
+              text-auth-hover
               transition-colors
               hover:bg-muted
             "

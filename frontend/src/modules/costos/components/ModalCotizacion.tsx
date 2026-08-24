@@ -22,10 +22,11 @@ import { Input } from '@/shared/ui/input';
 import { Select } from '@/shared/ui/select';
 import { Badge } from '@/shared/ui/badge';
 import { Spinner } from '@/shared/ui/spinner';
-import { Campo, CLASES_TEXTAREA } from './Campo';
+import { Campo } from './Campo';
 import { useDebounce } from '@/shared/hooks/useDebounce';
 import { useProveedores } from '@/modules/costos/hooks/useProveedores';
 import { formatPrecio, aValorInputFecha, hoyISO } from '@/shared/lib/format';
+import { Textarea } from '@/shared/ui/textarea';
 import type {
   CotizacionProveedor,
   GuardarCotizacionPayload,
@@ -259,11 +260,11 @@ export function ModalCotizacion({
 
         {/* §54: se está arreglando una que quedó desfasada. */}
         {cotizacion?.requiereRevision && (
-          <div className="rounded-lg border border-amber-600/25 bg-amber-50 p-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
-            <p className="font-medium text-amber-900 dark:text-amber-200">
+          <div className="rounded-lg border border-warning/25 bg-warning-soft p-3 text-sm">
+            <p className="font-medium text-warning-soft-foreground">
               Esta cotización quedó pendiente de revisar
             </p>
-            <p className="text-amber-800 dark:text-amber-300">
+            <p className="text-warning-soft-foreground">
               {cotizacion.revisionMotivo ??
                 'Un ítem del requerimiento cambió después de recibirla.'}{' '}
               Al guardar vuelve a contar para la comparación, así que
@@ -464,6 +465,7 @@ export function ModalCotizacion({
                         variant="ghost"
                         size="icon"
                         aria-label="Quitar la línea"
+                        title="Quitar la línea"
                         onClick={() =>
                           setLineas((antes) =>
                             antes.filter((l) => l.clave !== c.linea.clave),
@@ -488,12 +490,11 @@ export function ModalCotizacion({
         </div>
 
         <Campo label="Observaciones">
-          <textarea
+          <Textarea
             value={observaciones}
             onChange={(e) => setObservaciones(e.target.value)}
             rows={2}
             placeholder="Lo que el proveedor aclaró y no cabe en las columnas."
-            className={CLASES_TEXTAREA}
           />
         </Campo>
 

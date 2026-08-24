@@ -251,6 +251,7 @@ export function Incidencias() {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Editar ${i.codigo}`}
+                  title={`Editar ${i.codigo}`}
                   onClick={() => setEditando(i)}
                 >
                   <PencilIcon />
@@ -259,6 +260,7 @@ export function Incidencias() {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Eliminar ${i.codigo}`}
+                  title={`Eliminar ${i.codigo}`}
                   onClick={() => setABorrar(i)}
                 >
                   <Trash2Icon />

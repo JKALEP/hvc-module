@@ -14,10 +14,16 @@ export function useComentarios(
   entidad: EntidadComentable,
   entidadId: number | null,
   habilitado = true,
+  portal = false,
 ) {
   return useQuery({
-    queryKey: QUERY_KEYS.comentarios(entidad, entidadId ?? 0),
-    queryFn: () => fotos.verComentarios(entidad, entidadId!),
+    queryKey: portal
+      ? QUERY_KEYS.portalComentarios(entidad, entidadId ?? 0)
+      : QUERY_KEYS.comentarios(entidad, entidadId ?? 0),
+    queryFn: () =>
+      portal
+        ? fotos.verComentariosPortal(entidad, entidadId!)
+        : fotos.verComentarios(entidad, entidadId!),
     enabled: habilitado && entidadId !== null,
   });
 }

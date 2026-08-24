@@ -54,25 +54,17 @@ import { ReporteConsolidadoService } from './reporte-consolidado.service';
     ReporteEquipoService,
     ReporteConsolidadoService,
   ],
-  /**
-   * Lo que el módulo Fotos consume para su selector de equipos (§12 de la
-   * especificación de Fotos).
-   *
-   * Es el ÚNICO cambio que Fotos hizo aquí: cero rutas nuevas, cero
-   * controllers y cero líneas de lógica tocadas. La dependencia va en un
-   * solo sentido —Fotos referencia el catálogo, este módulo no sabe que
-   * Fotos existe— y por eso el controller vive allá, no aquí.
-   *
-   * `EquipoService` se exporta por su `crear`, que Fotos reutiliza en el
-   * atajo de §12 en vez de escribir en estas tablas por su cuenta. Exportar
-   * un service no abre ninguna ruta: `POST /equipos/equipo` sigue bajo
-   * `@SoloSuperAdmin`, y editar y eliminar no tienen otra puerta.
-   */
-  exports: [
-    OrganizacionService,
-    EstructuraService,
-    EquipoBusquedaService,
-    EquipoService,
-  ],
+  // ⚠️ Sin `exports`, y volver a ponerlos debería costar una justificación.
+  //
+  // Aquí se exportaban `OrganizacionService`, `EstructuraService`,
+  // `EquipoBusquedaService` y `EquipoService` para que el módulo Fotos los
+  // consumiera en su selector de equipos (§12 de la especificación de
+  // Fotos). Esa dependencia se deshizo entera en la Fase 1a de «Gestión de
+  // contenido»: Fotos ya no referencia este catálogo.
+  //
+  // Los cuatro services SIGUEN EXISTIENDO y los usan los controllers de
+  // este módulo —`EquipoBusquedaService` en `InventarioController`, entre
+  // otros—: lo que se retira es la puerta hacia fuera, no la lógica.
+  // Ningún otro módulo importa `EquiposModule`.
 })
 export class EquiposModule {}

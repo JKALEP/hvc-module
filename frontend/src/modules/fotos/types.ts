@@ -31,15 +31,13 @@ export interface CarpetaListada {
   actualizadoEn: string;
   /** Lo que este usuario puede hacer aquí. Decide qué acciones se pintan. */
   permiso: PermisoCarpeta;
-  tipo: 'CARPETA' | 'EQUIPO';
   /**
-   * El equipo del catálogo al que apunta, si es de tipo EQUIPO (§12).
-   *
-   * Solo el código: marca y modelo son campos dinámicos y traerlos por
-   * tarjeta costaría una consulta por cada una. La ficha completa vive en
-   * Gestión de equipos.
+   * ⚠️ Aquí acompañaba un `equipo` con el código del catálogo de Gestión de
+   * Equipos. Se retiró en la Fase 1a de «Gestión de contenido»: Fotos ya no
+   * referencia ese módulo. Los campos propios del equipo llegan en la Fase
+   * 1b, y a la carpeta que se abre — no a cada tarjeta del listado.
    */
-  equipo: { id: number; codigoInterno: string | null } | null;
+  tipo: 'CARPETA' | 'EQUIPO';
 }
 
 /**
@@ -77,7 +75,6 @@ export interface ContenidoCarpeta {
     actualizadoEn: string;
     /** Desde la Fase 5: si es EQUIPO, la pantalla ofrece las tareas de §13. */
     tipo: 'CARPETA' | 'EQUIPO';
-    equipo: { id: number; codigoInterno: string | null } | null;
   } | null;
   /** Si puede subir fotos y crear carpetas aquí. */
   puedeEscribir: boolean;
@@ -98,6 +95,11 @@ export interface FotoDeAlbum {
   /** Fecha EXIF de captura, "YYYY-MM-DD". Puede no venir. */
   tomadaEn: string | null;
   creadoEn: string;
+  /**
+   * La suya propia. Nace siendo la del LOTE —`subir` la copia a todas— y
+   * desde la Fase 2b se puede corregir foto a foto.
+   */
+  descripcion: string | null;
   /** null para un cliente externo: no se le enseña quién subió qué. */
   subidaPor: { id: number; nombre: string } | null;
   url: string;
@@ -210,50 +212,91 @@ export interface InvitacionAbierta {
   expiraEn: string;
 }
 
-// ── Catálogo de equipos (§12) ──
-// Fotos LEE este catálogo, no lo administra: la ficha completa de un equipo
-// vive en Gestión de equipos y aquí solo se elige uno.
+// ── Catálogo de equipos — RETIRADO ──
+//
+// Aquí vivían `OrganizacionDeCatalogo`, `EquipoDeCatalogo`,
+// `UbicacionDeCatalogo`, `ColumnaDeCatalogo` y `BusquedaDeEquipos`: las
+// formas que devolvía `/fotos/catalogo-equipos`, la puerta de Fotos al
+// catálogo de Gestión de Equipos (§12). Se retiraron enteras en la Fase 1a
+// de «Gestión de contenido» junto con el selector de tres pasos.
+//
+// Si buscas los tipos del catálogo de equipos, están donde siempre
+// estuvieron los de ese módulo: `modules/equipos/types.ts`.
 
-export interface OrganizacionDeCatalogo {
+// ── Color por tipo de carpeta (Fase 1c) ──
+
+export type ColorCarpeta = 'AMARILLO' | 'CELESTE';
+
+/**
+ * Qué color usa cada tipo de carpeta en el explorador.
+ *
+ * Es un dato CONFIGURABLE que llega del servidor, no una constante: un
+ * administrador puede cambiarlo sin tocar código. Lo que sí es cerrado es la
+ * paleta —`ColorCarpeta`—, porque Tailwind solo genera las clases que ve
+ * escritas y `bg-${loQueDiga}` no existiría en el CSS compilado.
+ */
+export type ColoresDeCarpeta = Record<'CARPETA' | 'EQUIPO', ColorCarpeta>;
+
+// ── Campos configurables del EQUIPO (Fase 1b) ──
+//
+// Sustituyen al enlace con el catálogo de Gestión de Equipos: la
+// información del equipo la define un ADMIN_GLOBAL, sin tocar código.
+
+export type TipoCampoFotos =
+  | 'TEXTO'
+  | 'TEXTO_LARGO'
+  | 'NUMERO'
+  | 'FECHA'
+  | 'BOOLEANO'
+  | 'LISTA'
+  | 'FOTO';
+
+export interface OpcionCampo {
+  id: number;
+  etiqueta: string;
+  orden?: number;
+  /** `false` = ya no se ofrece, pero quien la eligió la conserva. */
+  activo: boolean;
+}
+
+/** Una definición, tal como la devuelve la administración del módulo. */
+export interface CampoEquipo {
   id: number;
   nombre: string;
+  /** Slug estable. Es la clave con la que se mandan los valores. */
+  clave: string;
+  tipo: TipoCampoFotos;
+  orden: number;
+  activo: boolean;
+  opciones: OpcionCampo[];
+  /** Cuántos equipos lo tienen rellenado: con >0 no se puede borrar. */
+  _count?: { valores: number };
 }
 
 /**
- * Un equipo tal como sale del buscador.
+ * Un campo CON lo que esta carpeta tenga rellenado.
  *
- * `valores` está indexado por la CLAVE del campo dinámico —marca, modelo,
- * serie…— porque no son columnas: son EAV. `columnas` dice qué claves pintar
- * y en qué orden, y lo decide la configuración de cada organización, así que
- * el selector no puede traerlas escritas a mano.
+ * `valor` viene ya con la forma de su tipo —el backend decide en qué
+ * columna del EAV vive cada uno, y aquí no hay que saberlo—: texto,
+ * número, `"AAAA-MM-DD"`, booleano, el id de la opción elegida, o
+ * `true`/`false` en un FOTO según tenga imagen.
+ *
+ * ⚠️ Tipo PROPIO y no `CampoEquipo` reutilizado, aunque compartan casi
+ * todo: son dos proyecciones distintas del mismo recurso y TypeScript
+ * FUSIONA dos interfaces con el mismo nombre en vez de rechazarlas —fue
+ * exactamente lo que pasó con las dos `interface Album` de la Fase 9a, que
+ * compilaba prometiendo campos que el endpoint nunca devolvió—.
  */
-export interface EquipoDeCatalogo {
-  id: number;
-  codigoInterno: string | null;
-  nodo: { id: number; nombre: string } | null;
-  actualizadoEn: string;
-  valores: Record<string, string>;
-}
-
-export interface UbicacionDeCatalogo {
+export interface CampoDeCarpeta {
   id: number;
   nombre: string;
-  /** Profundidad en el árbol, para sangrar el selector. */
-  nivel: number;
-}
-
-export interface ColumnaDeCatalogo {
   clave: string;
-  nombre: string;
-  tipo: string;
-}
-
-export interface BusquedaDeEquipos {
-  total: number;
-  pagina: number;
-  porPagina: number;
-  columnas: ColumnaDeCatalogo[];
-  equipos: EquipoDeCatalogo[];
+  tipo: TipoCampoFotos;
+  activo: boolean;
+  opciones: OpcionCampo[];
+  valor: string | number | boolean | null;
+  /** Solo en un campo FOTO con imagen. Las URLs son firmadas y caducan. */
+  imagen: { url: string; urlMiniatura: string | null } | null;
 }
 
 // ── Tareas (§13) y comentarios (§14) ──
@@ -448,3 +491,23 @@ export interface PreviaImportacion {
   }[];
   problemas: { fila: number; motivo: string }[];
 }
+
+/**
+ * Una foto tal como la devuelve `GET /fotos/tarea/:id/foto` (§15).
+ *
+ * Extiende la de galería con `descripcion`, que ese endpoint sí manda: la
+ * galería la muestra por álbum —es de la subida entera— y aquí es de la foto.
+ * Tipo propio y no reutilizar `FotoDeAlbum` a secas por lo aprendido con
+ * `AlbumDeGaleria`: dos proyecciones distintas con el mismo nombre acaban
+ * fusionándose en silencio.
+ */
+/**
+ * Igual que `FotoDeAlbum` desde la Fase 2b, cuando la galería empezó a
+ * devolver también la descripción por foto.
+ *
+ * Se conserva el nombre en vez de fundirlos: son dos endpoints distintos y
+ * el día que uno añada un campo, tenerlos separados evita que el otro
+ * prometa algo que no manda. Es el mismo cuidado que obligó a partir
+ * `Album` y `AlbumDeGaleria` en 9a.
+ */
+export type FotoDeTarea = FotoDeAlbum;

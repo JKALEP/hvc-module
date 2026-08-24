@@ -51,6 +51,11 @@ export function CapturaRapida() {
 
   // Selección de la bandeja, para clasificar por lotes.
   const [elegidas, setElegidas] = useState<Set<number>>(new Set());
+  // Nombre del álbum que recogerá el lote (Fase 2c). Opcional: sin él, el
+  // álbum nace sin título como siempre y la pantalla lo distingue por su
+  // fecha. Antes NO había forma de ponérselo aquí — había que clasificar y
+  // después ir a editar el álbum, que es el paso de más que §18 evita.
+  const [nombreAlbum, setNombreAlbum] = useState('');
 
   const carpetasRaiz = (raiz?.secciones ?? []).flatMap((s) => s.carpetas);
   // ⚠️ Solo cuando hay proyecto elegido. `useCarpeta(null)` devuelve la
@@ -101,8 +106,20 @@ export function CapturaRapida() {
   const clasificarElegidas = () => {
     if (elegidas.size === 0 || destino.tipo === 'bandeja') return;
     clasificar.mutate(
-      { fotoIds: [...elegidas], destino },
-      { onSuccess: () => setElegidas(new Set()) },
+      {
+        fotoIds: [...elegidas],
+        destino,
+        // Solo viaja hacia una CARPETA: es el único caso en que se crea un
+        // álbum. Hacia una tarea o un álbum existente el servidor lo
+        // rechaza, y con razón — sería renombrar por la puerta de atrás.
+        album: destino.tipo === 'carpeta' ? { nombre: nombreAlbum } : undefined,
+      },
+      {
+        onSuccess: () => {
+          setElegidas(new Set());
+          setNombreAlbum('');
+        },
+      },
     );
   };
 
@@ -255,12 +272,24 @@ export function CapturaRapida() {
             )}
           </h2>
           {elegidas.size > 0 && (
-            <Button
-              onClick={clasificarElegidas}
-              disabled={destino.tipo === 'bandeja' || clasificar.isPending}
-            >
-              Clasificar {elegidas.size} aquí
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* El nombre solo se ofrece si de verdad se va a crear un
+                  álbum: hacia una tarea no hay álbum que nombrar. */}
+              {destino.tipo === 'carpeta' && (
+                <Input
+                  value={nombreAlbum}
+                  onChange={(e) => setNombreAlbum(e.target.value)}
+                  placeholder="Nombre del álbum (opcional)"
+                  className="max-w-56"
+                />
+              )}
+              <Button
+                onClick={clasificarElegidas}
+                disabled={destino.tipo === 'bandeja' || clasificar.isPending}
+              >
+                Clasificar {elegidas.size} aquí
+              </Button>
+            </div>
           )}
         </div>
 

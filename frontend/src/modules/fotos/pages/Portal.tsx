@@ -6,7 +6,9 @@ import { PageHeader } from '@/shared/components/PageHeader';
 import { EmptyState } from '@/shared/components/EmptyState';
 import { TarjetaCarpeta } from '@/modules/fotos/components/TarjetaCarpeta';
 import { RutaSedes } from '@/modules/fotos/components/RutaSedes';
-import { GaleriaAlbumes } from '@/modules/fotos/components/GaleriaAlbumes';
+import { GaleriaFotosPlanas } from '@/modules/fotos/components/GaleriaAlbumes';
+import { PanelTareas } from '@/modules/fotos/components/PanelTareas';
+import { HiloComentarios } from '@/modules/fotos/components/HiloComentarios';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Skeleton } from '@/shared/ui/skeleton';
@@ -14,7 +16,11 @@ import { useCarpeta } from '@/modules/fotos/hooks/useCarpetas';
 import { useGaleria } from '@/modules/fotos/hooks/useAlbumes';
 import type { FiltrosGaleria } from '@/modules/fotos/types';
 
-const SIN_FILTROS: FiltrosGaleria = { subidaPorId: null, desde: '', hasta: '' };
+const SIN_FILTROS: FiltrosGaleria = {
+  subidaPorId: null,
+  desde: '',
+  hasta: '',
+};
 
 /**
  * Portal del cliente externo: ver y descargar, nada más.
@@ -37,6 +43,7 @@ export function Portal() {
   const albumes = galeria.data?.pages.flatMap((p) => p.albumes) ?? [];
   const totalFotos = galeria.data?.pages[0]?.totalFotos ?? 0;
   const hayFiltro = filtros.desde !== '' || filtros.hasta !== '';
+
   const totalCarpetas = (data?.secciones ?? []).reduce(
     (t, s) => t + s.carpetas.length,
     0,
@@ -46,7 +53,14 @@ export function Portal() {
     <div className="space-y-6">
       <div className="space-y-3">
         <RutaSedes
-          ancestros={data?.ancestros ?? []}
+          // ⚠️ Se descartan los ancestros NO navegables (§22).
+          //
+          // El backend los manda como contexto —«tu carpeta cuelga de UPN
+          // Villa»— y para un interno eso está bien. Para un CLIENTE es
+          // enseñarle el nombre de una carpeta que no tiene autorizada, que
+          // es literalmente lo que §22 prohíbe: «No mostrar carpetas que no
+          // tenga autorizadas». Y no le sirve de nada: abrirla da 404.
+          ancestros={(data?.ancestros ?? []).filter((a) => a.navegable)}
           actual={data?.carpetaActual?.nombre ?? null}
           raiz="/portal"
           etiquetaRaiz="Compartido conmigo"
@@ -66,7 +80,7 @@ export function Portal() {
       </div>
 
       {data?.ramaCerrada && (
-        <div className="flex items-start gap-2 rounded-xl border border-amber-600/25 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-500">
+        <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning-soft px-4 py-3 text-sm text-warning-soft-foreground">
           <ArchiveIcon className="mt-0.5 size-4 shrink-0" />
           <p>Esta carpeta está archivada: ya no se le añaden fotos nuevas.</p>
         </div>
@@ -93,6 +107,7 @@ export function Portal() {
           <h2 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
             {seccion.etiqueta}
           </h2>
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {seccion.carpetas.map((c) => (
               // Un cliente no administra nada: sin acciones.
@@ -108,33 +123,69 @@ export function Portal() {
 
       {sedeId !== null && data && (
         <>
+          {/* §22 describe el recorrido del cliente:
+              «… → Equipo ABC → Tareas → Álbumes → Fotografías → Comentarios».
+              Las tareas solo existen en un equipo (§13), así que la sección
+              aparece cuando la carpeta lo es — igual que en el módulo interno.
+          */}
+          {data.carpetaActual?.tipo === 'EQUIPO' && (
+            <PanelTareas
+              carpetaId={sedeId}
+              permiso={data.permiso}
+              ramaCerrada={data.ramaCerrada}
+              portal
+            />
+          )}
+
+          <section className="rounded-xl border border-border bg-card p-4">
+            <h2 className="mb-3 font-medium text-foreground">Comentarios</h2>
+
+            <HiloComentarios
+              entidad="carpeta"
+              entidadId={sedeId}
+              permiso={data.permiso}
+              ramaCerrada={data.ramaCerrada}
+              portal
+            />
+          </section>
+
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">
                 Desde
               </label>
+
               <Input
                 type="date"
                 className="h-9 w-40"
                 value={filtros.desde}
                 onChange={(e) =>
-                  setFiltros((f) => ({ ...f, desde: e.target.value }))
+                  setFiltros((f) => ({
+                    ...f,
+                    desde: e.target.value,
+                  }))
                 }
               />
             </div>
+
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">
                 Hasta
               </label>
+
               <Input
                 type="date"
                 className="h-9 w-40"
                 value={filtros.hasta}
                 onChange={(e) =>
-                  setFiltros((f) => ({ ...f, hasta: e.target.value }))
+                  setFiltros((f) => ({
+                    ...f,
+                    hasta: e.target.value,
+                  }))
                 }
               />
             </div>
+
             {hayFiltro && (
               <Button
                 variant="ghost"
@@ -145,12 +196,13 @@ export function Portal() {
                 Limpiar
               </Button>
             )}
+
             <p className="ml-auto text-sm text-muted-foreground tabular-nums">
               {totalFotos} foto(s)
             </p>
           </div>
 
-          <GaleriaAlbumes
+          <GaleriaFotosPlanas
             albumes={albumes}
             cargando={galeria.isLoading}
             hayMas={Boolean(galeria.hasNextPage)}
@@ -159,6 +211,11 @@ export function Portal() {
             // Un cliente nunca borra.
             puedeBorrar={() => false}
             portal
+            // Hacen falta para los hilos de §14 que la galería monta en la
+            // cabecera del álbum y dentro del visor de la foto. Con `portal`
+            // los dos quedan en solo lectura pase lo que pase con el grado.
+            permiso={data.permiso}
+            ramaCerrada={data.ramaCerrada}
             vacio={{
               titulo: hayFiltro
                 ? 'Ninguna foto en esas fechas'

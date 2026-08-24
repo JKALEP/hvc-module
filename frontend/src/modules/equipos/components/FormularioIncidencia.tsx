@@ -12,6 +12,7 @@ import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Select } from '@/shared/ui/select';
 import { Spinner } from '@/shared/ui/spinner';
+import { Textarea } from '@/shared/ui/textarea';
 import type {
   Incidencia,
   EquipoFila,
@@ -147,35 +148,32 @@ export function FormularioIncidencia({
 
           <div className="sm:col-span-2">
             <Campo label="Descripción" requerido>
-              <textarea
+              <Textarea
                 value={descripcion}
                 onChange={(e) => setDescripcion(e.target.value)}
                 rows={3}
                 placeholder="Qué se detectó."
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
               />
             </Campo>
           </div>
 
           <div className="sm:col-span-2">
             <Campo label="Observación">
-              <textarea
+              <Textarea
                 value={observacion}
                 onChange={(e) => setObservacion(e.target.value)}
                 rows={2}
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
               />
             </Campo>
           </div>
 
           <div className="sm:col-span-2">
             <Campo label="Recomendación">
-              <textarea
+              <Textarea
                 value={recomendacion}
                 onChange={(e) => setRecomendacion(e.target.value)}
                 rows={2}
                 placeholder="Qué debería hacerse."
-                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
               />
             </Campo>
           </div>

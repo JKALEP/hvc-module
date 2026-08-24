@@ -125,6 +125,13 @@ function App() {
         <Route path="/fotos/recientes" element={fotos(<Recientes />)} />
         <Route path="/fotos/captura" element={fotos(<CapturaRapida />)} />
         <Route path="/fotos/admin" element={fotos(<AdminFotos />)} />
+        {/* §21: las dos secciones que la raíz ya devuelve, cada una en su
+            entrada del panel lateral. Misma pantalla, recortada. */}
+        <Route path="/fotos/mias" element={fotos(<Fotos seccion="propias" />)} />
+        <Route
+          path="/fotos/compartidas"
+          element={fotos(<Fotos seccion="compartidas" />)}
+        />
         <Route path="/fotos/carpeta/:id" element={fotos(<Fotos />)} />
 
         {/* Administración */}

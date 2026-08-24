@@ -168,7 +168,7 @@ export function SelectorProveedores({
                         {p.correo ?? 'sin correo'}
                       </p>
                       {sinCorreo && (
-                        <p className="mt-0.5 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-warning-soft-foreground">
                           <MailWarningIcon className="size-3.5" />
                           Complétale el correo en su ficha para poder pedirle
                           cotización.
@@ -189,7 +189,7 @@ export function SelectorProveedores({
               : `${String(elegidos.size)} proveedor(es) seleccionados.`}
           </span>
           {repetidos > 0 && (
-            <span className="text-amber-700 dark:text-amber-400">
+            <span className="text-warning-soft-foreground">
               A {repetidos} ya se le había pedido: se le vuelve a mandar y
               queda registrado como un envío nuevo.
             </span>

@@ -16,7 +16,12 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        'fixed inset-0 z-50 bg-black/50 transition-opacity duration-150',
+        // ⚠️ Overlay al 10 %, no al 50 %. El modal NO oscurece la página:
+        // la separa con un micro-desenfoque y deja el contexto legible
+        // detrás. `supports-` porque donde no haya `backdrop-filter` el
+        // velo claro sigue funcionando por sí solo.
+        'fixed inset-0 z-50 bg-black/10 transition-opacity duration-150',
+        'supports-[backdrop-filter:blur(0px)]:backdrop-blur-xs',
         'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
         className,
       )}
@@ -39,7 +44,25 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          'fixed top-1/2 left-1/2 z-50 grid w-full max-w-lg -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl border border-border bg-background p-6 shadow-lg',
+          // `ring-1` en vez de `border`: el anillo no ocupa espacio de
+          // layout, así que el contenido no se desplaza 1px respecto a un
+          // contenedor sin borde. `bg-popover` es el fondo de lo que
+          // flota. El ancho por defecto se queda en `max-w-lg`: 24 de los
+          // 75 diálogos ya lo sobrescriben y los pequeños de confirmar y
+          // renombrar piden `max-w-md`, no menos.
+          // ⚠️ El aire lateral en móvil va en `w-`, NO en `max-w-`.
+          // Casi todos los diálogos pasan su propio `max-w-*` por
+          // `className`, y `twMerge` —haciendo su trabajo— elimina el de
+          // aquí por pertenecer a la misma familia. El resultado era un
+          // modal pegado a los dos bordes de la pantalla en móvil. Con
+          // `w-[calc(100%_-_2rem)]` el ancho queda siempre 16px por lado
+          // por dentro del viewport, y el `max-w` del llamador sigue
+          // mandando en pantallas grandes.
+          //
+          // Los guiones bajos son la sintaxis de Tailwind para espacios en
+          // un valor arbitrario: `calc(100%-2rem)` sin espacios es CSS
+          // inválido y el navegador lo descarta en silencio.
+          'fixed top-1/2 left-1/2 z-50 grid w-[calc(100%_-_2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-popover-foreground shadow-lg ring-1 ring-foreground/10 sm:max-w-lg',
           'transition-all duration-150 data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0',
           className,
         )}
@@ -74,7 +97,10 @@ function DialogFooter({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="dialog-footer"
       className={cn(
-        'flex flex-col-reverse gap-2 sm:flex-row sm:justify-end',
+        // El pie es una BARRA a sangre: los márgenes negativos compensan
+        // el `p-4` del contenedor para que el fondo llegue hasta el borde
+        // y el `rounded-b-xl` case con la esquina del diálogo.
+        '-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t border-border bg-muted/50 p-4 sm:flex-row sm:justify-end',
         className,
       )}
       {...props}

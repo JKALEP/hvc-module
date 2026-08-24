@@ -3,6 +3,7 @@ import { Select } from '@/shared/ui/select';
 import { cn } from '@/shared/lib/utils';
 import { ETIQUETA_TIPO } from '@/modules/equipos/lib/campos';
 import type { DefinicionCampo, TipoCampo } from '@/modules/equipos/types';
+import { Textarea } from '@/shared/ui/textarea';
 
 /**
  * Un campo del formulario, pintado según su TIPO.
@@ -31,11 +32,10 @@ export function CampoDinamico({
     switch (campo.tipo) {
       case 'TEXTO_LARGO':
         return (
-          <textarea
+          <Textarea
             value={String(valor ?? '')}
             onChange={(e) => onCambiar(e.target.value)}
             rows={3}
-            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-ring focus:ring-3 focus:ring-ring/30"
           />
         );
 

@@ -1,14 +1,16 @@
 import { Module } from '@nestjs/common';
-import { EquiposModule } from '../equipos/equipos.module';
 import { AlbumController } from './album.controller';
-import { CatalogoEquiposController } from './catalogo-equipos.controller';
 import { CarpetaController } from './carpeta.controller';
 import { TareaController } from './tarea.controller';
 import { AdministracionFotosController } from './administracion.controller';
 import { CompartirController } from './compartir.controller';
 import { InvitacionController } from './invitacion.controller';
 import { PortalController } from './portal.controller';
+import { ExportacionFotosController } from './exportacion.controller';
 import { CarpetaService } from './carpeta.service';
+import { CampoFotosService } from './campo.service';
+import { ConfiguracionFotosService } from './configuracion.service';
+import { ValorCampoFotosService } from './valor-campo-fotos.service';
 import { AlbumService } from './album.service';
 import { AccesoService } from './acceso.service';
 import { NavegacionService } from './navegacion.service';
@@ -16,12 +18,12 @@ import { CompartirService } from './compartir.service';
 import { InvitacionService } from './invitacion.service';
 import { AlmacenamientoService } from './almacenamiento.service';
 import { ImagenService } from './imagen.service';
-import { CatalogoEquiposService } from './catalogo-equipos.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
 import { TareaService } from './tarea.service';
 import { ComentarioService } from './comentario.service';
 import { PlantillaService } from './plantilla.service';
 import { ImportacionFotosService } from './importacion.service';
+import { ExportableFotosService } from './exportable-fotos.service';
 
 /**
  * Módulo Fotos (v3).
@@ -36,21 +38,33 @@ import { ImportacionFotosService } from './importacion.service';
  * toca fotos, y `CompartirService` reparte accesos.
  */
 @Module({
-  // Fotos REFERENCIA el catálogo de equipos (§12). La flecha va en este
-  // sentido y solo en este: Equipos no importa nada de Fotos.
-  imports: [EquiposModule],
+  // ⚠️ Sin `imports`. Hasta la Fase 1a de «Gestión de contenido» esto
+  // importaba `EquiposModule`: una carpeta de tipo EQUIPO referenciaba al
+  // equipo real del catálogo (§12), y `CatalogoEquiposController` era la
+  // puerta autorizada a buscarlo y registrarlo. Se retiró entero —el flujo
+  // cruzado generaba fricción en obra y ninguna carpeta llegó a
+  // enlazarse—, así que hoy **Fotos no depende de ningún otro módulo de
+  // negocio**. La información del equipo pasa a ser propia y configurable
+  // (Fase 1b).
   controllers: [
     AlbumController,
-    CatalogoEquiposController,
     CarpetaController,
     TareaController,
     AdministracionFotosController,
     CompartirController,
     InvitacionController,
     PortalController,
+    ExportacionFotosController,
   ],
   providers: [
     CarpetaService,
+    // Los campos configurables de una carpeta de tipo EQUIPO (Fase 1b):
+    // `CampoFotosService` los DEFINE (ADMIN_GLOBAL) y
+    // `ValorCampoFotosService` los RELLENA (EDICION sobre la carpeta).
+    // Dos services y no uno porque son dos permisos distintos.
+    CampoFotosService,
+    ValorCampoFotosService,
+    ConfiguracionFotosService,
     AlbumService,
     AccesoService,
     NavegacionService,
@@ -58,12 +72,12 @@ import { ImportacionFotosService } from './importacion.service';
     InvitacionService,
     AlmacenamientoService,
     ImagenService,
-    CatalogoEquiposService,
     AuditoriaFotosService,
     TareaService,
     ComentarioService,
     PlantillaService,
     ImportacionFotosService,
+    ExportableFotosService,
   ],
 })
 export class FotosModule {}

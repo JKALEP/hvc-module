@@ -293,6 +293,7 @@ export function CamposOrganizacion() {
                   variant="ghost"
                   size="icon-sm"
                   aria-label={`Eliminar ${c.nombre}`}
+                  title={`Eliminar ${c.nombre}`}
                   onClick={() => setABorrar(c)}
                 >
                   <Trash2Icon />

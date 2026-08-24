@@ -6,10 +6,11 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService, noExisteOSinAcceso } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
+import { AlmacenamientoService } from './almacenamiento.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar, describir } from '../common/texto';
 import { aIdOpcional } from '../common/validacion';
-import { aFechaUTC } from '../common/fechas';
+import { aFechaUTC, claveDia } from '../common/fechas';
 import type {
   EstadoTareaFotos,
   PrioridadTareaFotos,
@@ -47,6 +48,9 @@ const SELECT_TAREA = {
   _count: { select: { fotos: true, comentarios: true } },
 } as const;
 
+/** Lo que devuelve Prisma para una tarea, antes de normalizar la fecha. */
+type TareaCruda = { fecha: Date | null } & Record<string, unknown>;
+
 /**
  * Las tareas de §13.
  *
@@ -70,6 +74,7 @@ export class TareaService {
     private readonly prisma: PrismaService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
+    private readonly almacenamiento: AlmacenamientoService,
   ) {}
 
   /**
@@ -97,6 +102,27 @@ export class TareaService {
       minimo,
     );
     return { tarea, carpeta };
+  }
+
+  /**
+   * Normaliza `fecha` a "YYYY-MM-DD" antes de salir.
+   *
+   * ⚠️ `@db.Date` llega como `Date` y se serializa a
+   * `"2026-08-21T00:00:00.000Z"`. Un `<input type="date">` no acepta eso, así
+   * que el formulario de edición se quedaba con la fecha VACÍA aunque la
+   * tarea la tuviera —el listado sí la pintaba, porque ahí solo se formatea—.
+   * Se corta aquí y no en el cliente para que el contrato diga la verdad: el
+   * tipo del frontend ya prometía "YYYY-MM-DD". Es lo mismo que hace la
+   * galería con la fecha del álbum.
+   */
+  private conFecha<T extends TareaCruda>(tarea: T): T;
+  private conFecha<T extends TareaCruda>(tareas: T[]): T[];
+  private conFecha<T extends TareaCruda>(entrada: T | T[]): T | T[] {
+    const una = (t: T) => ({
+      ...t,
+      fecha: t.fecha ? claveDia(t.fecha) : null,
+    });
+    return Array.isArray(entrada) ? entrada.map(una) : una(entrada);
   }
 
   private validarEstado(valor: unknown): EstadoTareaFotos | null {
@@ -154,6 +180,87 @@ export class TareaService {
       : { completadaEn: null, completadaPorId: null };
   }
 
+  /**
+   * Quién puede ser RESPONSABLE de una tarea (§13).
+   *
+   * Solo id y nombre, y solo de cuentas ACTIVAS con el módulo FOTOS (más el
+   * SuperAdmin, que llega a todo por su rol). **Sin correos**: §10 exige
+   * TOTAL para ver la lista de colaboradores justamente porque ahí van
+   * correos de terceros; un nombre para rellenar un desplegable no es lo
+   * mismo, pero no hay razón para añadir el correo al lado.
+   *
+   * Vive aquí y no en `/usuario`, que es `@SoloSuperAdmin`: abrir aquella
+   * ruta para esto habría dado a cualquier supervisor la ficha completa de
+   * todas las cuentas del sistema. Es el mismo criterio que llevó el
+   * catálogo de Equipos a un controller propio en la Fase 4.
+   *
+   * Los CLIENTES quedan fuera: son cuentas externas del portal (§4) y
+   * asignarles trabajo de obra no significa nada.
+   */
+  async asignables() {
+    return this.prisma.usuario.findMany({
+      where: {
+        estado: 'ACTIVO',
+        OR: [
+          { rol: 'SUPERADMIN' },
+          { permisos: { some: { modulo: 'FOTOS' } } },
+        ],
+        NOT: { rol: 'CLIENTE' },
+      },
+      select: { id: true, nombre: true },
+      orderBy: { nombre: 'asc' },
+    });
+  }
+
+  /**
+   * Las fotos de una tarea (§15: «tarea relacionada»).
+   *
+   * ⚠️ Existe porque desde la Fase 6 se PODÍAN subir fotos a una tarea y no
+   * había forma de volver a verlas: la galería lista por álbum
+   * (`where: { album }`) y la bandeja solo lo que no está clasificado, así
+   * que una foto de tarea quedaba invisible en las dos. Era un cabo suelto,
+   * no una decisión.
+   *
+   * Sin paginar a propósito: las fotos de UNA tarea son unas pocas —lo que
+   * documenta un trabajo concreto—, al revés que la galería de una carpeta,
+   * que acumula todo lo del proyecto.
+   */
+  async fotosDe(usuario: UsuarioAutenticado, tareaId: number) {
+    const { tarea } = await this.tareaConPermiso(usuario, tareaId, 'LECTURA');
+
+    const fotos = await this.prisma.foto.findMany({
+      where: { tareaId: tarea.id },
+      orderBy: { creadoEn: 'asc' },
+      select: {
+        id: true,
+        descripcion: true,
+        anchoPx: true,
+        altoPx: true,
+        bytes: true,
+        tomadaEn: true,
+        creadoEn: true,
+        claveImagen: true,
+        claveMiniatura: true,
+        subidaPor: { select: { id: true, nombre: true } },
+      },
+    });
+
+    return Promise.all(
+      fotos.map(async (f) => ({
+        id: f.id,
+        descripcion: f.descripcion,
+        anchoPx: f.anchoPx,
+        altoPx: f.altoPx,
+        bytes: f.bytes,
+        tomadaEn: f.tomadaEn ? claveDia(f.tomadaEn) : null,
+        creadoEn: f.creadoEn,
+        subidaPor: f.subidaPor,
+        url: await this.almacenamiento.urlFirmada(f.claveImagen),
+        urlMiniatura: await this.almacenamiento.urlFirmada(f.claveMiniatura),
+      })),
+    );
+  }
+
   /** Las tareas de una carpeta. §5: ver es LECTURA. */
   async listar(
     usuario: UsuarioAutenticado,
@@ -163,21 +270,24 @@ export class TareaService {
     await this.acceso.exigirPermiso(usuario, carpetaId, 'LECTURA');
     const estado = this.validarEstado(filtros.estado);
 
-    return this.prisma.tareaFotos.findMany({
-      where: { carpetaId, ...(estado ? { estado } : {}) },
-      select: SELECT_TAREA,
-      // Pendientes arriba y, dentro de cada estado, lo más reciente
-      // primero: una lista de tareas se mira para saber qué falta.
-      orderBy: [{ estado: 'asc' }, { creadoEn: 'desc' }],
-    });
+    return this.conFecha(
+      await this.prisma.tareaFotos.findMany({
+        where: { carpetaId, ...(estado ? { estado } : {}) },
+        select: SELECT_TAREA,
+        // Pendientes arriba y, dentro de cada estado, lo más reciente
+        // primero: una lista de tareas se mira para saber qué falta.
+        orderBy: [{ estado: 'asc' }, { creadoEn: 'desc' }],
+      }),
+    );
   }
 
   async detalle(usuario: UsuarioAutenticado, tareaId: number) {
     await this.tareaConPermiso(usuario, tareaId, 'LECTURA');
-    return this.prisma.tareaFotos.findUnique({
+    const tarea = await this.prisma.tareaFotos.findUniqueOrThrow({
       where: { id: tareaId },
       select: SELECT_TAREA,
     });
+    return this.conFecha(tarea);
   }
 
   /** Crear. §5: escribir dentro de una carpeta es EDICION. */
@@ -232,7 +342,7 @@ export class TareaService {
       accion: 'CREACION',
       descripcion: `Creó la tarea "${tarea.titulo}".`,
     });
-    return tarea;
+    return this.conFecha(tarea);
   }
 
   /**
@@ -246,6 +356,14 @@ export class TareaService {
     dto: EditarTareaDto,
   ) {
     const { carpeta } = await this.tareaConPermiso(usuario, tareaId, 'EDICION');
+
+    // Instantánea ANTES de tocar nada: comparar los dos estados es más
+    // fiable que deducir el cambio del payload, que no sabe qué había.
+    // Mismo criterio que `EquipoService.editar` y que `CarpetaService`.
+    const antes = await this.prisma.tareaFotos.findUniqueOrThrow({
+      where: { id: tareaId },
+      select: SELECT_TAREA,
+    });
 
     const datos: Record<string, unknown> = {};
 
@@ -282,7 +400,31 @@ export class TareaService {
     });
 
     await this.acceso.marcarActividad(carpeta.ruta);
-    return tarea;
+
+    // Un evento POR CAMPO que cambió, con su valor anterior (§23). §23 no
+    // nombra «editar tarea» entre sus trece acciones —sí «crear» y
+    // «completar»—, pero una carpeta ya lo registra y no tenerlo aquí
+    // dejaba un agujero raro: se sabía quién creó la tarea y quién la dio
+    // por hecha, pero no quién le cambió el responsable por el camino.
+    const comoTexto = (t: typeof antes) => ({
+      titulo: t.titulo,
+      descripcion: t.descripcion,
+      estado: t.estado,
+      prioridad: t.prioridad ?? null,
+      fecha: t.fecha ? claveDia(t.fecha) : null,
+      responsable: t.responsable?.nombre ?? null,
+    });
+
+    await this.auditoria.registrar(
+      usuario,
+      this.auditoria.diferencias(comoTexto(antes), comoTexto(tarea), {
+        carpetaId: carpeta.id,
+        entidad: 'TAREA',
+        entidadId: tareaId,
+      }),
+    );
+
+    return this.conFecha(tarea);
   }
 
   /**
@@ -322,7 +464,7 @@ export class TareaService {
       accion: completada ? 'TAREA_COMPLETADA' : 'TAREA_REABIERTA',
       descripcion: `${completada ? 'Completó' : 'Reabrió'} "${tarea.titulo}".`,
     });
-    return tarea;
+    return this.conFecha(tarea);
   }
 
   /**

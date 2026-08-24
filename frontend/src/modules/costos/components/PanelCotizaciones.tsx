@@ -102,7 +102,7 @@ export function PanelCotizaciones({
                 className={cn(
                   'space-y-3 rounded-xl border p-4',
                   c.requiereRevision
-                    ? 'border-amber-600/30 bg-amber-50/50 dark:border-amber-500/30 dark:bg-amber-500/5'
+                    ? 'border-warning/30 bg-warning-soft/50'
                     : 'border-border',
                   fuera && 'opacity-60',
                 )}
@@ -129,7 +129,7 @@ export function PanelCotizaciones({
 
                 {/* §54: puso precio a algo que después cambió. */}
                 {c.requiereRevision && (
-                  <p className="flex items-start gap-1.5 text-xs text-amber-800 dark:text-amber-300">
+                  <p className="flex items-start gap-1.5 text-xs text-warning-soft-foreground">
                     <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
                     <span>
                       Pendiente de revisar:{' '}

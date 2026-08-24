@@ -139,6 +139,7 @@ export function PanelGrupo({
             variant="ghost"
             size="icon-sm"
             aria-label={`Renombrar ${ETIQUETA_GRUPO[tipo].toLowerCase()}`}
+            title={`Renombrar ${ETIQUETA_GRUPO[tipo].toLowerCase()}`}
             onClick={() => setEditandoNombre(true)}
           >
             <PencilIcon />
@@ -147,6 +148,7 @@ export function PanelGrupo({
             variant="ghost"
             size="icon-sm"
             aria-label="Eliminar grupo"
+            title="Eliminar grupo"
             onClick={() => onEliminarGrupo(grupo)}
           >
             <Trash2Icon />

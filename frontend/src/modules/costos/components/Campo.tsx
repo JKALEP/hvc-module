@@ -32,18 +32,6 @@ export function Campo({
   );
 }
 
-/**
- * Las clases del `<textarea>`.
- *
- * No hay primitiva compartida para textarea en `shared/ui`, y el resto
- * del repositorio lo escribe a mano en cada formulario. Esto al menos
- * las deja en un sitio dentro del módulo.
- */
-export const CLASES_TEXTAREA =
-  'w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none ' +
-  'placeholder:text-muted-foreground focus:border-ring focus:ring-3 focus:ring-ring/30 ' +
-  'disabled:pointer-events-none disabled:opacity-50';
-
 /** El estado del requerimiento, con la etiqueta y el tono de `lib/estados`. */
 export function EstadoBadge({ estado }: { estado: EstadoRequerimiento }) {
   const { etiqueta, tono } = presentacionDe(estado);

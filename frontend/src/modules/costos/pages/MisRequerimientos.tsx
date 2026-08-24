@@ -136,7 +136,7 @@ export function MisRequerimientos() {
                     className={cn(
                       'cursor-pointer',
                       miTurno &&
-                        'border-l-2 border-l-amber-500 bg-amber-50/40 hover:bg-amber-50/70 dark:bg-amber-500/5 dark:hover:bg-amber-500/10',
+                        'border-l-2 border-l-warning bg-warning-soft/40 hover:bg-warning-soft/70',
                     )}
                     onClick={() => navigate(`/costos/requerimiento/${r.id}`)}
                   >

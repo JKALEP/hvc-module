@@ -16,7 +16,7 @@ import { DialogoConfirmar } from '@/shared/components/DialogoConfirmar';
 import { Card, CardContent } from '@/shared/ui/card';
 import { Button } from '@/shared/ui/button';
 import { Spinner } from '@/shared/ui/spinner';
-import { Dato, EstadoBadge, CLASES_TEXTAREA } from '@/modules/costos/components/Campo';
+import { Dato, EstadoBadge } from '@/modules/costos/components/Campo';
 import { FormularioCabecera } from '@/modules/costos/components/FormularioCabecera';
 import {
   aPayload,
@@ -53,6 +53,7 @@ import {
 import { presentacionDe } from '@/modules/costos/lib/estados';
 import { formatFechaCorta, formatPrecio, orDash } from '@/shared/lib/format';
 import type { RequerimientoItem } from '@/modules/costos/types';
+import { Textarea } from '@/shared/ui/textarea';
 
 /**
  * El detalle de un requerimiento, desde el lado del solicitante.
@@ -195,12 +196,12 @@ export function RequerimientoDetalle() {
 
       {/* §46: la tarea pendiente, donde no se pueda pasar por alto. */}
       {estado === 'PENDIENTE_REGISTRO_COSTO' && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-600/25 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning-soft p-4">
           <div>
-            <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+            <p className="text-sm font-medium text-warning-soft-foreground">
               Requerimiento aprobado — falta registrar el costo
             </p>
-            <p className="text-sm text-amber-800 dark:text-amber-300">
+            <p className="text-sm text-warning-soft-foreground">
               Anota cuánto costó cada ítem para cerrar el proceso.
             </p>
           </div>
@@ -463,12 +464,11 @@ export function RequerimientoDetalle() {
           }
           onCerrar={() => setCancelando(false)}
         >
-          <textarea
+          <Textarea
             value={motivoCancelar}
             onChange={(e) => setMotivoCancelar(e.target.value)}
             rows={3}
             placeholder="Por qué se cancela (obligatorio)."
-            className={CLASES_TEXTAREA}
           />
         </DialogoConfirmar>
       )}

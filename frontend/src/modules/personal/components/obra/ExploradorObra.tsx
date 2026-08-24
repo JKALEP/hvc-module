@@ -100,6 +100,7 @@ export function TarjetaCarpeta({
           variant="ghost"
           size="icon-sm"
           aria-label={`Renombrar ${carpeta.nombre}`}
+          title={`Renombrar ${carpeta.nombre}`}
           onClick={() => onRenombrar(carpeta)}
         >
           <PencilIcon />
@@ -108,6 +109,7 @@ export function TarjetaCarpeta({
           variant="ghost"
           size="icon-sm"
           aria-label={`Eliminar ${carpeta.nombre}`}
+          title={`Eliminar ${carpeta.nombre}`}
           onClick={() => onEliminar(carpeta)}
         >
           <Trash2Icon />

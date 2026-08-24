@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
+import { ValorCampoFotosService } from './valor-campo-fotos.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar, describir } from '../common/texto';
 import { aIdOpcional } from '../common/validacion';
@@ -17,10 +18,26 @@ import type { TipoCarpetaFotos } from '../../generated/prisma/enums';
 export interface CrearCarpetaDto {
   nombre?: string | null;
   parentId?: number | string | null;
-  /** `CARPETA` (por defecto) o `EQUIPO` (§12). */
+  /**
+   * `CARPETA` (por defecto) o `EQUIPO`.
+   *
+   * Ya NO lleva `equipoId`: desde la Fase 1a de «Gestión de contenido»
+   * este módulo no referencia el catálogo de Gestión de Equipos. La
+   * información del equipo es propia de Fotos y llega en la Fase 1b.
+   */
   tipo?: string | null;
-  /** Obligatorio con `tipo = EQUIPO`, prohibido con `CARPETA`. */
-  equipoId?: number | string | null;
+  /**
+   * Los campos configurables del equipo, indexados por CLAVE (Fase 1b).
+   *
+   * Solo con `tipo = EQUIPO`. Van en la misma llamada —y en la misma
+   * transacción— que la carpeta a propósito: crear y luego rellenar en dos
+   * pasos deja una carpeta a medias si el segundo falla, y en obra ese
+   * segundo paso es justo el que se pierde cuando se va la señal.
+   *
+   * ⚠️ Los campos de tipo FOTO NO caben aquí: una imagen no viaja en un
+   * JSON. Se suben después, por `POST carpeta/:id/campo/:campoId/imagen`.
+   */
+  valores?: Record<string, unknown> | null;
 }
 
 export interface EditarCarpetaDto {
@@ -34,6 +51,7 @@ export class CarpetaService {
     private readonly prisma: PrismaService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
+    private readonly valores: ValorCampoFotosService,
   ) {}
 
   /** Ruta materializada del nodo: la de su madre más su propio id. */
@@ -51,21 +69,21 @@ export class CarpetaService {
   }
 
   /**
-   * Valida el par `tipo` / `equipoId` de §12.
+   * Valida el `tipo` de la carpeta.
    *
-   * El CHECK `carpetas_fotos_equipo_segun_tipo_chk` ya impide la fila
-   * imposible, pero un CHECK habla en inglés y sin contexto: aquí se
-   * traduce a lo que el usuario hizo mal, y se comprueba además que el
-   * equipo EXISTA —eso la FK lo dice, pero también con un error crudo—.
+   * ⚠️ Antes se llamaba `tipoYEquipo` y validaba además el par
+   * `tipo`/`equipoId`: una carpeta de tipo EQUIPO tenía que apuntar a un
+   * equipo del catálogo de Gestión de Equipos, y lo hacía cumplir también
+   * el CHECK `carpetas_fotos_equipo_segun_tipo_chk`. Los dos se retiraron
+   * en la Fase 1a de «Gestión de contenido»: el enlace entre módulos se
+   * deshizo entero.
    *
-   * Fotos no crea equipos por esta puerta: el equipo tiene que estar ya en
-   * el catálogo. Para registrarlo sin salir de Fotos está el atajo de
-   * `CatalogoEquiposService`, que es otra ruta y otro permiso.
+   * Hoy `EQUIPO` no exige NADA más, y con los campos configurables de la
+   * Fase 1b seguirá sin exigirlo —todos son opcionales a propósito, para
+   * que crear una carpeta de equipo en obra no se pueda trabar—. Por eso
+   * esto ya no es `async`: no queda nada que preguntarle a la base.
    */
-  private async tipoYEquipo(dto: CrearCarpetaDto): Promise<{
-    tipo: TipoCarpetaFotos;
-    equipoId: number | null;
-  }> {
+  private tipoValido(dto: CrearCarpetaDto): TipoCarpetaFotos {
     // `toUpperCase()` devuelve `string`, y comparar un `string` contra dos
     // literales no lo estrecha a la unión: de ahí el tipo de retorno
     // explícito en vez de un cast, que `eslint --fix` borra por creerlo
@@ -75,37 +93,11 @@ export class CarpetaService {
       throw new BadRequestException(
         `Tipo de carpeta inválido: "${describir(dto.tipo)}". Valores permitidos: CARPETA, EQUIPO.`,
       );
-
-    const equipoId = aIdOpcional(
-      dto.equipoId,
-      'El equipo que indicaste no es válido.',
-    );
-
-    if (tipo === 'EQUIPO' && equipoId === null)
-      throw new BadRequestException(
-        'Una carpeta de tipo EQUIPO tiene que apuntar a un equipo del catálogo.',
-      );
-    if (tipo === 'CARPETA' && equipoId !== null)
-      throw new BadRequestException(
-        'Solo una carpeta de tipo EQUIPO puede apuntar a un equipo.',
-      );
-
-    if (equipoId !== null) {
-      const existe = await this.prisma.equipo.findUnique({
-        where: { id: equipoId },
-        select: { id: true },
-      });
-      if (!existe)
-        throw new NotFoundException(
-          'Ese equipo no está en el catálogo de Gestión de equipos.',
-        );
-    }
-
-    return { tipo: tipo, equipoId };
+    return tipo;
   }
 
   /**
-   * Crea una carpeta, corriente o de tipo EQUIPO (§12).
+   * Crea una carpeta, corriente o de tipo EQUIPO.
    *
    * Dentro de otra exige EDICION sobre la madre (§5: crear subcarpetas es
    * de Editor). En la raíz no hay madre cuyo permiso mirar, así que decide
@@ -119,7 +111,17 @@ export class CarpetaService {
       dto.parentId,
       'La carpeta que indicaste no es válida.',
     );
-    const { tipo, equipoId } = await this.tipoYEquipo(dto);
+    const tipo = this.tipoValido(dto);
+
+    // Los campos configurables describen un EQUIPO. En una carpeta
+    // corriente no hay dónde enseñarlos, así que se rechaza en vez de
+    // guardarlos donde nadie los verá.
+    const valoresDeEquipo =
+      dto.valores && Object.keys(dto.valores).length > 0 ? dto.valores : null;
+    if (valoresDeEquipo && tipo !== 'EQUIPO')
+      throw new BadRequestException(
+        'Solo una carpeta de tipo Equipo lleva campos configurables.',
+      );
 
     if (parentId === null) {
       if (!this.acceso.puedeCrearRaiz(usuario))
@@ -153,14 +155,25 @@ export class CarpetaService {
           ruta: '',
           propietarioId: usuario.id,
           tipo,
-          equipoId,
         },
       });
       const ruta = await this.calcularRuta(carpeta.id, parentId);
-      return tx.carpetaFotos.update({
+      const actualizada = await tx.carpetaFotos.update({
         where: { id: carpeta.id },
         data: { ruta },
       });
+
+      // Los datos del equipo, en la MISMA transacción (Fase 1b). Si un
+      // valor no vale, no queda una carpeta a medias: se deshace todo.
+      //
+      // `escribirEn` y no `guardar` a propósito: aquí el permiso ya se
+      // decidió arriba —`puedeCrearRaiz` o EDICION sobre la madre— y la
+      // carpeta todavía no está confirmada, así que volver a comprobarlo
+      // daría el 404 uniforme sobre algo que sí existe.
+      if (valoresDeEquipo)
+        await this.valores.escribirEn(tx, carpeta.id, valoresDeEquipo);
+
+      return actualizada;
     });
 
     // Crear una subcarpeta es actividad de toda la línea de arriba.
@@ -384,7 +397,24 @@ export class CarpetaService {
         `No se puede eliminar: esta carpeta tiene ${carpeta._count.albumes} álbum(es) de fotos dentro. Archívala en su lugar.`,
       );
 
+    // ⚠️ Las imágenes de los campos de tipo FOTO se retiran de R2 ANTES de
+    // borrar la carpeta, y esto no es opcional.
+    //
+    // `ValorCampoFotos` va con `Cascade`, así que la base se lleva las
+    // filas sola —son datos DE la carpeta, no contenido colgado de ella—
+    // pero **no sabe nada del bucket**. Sin esto, cada equipo eliminado
+    // dejaría dos objetos huérfanos para siempre, y sin ninguna fila que
+    // apuntara a ellos no habría forma de encontrarlos después.
+    //
+    // Se leen antes del `delete` porque después ya no existen, y se borran
+    // del bucket después de que el `delete` haya salido bien: al revés, un
+    // fallo al borrar la carpeta dejaría la ficha apuntando a objetos que
+    // ya no están.
+    const imagenes = await this.valores.imagenesDe(id);
+
     await this.prisma.carpetaFotos.delete({ where: { id } });
+
+    await this.valores.borrarObjetos(imagenes);
 
     // §23, acción 2. `carpetaId` va en NULL a propósito: la FK es Cascade y
     // apuntar a la carpeta recién borrada se llevaría el propio registro de

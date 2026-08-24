@@ -280,6 +280,7 @@ export function Inventario() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Ver la ficha de este equipo"
+                        title="Ver la ficha de este equipo"
                         onClick={() =>
                           navegar(`/equipos/${organizacionId}/equipo/${e.id}`)
                         }
@@ -290,6 +291,7 @@ export function Inventario() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Ver incidencias de este equipo"
+                        title="Ver incidencias de este equipo"
                         onClick={() =>
                           navegar(
                             `/equipos/${organizacionId}/incidencias?equipo=${e.id}`,
@@ -302,6 +304,7 @@ export function Inventario() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Editar equipo"
+                        title="Editar equipo"
                         onClick={() => setEditandoId(e.id)}
                       >
                         <PencilIcon />
@@ -310,6 +313,7 @@ export function Inventario() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label="Eliminar equipo"
+                        title="Eliminar equipo"
                         onClick={() => setABorrar(e)}
                       >
                         <Trash2Icon />

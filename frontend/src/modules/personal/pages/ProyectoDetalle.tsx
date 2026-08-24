@@ -50,7 +50,7 @@ function Vigente({
       <span className="font-medium text-foreground">{nombre}</span>
       {!vigente && (
         <span
-          className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"
+          className="flex items-center gap-1 text-xs text-warning"
           title="Ya no figura en la lista de personal vigente"
         >
           <TriangleAlertIcon className="size-3.5" />

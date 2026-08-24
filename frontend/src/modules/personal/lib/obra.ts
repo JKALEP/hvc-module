@@ -55,7 +55,7 @@ export function claseSiBaja(
 ): string {
   if (valor === null) return 'text-muted-foreground';
   return valor < umbral
-    ? 'text-red-600 dark:text-red-400'
+    ? 'text-destructive'
     : 'text-foreground';
 }
 

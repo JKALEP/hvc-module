@@ -245,6 +245,7 @@ export function Documentos() {
                         variant="ghost"
                         size="icon-sm"
                         aria-label={`Eliminar ${d.codigo}`}
+                        title={`Eliminar ${d.codigo}`}
                         onClick={() => setABorrar(d)}
                       >
                         <Trash2Icon />

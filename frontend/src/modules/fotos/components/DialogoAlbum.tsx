@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Trash2Icon } from 'lucide-react';
 
 import {
   Dialog,
@@ -13,6 +14,7 @@ import { Input } from '@/shared/ui/input';
 import {
   useCrearAlbum,
   useEditarAlbum,
+  useEliminarAlbum,
 } from '@/modules/fotos/hooks/useAlbumes';
 import type { AlbumDeGaleria } from '@/modules/fotos/types';
 
@@ -44,6 +46,7 @@ export function DialogoAlbum({
 }) {
   const crear = useCrearAlbum();
   const editar = useEditarAlbum();
+  const eliminar = useEliminarAlbum();
 
   const editando = album !== null;
 
@@ -148,6 +151,30 @@ export function DialogoAlbum({
         </div>
 
         <DialogFooter>
+          {/* Solo si está VACÍO, y no por prudencia: el backend rechaza con
+              400 uno que tenga fotos, así que pintarlo siempre sería ofrecer
+              un botón que contesta un error. Mismo criterio que separar
+              `renombrar` de `compartir` en las tarjetas de carpeta.
+
+              Un álbum vacío no se podía retirar por ninguna vía hasta ahora
+              —se descubrió al limpiar una prueba: además bloqueaba el borrado
+              de su carpeta, porque la FK es `Restrict`—. Con fotos dentro no
+              hace falta este botón: se van borrando y el álbum se retira solo
+              con la última. */}
+          {editando && album.fotos.length === 0 && (
+            <Button
+              variant="ghost"
+              className="mr-auto text-destructive hover:text-destructive"
+              disabled={eliminar.isPending}
+              onClick={() =>
+                eliminar.mutate(album.id, { onSuccess: onCerrar })
+              }
+            >
+              <Trash2Icon />
+              Eliminar
+            </Button>
+          )}
+
           <Button variant="ghost" onClick={onCerrar}>
             Cancelar
           </Button>

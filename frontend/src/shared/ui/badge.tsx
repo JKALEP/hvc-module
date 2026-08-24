@@ -2,21 +2,45 @@ import { cva, type VariantProps } from 'class-variance-authority';
 
 import { cn } from '@/shared/lib/utils';
 
+/**
+ * Etiqueta de estado o contador.
+ *
+ * ⚠️ **Los colores salen de tokens semánticos, no de la paleta de Tailwind.**
+ * Antes las tres variantes de estado se escribían con `emerald-*`, `amber-*`
+ * y `red-*`, cada una con su pareja `dark:`. Eso tenía dos problemas: el
+ * color de «correcto» estaba escrito aquí y no en el sistema, así que
+ * cambiarlo obligaba a buscarlo por el código; y había que acordarse de
+ * escribir el par claro/oscuro cada vez —bastaba olvidar uno para que el
+ * modo oscuro quedara roto en silencio—.
+ *
+ * Con tokens, `.dark` ya redefine cada familia, así que **las variantes
+ * `dark:` desaparecen**: nueve clases menos que mantener a la par.
+ *
+ * La variante *soft* es la normal: fondo tenue y texto oscuro del mismo
+ * matiz. **El borde al 15 %** es lo que evita que se vean como manchas —
+ * define el contorno sin competir con el relleno—.
+ */
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-colors [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-3",
+  "inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-[11px] font-medium leading-none whitespace-nowrap transition-colors [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-3",
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-primary text-primary-foreground',
-        secondary:
-          'border-transparent bg-secondary text-secondary-foreground',
-        outline: 'border-border text-foreground',
+        // ── Neutras ──
+        default: 'bg-primary text-primary-foreground',
+        secondary: 'bg-secondary text-secondary-foreground',
+        outline: 'border-border bg-card text-foreground',
+
+        // ── Semánticas, en variante soft ──
         success:
-          'border-emerald-600/20 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-400',
+          'border-success/15 bg-success-soft text-success-soft-foreground',
         warning:
-          'border-amber-600/25 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-500',
+          'border-warning/15 bg-warning-soft text-warning-soft-foreground',
+        info: 'border-info/15 bg-info-soft text-info-soft-foreground',
         destructive:
-          'border-red-600/20 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/15 dark:text-red-400',
+          'border-destructive/15 bg-destructive-soft text-destructive-soft-foreground',
+
+        /** El acento de marca. Para destacar sin significar «correcto». */
+        brand: 'border-brand/15 bg-brand-soft text-brand-soft-foreground',
       },
     },
     defaultVariants: {

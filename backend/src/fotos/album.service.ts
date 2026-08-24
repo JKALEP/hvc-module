@@ -142,6 +142,13 @@ export class AlbumService {
             bytes: true,
             tomadaEn: true,
             creadoEn: true,
+            // ⚠️ La galería NO devolvía la descripción de cada foto, aunque
+            // la columna existe desde v2 y `subir` la escribe. Se veía en
+            // las fotos de una tarea —`TareaService.fotosDe` sí la manda— y
+            // aquí no, así que el mismo dato estaba visible en una pantalla
+            // e invisible en la otra. Hacía falta para poder corregirla
+            // (Fase 2b): no se edita lo que no se ve.
+            descripcion: true,
             subidaPor: { select: { id: true, nombre: true } },
           },
         },
@@ -169,6 +176,7 @@ export class AlbumService {
             bytes: f.bytes,
             tomadaEn: f.tomadaEn ? claveDia(f.tomadaEn) : null,
             creadoEn: f.creadoEn,
+            descripcion: f.descripcion,
             subidaPor: opciones.anonimo ? null : f.subidaPor,
             url: await this.almacenamiento.urlFirmada(f.claveImagen),
             urlMiniatura: await this.almacenamiento.urlFirmada(
@@ -376,6 +384,63 @@ export class AlbumService {
   }
 
   /**
+   * Elimina un álbum VACÍO.
+   *
+   * Existe porque desde §16 un álbum se puede crear vacío (9a) y no había
+   * forma de retirarlo: uno creado por error se quedaba para siempre y
+   * además **bloqueaba el borrado de su carpeta**, porque
+   * `carpetas_fotos ← albumes_fotos` es `Restrict`. Se descubrió al intentar
+   * limpiar los datos de una prueba.
+   *
+   * ⚠️ Solo si está vacío. Un álbum con fotos NO se borra por aquí: se
+   * borran las fotos —que es una decisión por foto, con su propio permiso— y
+   * entonces el álbum se retira solo, como ya hace `eliminar`. Es el mismo
+   * criterio que la carpeta, donde el `Restrict` es lo que hace que borrar
+   * no sea peligroso.
+   *
+   * El propio con EDICION, el ajeno con TOTAL: la distinción de §5 que ya
+   * siguen las fotos y las tareas.
+   */
+  async eliminarAlbum(usuario: UsuarioAutenticado, albumId: number) {
+    const album = await this.prisma.albumFotos.findUnique({
+      where: { id: albumId },
+      select: {
+        carpetaId: true,
+        nombre: true,
+        creadoPorId: true,
+        _count: { select: { fotos: true } },
+      },
+    });
+    if (!album) throw new NotFoundException(noExisteOSinAcceso('Ese álbum'));
+
+    const esPropio = album.creadoPorId === usuario.id;
+    const carpeta = await this.acceso.exigirPermiso(
+      usuario,
+      album.carpetaId,
+      esPropio ? 'EDICION' : 'TOTAL',
+    );
+
+    if (album._count.fotos > 0)
+      throw new BadRequestException(
+        `No se puede eliminar: "${album.nombre ?? 'el álbum'}" tiene ${album._count.fotos} foto(s). ` +
+          'Elimínalas primero y vuelve a intentarlo.',
+      );
+
+    await this.prisma.albumFotos.delete({ where: { id: albumId } });
+    await this.acceso.marcarActividad(carpeta.ruta);
+
+    await this.auditoria.registrar(usuario, {
+      carpetaId: album.carpetaId,
+      entidad: 'ALBUM',
+      entidadId: albumId,
+      accion: 'ELIMINACION',
+      descripcion: `Eliminó el álbum "${album.nombre ?? 'sin título'}".`,
+    });
+
+    return { ok: true, id: albumId };
+  }
+
+  /**
    * La bandeja de §18: lo que subí y todavía no he clasificado.
    *
    * Es SIEMPRE la del usuario que pregunta —no recibe un id de nadie—,
@@ -437,6 +502,20 @@ export class AlbumService {
     usuario: UsuarioAutenticado,
     fotoIds: number[],
     destino: DestinoSubida,
+    /**
+     * Nombre y descripción del álbum que recoge el lote (Fase 2c).
+     *
+     * Solo se usan cuando el destino es una CARPETA, que es el único caso en
+     * que se crea un álbum aquí. Los dos son opcionales: la captura rápida de
+     * §17 sigue pudiendo clasificar sin escribir nada, y entonces el álbum
+     * nace sin título como hasta ahora —la pantalla lo distingue por su
+     * fecha—.
+     *
+     * Antes NO había forma de ponerle nombre: había que clasificar y después
+     * ir a editar el álbum, y el flujo de §18 es justo el que quiere evitar
+     * pasos de más.
+     */
+    album: { nombre?: unknown; descripcion?: unknown } = {},
   ) {
     if (!Array.isArray(fotoIds) || fotoIds.length === 0)
       throw new BadRequestException('No se indicó ninguna foto.');
@@ -451,6 +530,18 @@ export class AlbumService {
 
     const resuelto = await this.resolverDestino(usuario, destino);
 
+    // ⚠️ El nombre solo se admite cuando de verdad se va a crear un álbum.
+    // Mandarlo hacia un álbum que ya existe sería una renombrada encubierta:
+    // para eso está `PATCH /fotos/album/:id`, que es otra decisión y otro
+    // aviso en pantalla.
+    const nombre = limpiar(album.nombre);
+    const descripcion = limpiar(album.descripcion);
+    if ((nombre || descripcion) && !resuelto.crearAlbum)
+      throw new BadRequestException(
+        'El nombre es para el álbum que se crea al clasificar en una carpeta. ' +
+          'Para renombrar uno que ya existe, edítalo.',
+      );
+
     // Un destino de tipo `carpeta` crea aquí el álbum que las recoge, igual
     // que lo haría una subida directa.
     const albumId =
@@ -461,6 +552,8 @@ export class AlbumService {
               data: {
                 carpetaId: resuelto.carpetaId!,
                 creadoPorId: usuario.id,
+                nombre,
+                descripcion,
               },
               select: { id: true },
             })
@@ -693,6 +786,9 @@ export class AlbumService {
         creadoEn: true,
         albumId: true,
         tareaId: true,
+        // Para poder anotar el valor ANTERIOR al editar la descripción: una
+        // auditoría que solo dice «cambió» no responde a qué cambió.
+        descripcion: true,
       },
     });
     if (!foto) throw new NotFoundException(noExisteOSinAcceso('Esa foto'));
@@ -713,6 +809,195 @@ export class AlbumService {
    * el log —que recoge `scripts/limpiar-r2-huerfanos.cjs`—, no una foto
    * fantasma en la galería.
    */
+  /**
+   * Mueve UNA foto de sitio (§1.2 del documento de gestión de contenido).
+   *
+   * Reutiliza `DestinoSubida`, así que los cuatro sitios donde puede vivir
+   * una foto son los mismos que al subirla —álbum, tarea, carpeta (crea
+   * álbum) y bandeja—: mover no inventa destinos nuevos, y `resolverDestino`
+   * ya sabe validarlos y exigir EDICION en cada uno.
+   *
+   * ⚠️ **Permiso en ORIGEN y en DESTINO, y las dos comprobaciones importan.**
+   * Con solo la del destino se podría sacar una foto de una carpeta que no se
+   * alcanza; con solo la del origen, meterla en una donde no se puede
+   * escribir. Es el mismo criterio que ya aplica `CarpetaService.editar` al
+   * mover una rama del árbol. Las dos pasan por `exigirPermiso`, así que una
+   * rama archivada bloquea el movimiento por los dos lados sin regla nueva.
+   *
+   * ⚠️ **Los objetos de R2 NO se mueven.** La clave se guarda por foto, así
+   * que copiar y borrar en el bucket para que el prefijo quede bonito sería
+   * gastar red y arriesgar huérfanos a cambio de nada. Es la misma decisión
+   * que tomó `clasificar` en la Fase 6: una foto no cambia de clave nunca.
+   *
+   * ⚠️ **El álbum de origen que se queda vacío SE QUEDA.** Desde la Fase 2b
+   * vaciar no es borrar, y mover la última foto de un álbum es vaciarlo.
+   */
+  async mover(
+    usuario: UsuarioAutenticado,
+    fotoId: number,
+    destino: DestinoSubida,
+  ) {
+    const foto = await this.buscarConAcceso(usuario, fotoId, 'EDICION');
+
+    // ⚠️ Devolver una foto a la bandeja solo se admite si es TUYA, y no es
+    // una cortesía: la bandeja de §18 es estrictamente de quien subió la
+    // foto —`subidaPorId`—, y ni un ADMIN_GLOBAL ve la ajena. Sin esta
+    // comprobación, mover la foto de otro «a sin álbum» la sacaría del árbol
+    // de carpetas y la dejaría donde quien la movió ya no puede alcanzarla:
+    // no un borrado, pero indistinguible de uno para todos menos su autor.
+    if (destino.tipo === 'bandeja' && foto.subidaPorId !== usuario.id)
+      throw new BadRequestException(
+        'Solo puedes devolver a «sin clasificar» una foto que subiste tú: ' +
+          'la bandeja es privada de quien sube, y ahí dejarías de verla.',
+      );
+
+    const resuelto = await this.resolverDestino(usuario, destino);
+
+    // El álbum que recoge la foto cuando el destino es una CARPETA: igual
+    // que hacen `subir` y `clasificar`, se crea aquí.
+    const albumDestino =
+      resuelto.albumId ??
+      (resuelto.crearAlbum
+        ? (
+            await this.prisma.albumFotos.create({
+              data: {
+                carpetaId: resuelto.carpetaId!,
+                creadoPorId: usuario.id,
+              },
+              select: { id: true },
+            })
+          ).id
+        : null);
+    const tareaDestino = resuelto.tareaId ?? null;
+
+    // Mover algo a donde ya está no es un error, pero tampoco es un
+    // movimiento: se contesta sin escribir ni ensuciar la bitácora. Si el
+    // destino era una carpeta, el álbum que se acaba de crear sobra.
+    if (foto.albumId === albumDestino && foto.tareaId === tareaDestino) {
+      if (resuelto.crearAlbum && albumDestino !== null)
+        await this.prisma.albumFotos.delete({ where: { id: albumDestino } });
+      return { ok: true, id: fotoId, sinCambios: true };
+    }
+
+    const origen = await this.nombreDeSitio(foto.albumId, foto.tareaId);
+
+    await this.prisma.foto.update({
+      where: { id: fotoId },
+      data: { albumId: albumDestino, tareaId: tareaDestino },
+    });
+
+    // Las DOS líneas de ancestros marcan actividad: la carpeta de la que
+    // sale también cambió, aunque sea para tener una foto menos.
+    if (foto.carpeta) await this.acceso.marcarActividad(foto.carpeta.ruta);
+    if (resuelto.ruta) await this.acceso.marcarActividad(resuelto.ruta);
+
+    const hacia = await this.nombreDeSitio(albumDestino, tareaDestino);
+
+    // §23. `MOVIMIENTO` ya existía en el enum desde la Fase 1 y hasta ahora
+    // solo lo escribían las carpetas.
+    await this.auditoria.registrar(usuario, {
+      // Cuelga de la carpeta DESTINO cuando la hay; si la foto va a la
+      // bandeja no hay ninguna, y entonces se ancla en la de origen para
+      // que el hilo de §23 de esa carpeta registre que algo salió de ella.
+      carpetaId: resuelto.carpetaId ?? foto.carpeta?.id ?? null,
+      entidad: 'FOTO',
+      entidadId: fotoId,
+      accion: 'MOVIMIENTO',
+      descripcion: `Movió una foto: ${origen} → ${hacia}.`,
+    });
+
+    return {
+      ok: true,
+      id: fotoId,
+      albumId: albumDestino,
+      tareaId: tareaDestino,
+      sinCambios: false,
+    };
+  }
+
+  /** Cómo se lee el sitio de una foto en la bitácora. */
+  private async nombreDeSitio(
+    albumId: number | null,
+    tareaId: number | null,
+  ): Promise<string> {
+    if (albumId !== null) {
+      const a = await this.prisma.albumFotos.findUnique({
+        where: { id: albumId },
+        select: { nombre: true, carpeta: { select: { nombre: true } } },
+      });
+      const album = a?.nombre ?? `álbum #${albumId}`;
+      return a?.carpeta ? `${a.carpeta.nombre} / ${album}` : album;
+    }
+    if (tareaId !== null) {
+      const t = await this.prisma.tareaFotos.findUnique({
+        where: { id: tareaId },
+        select: { titulo: true, carpeta: { select: { nombre: true } } },
+      });
+      const tarea = t?.titulo ?? `tarea #${tareaId}`;
+      return t?.carpeta ? `${t.carpeta.nombre} / ${tarea}` : tarea;
+    }
+    return 'sin clasificar';
+  }
+
+  /**
+   * Corrige la descripción de una foto ya subida (§2.2 del documento de
+   * gestión de contenido).
+   *
+   * Es un error humano de los corrientes —una errata, o algo escrito
+   * apurado desde el móvil en obra— y corregirlo no compromete nada,
+   * igual que ya se admite corregir el lugar y la fecha de un
+   * requerimiento en Costos. Queda auditado con el valor anterior.
+   *
+   * ⚠️ **Pide EDICION y NO exige ser quien la subió**, al revés que borrar
+   * —propia con EDICION, ajena con TOTAL— y al revés que un comentario, que
+   * solo edita su autor. La diferencia no es un descuido:
+   *
+   *   · un COMENTARIO es una declaración firmada; que un tercero la
+   *     reescriba destruye el registro de quién dijo qué, que es justo lo
+   *     que §14 quiere guardar;
+   *   · una DESCRIPCIÓN es la etiqueta de una evidencia compartida —de
+   *     hecho nace siendo del LOTE, no de la foto—, así que corregirla es
+   *     mantenimiento del expediente, no hablar en nombre de otro.
+   *
+   * Lo que sigue sin poder tocarse es la IMAGEN: reemplazar el archivo
+   * detrás de un registro existente permitiría cambiar la prueba
+   * fotográfica de una inspección sin que se note. Para eso se elimina y se
+   * sube de nuevo, y las dos acciones quedan por separado en la bitácora.
+   */
+  async editarDescripcion(
+    usuario: UsuarioAutenticado,
+    fotoId: number,
+    descripcionCruda: unknown,
+  ) {
+    const foto = await this.buscarConAcceso(usuario, fotoId, 'EDICION');
+    const nueva = limpiar(descripcionCruda);
+    const anterior = foto.descripcion;
+
+    if (nueva === anterior)
+      return { ok: true, id: fotoId, descripcion: anterior };
+
+    await this.prisma.foto.update({
+      where: { id: fotoId },
+      data: { descripcion: nueva },
+    });
+
+    if (foto.carpeta) await this.acceso.marcarActividad(foto.carpeta.ruta);
+
+    // §23. Con el valor anterior Y el nuevo: es lo que hace de esto una
+    // corrección auditable y no una edición silenciosa.
+    await this.auditoria.registrar(usuario, {
+      carpetaId: foto.carpeta?.id ?? null,
+      entidad: 'FOTO',
+      entidadId: fotoId,
+      accion: 'EDICION',
+      descripcion:
+        `Cambió la descripción de una foto: ` +
+        `"${anterior ?? '(vacía)'}" → "${nueva ?? '(vacía)'}".`,
+    });
+
+    return { ok: true, id: fotoId, descripcion: nueva };
+  }
+
   async eliminar(usuario: UsuarioAutenticado, fotoId: number) {
     // El autor necesita EDICION; cualquier otro, TOTAL. Las dos ramas pasan
     // por `exigirSobreFoto`, así que las dos comprueban además que la rama
@@ -735,19 +1020,23 @@ export class AlbumService {
     await this.prisma.foto.delete({ where: { id: fotoId } });
     await this.almacenamiento.borrar([foto.claveImagen, foto.claveMiniatura]);
 
-    // Si el álbum se queda vacío deja de tener sentido.
+    // ⚠️ Un álbum que se queda vacío SE QUEDA VACÍO. No se borra solo.
+    //
+    // Hasta la Fase 2b sí lo hacía, y era un fallo latente: ese
+    // comportamiento se escribió cuando un álbum solo podía nacer de una
+    // subida, así que uno sin fotos era basura. Desde §16 se puede crear
+    // vacío Y CON NOMBRE, de modo que el auto-borrado destruía algo que
+    // alguien había titulado a propósito —y el nombre no se recupera—.
+    //
+    // Quien quiera deshacerse de él tiene `DELETE /fotos/album/:id`, que es
+    // una decisión explícita. Vaciar no es borrar.
     //
     // `albumId` es nullable —una foto de la bandeja de §18 no cuelga de
     // ninguno, y una de tarea tampoco—, así que hay que preguntarlo.
     const albumId = foto.albumId;
     let albumVacio = false;
-    if (albumId !== null) {
-      const quedan = await this.prisma.foto.count({ where: { albumId } });
-      if (quedan === 0) {
-        await this.prisma.albumFotos.delete({ where: { id: albumId } });
-        albumVacio = true;
-      }
-    }
+    if (albumId !== null)
+      albumVacio = (await this.prisma.foto.count({ where: { albumId } })) === 0;
 
     if (foto.carpeta) await this.acceso.marcarActividad(foto.carpeta.ruta);
 
@@ -762,6 +1051,9 @@ export class AlbumService {
         ? 'Eliminó una foto suya.'
         : 'Eliminó una foto de otro usuario.',
     });
+    // ⚠️ `albumVacio` dice «el álbum se quedó SIN FOTOS», no «se borró».
+    // Significaba lo segundo hasta la Fase 2b. Hoy nadie lo consume, pero
+    // el nombre se presta a confusión y por eso queda dicho aquí.
     return { ok: true, id: fotoId, albumVacio };
   }
 }

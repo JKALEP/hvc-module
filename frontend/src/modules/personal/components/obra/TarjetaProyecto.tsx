@@ -82,7 +82,7 @@ export function TarjetaProyecto({ proyecto }: { proyecto: ProyectoTarjeta }) {
             className={cn(
               'h-full rounded-full transition-all',
               proyecto.avance >= 100
-                ? 'bg-emerald-600 dark:bg-emerald-500'
+                ? 'bg-success'
                 : 'bg-[var(--serie-ejecutado)]',
             )}
             style={{ width: `${Math.max(2, proyecto.avance)}%` }}

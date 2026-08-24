@@ -11,7 +11,7 @@ import {
 } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
 import { Spinner } from '@/shared/ui/spinner';
-import { CLASES_TEXTAREA } from './Campo';
+import { Textarea } from '@/shared/ui/textarea';
 
 /** §27 pide que la observación diga algo, no que exista. */
 const MINIMO = 10;
@@ -62,13 +62,12 @@ export function DialogoObservar({
           <label className="block text-sm font-medium text-foreground">
             Qué hay que corregir<span className="text-destructive"> *</span>
           </label>
-          <textarea
+          <Textarea
             value={texto}
             onChange={(e) => setTexto(e.target.value)}
             rows={5}
             autoFocus
             placeholder="Ej.: el ítem 3 no dice la cantidad, y la referencia del ítem 5 apunta a un modelo descontinuado."
-            className={CLASES_TEXTAREA}
           />
           <p className="text-xs text-muted-foreground">
             {valido

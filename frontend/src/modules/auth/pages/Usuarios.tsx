@@ -307,6 +307,7 @@ export function Usuarios() {
                           variant="ghost"
                           size="icon"
                           aria-label="Editar cuenta"
+                          title="Editar cuenta"
                           onClick={() => abrirEdicion(u)}
                         >
                           <PencilIcon />
@@ -334,6 +335,7 @@ export function Usuarios() {
                               variant="ghost"
                               size="icon"
                               aria-label="Eliminar cuenta"
+                              title="Eliminar cuenta"
                               disabled={eliminar.isPending}
                               onClick={() => eliminar.mutate(u.id)}
                             >

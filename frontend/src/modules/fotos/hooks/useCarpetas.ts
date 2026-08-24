@@ -52,9 +52,10 @@ export function useCrearCarpeta() {
     mutationFn: (payload: {
       nombre: string;
       parentId: number | null;
-      /** `EQUIPO` obliga a mandar `equipoId` (§12). */
+      /** Desde la Fase 1a, `EQUIPO` ya no lleva `equipoId`. */
       tipo?: 'CARPETA' | 'EQUIPO';
-      equipoId?: number;
+      /** Los campos configurables del equipo (Fase 1b). */
+      valores?: Record<string, unknown>;
     }) => fotos.crearCarpeta(payload),
     onSuccess: (c, variables) => {
       invalidar();

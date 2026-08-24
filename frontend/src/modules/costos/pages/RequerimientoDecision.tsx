@@ -144,10 +144,10 @@ export function RequerimientoDecision() {
 
       {/* ── Lo que se recomienda, que es a lo que se viene ── */}
       {cotizacionRecomendada && vigente && (
-        <div className="rounded-xl border border-emerald-600/30 bg-emerald-50/60 p-5 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+        <div className="rounded-xl border border-success/25 bg-success-soft/60 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="flex flex-wrap items-center gap-2 text-xs font-medium tracking-wide text-emerald-800 uppercase dark:text-emerald-300">
+              <p className="flex flex-wrap items-center gap-2 text-xs font-medium tracking-wide text-success-soft-foreground uppercase">
                 <AwardIcon className="size-4" />
                 Cotización recomendada
                 {historial.rondas.length > 1 && (

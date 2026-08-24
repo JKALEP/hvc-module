@@ -62,7 +62,9 @@ export function PortalLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1400px] px-6 py-8">
+      {/* Mismo remate inferior generoso que el área de trabajo interna
+          (§6.2): 24px arriba, 64px abajo. */}
+      <main className="mx-auto max-w-[1400px] px-6 pt-6 pb-16">
         <Outlet />
       </main>
     </div>

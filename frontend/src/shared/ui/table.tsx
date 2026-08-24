@@ -19,7 +19,9 @@ function TableHeader({ className, ...props }: React.ComponentProps<'thead'>) {
   return (
     <thead
       data-slot="table-header"
-      className={cn('[&_tr]:border-b', className)}
+      // Franja tenue tras la cabecera: la separa del cuerpo sin necesidad
+      // de subir el peso del texto ni engordar el borde.
+      className={cn('bg-muted/30 [&_tr]:border-b', className)}
       {...props}
     />
   );
@@ -40,7 +42,12 @@ function TableRow({ className, ...props }: React.ComponentProps<'tr'>) {
     <tr
       data-slot="table-row"
       className={cn(
-        'border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted',
+        // El separador de filas va al 60 %: más tenue que el borde de la
+        // cabecera, que es el que tiene que leerse. Y `last:border-b-0`
+        // quita la línea que quedaba colgando bajo la última fila, justo
+        // encima del pie de la tabla.
+        'border-b border-border/60 transition-colors last:border-b-0',
+        'hover:bg-muted/40 data-[state=selected]:bg-muted',
         className,
       )}
       {...props}

@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/shared/ui/dialog';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
@@ -93,7 +94,11 @@ export function DialogoNombre({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-border pt-4">
+        {/* `DialogFooter` y no un `div` a mano: es lo que pinta la barra a
+            sangre con fondo del sistema. Escrito a mano, estos dos diálogos
+            —que son los más usados de la app— se quedaban fuera del cambio
+            y el pie se veía distinto según qué modal abrieras. */}
+        <DialogFooter>
           <Button variant="ghost" onClick={onCerrar}>
             Cancelar
           </Button>
@@ -104,7 +109,7 @@ export function DialogoNombre({
             {ocupado && <Spinner />}
             {textoBoton}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

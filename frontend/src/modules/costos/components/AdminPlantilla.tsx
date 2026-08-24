@@ -13,7 +13,7 @@ import { Input } from '@/shared/ui/input';
 import { Badge } from '@/shared/ui/badge';
 import { Spinner } from '@/shared/ui/spinner';
 import { TableSkeleton } from '@/shared/components/TableSkeleton';
-import { Campo, CLASES_TEXTAREA } from './Campo';
+import { Campo } from './Campo';
 import {
   usePlantilla,
   useCrearVersion,
@@ -22,6 +22,7 @@ import {
 } from '@/modules/costos/hooks/usePlantilla';
 import { formatFecha } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
+import { Textarea } from '@/shared/ui/textarea';
 
 /**
  * La plantilla del correo de solicitud (§32, §68).
@@ -87,8 +88,8 @@ export function AdminPlantilla() {
         className={cn(
           'flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4',
           data.enUso.origen === 'DEFECTO'
-            ? 'border-amber-600/25 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'
-            : 'border-emerald-600/25 bg-emerald-50/60 dark:border-emerald-500/30 dark:bg-emerald-500/10',
+            ? 'border-warning/25 bg-warning-soft'
+            : 'border-success/25 bg-success-soft/60',
         )}
       >
         <div>
@@ -120,11 +121,11 @@ export function AdminPlantilla() {
           <label className="block text-sm font-medium text-foreground">
             Cuerpo<span className="text-destructive"> *</span>
           </label>
-          <textarea
+          <Textarea
             value={cuerpoActual}
             onChange={(e) => setCuerpo(e.target.value)}
             rows={16}
-            className={cn(CLASES_TEXTAREA, 'font-mono text-xs')}
+            className="font-mono text-xs"
           />
         </div>
 
@@ -225,7 +226,7 @@ export function AdminPlantilla() {
           </div>
 
           {previsualizar.data.desconocidas.length > 0 && (
-            <p className="flex items-start gap-1.5 rounded-lg border border-amber-600/25 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <p className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning-soft p-2 text-xs text-warning-soft-foreground">
               <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
               <span>
                 Estos marcadores no existen y saldrían tal cual:{' '}

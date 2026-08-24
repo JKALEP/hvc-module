@@ -15,7 +15,7 @@ import { DialogoConfirmar } from '@/shared/components/DialogoConfirmar';
 import { Card, CardContent } from '@/shared/ui/card';
 import { Button } from '@/shared/ui/button';
 import { Spinner } from '@/shared/ui/spinner';
-import { Dato, EstadoBadge, CLASES_TEXTAREA } from '@/modules/costos/components/Campo';
+import { Dato, EstadoBadge } from '@/modules/costos/components/Campo';
 import { TablaItems } from '@/modules/costos/components/TablaItems';
 import { BotonesExportar } from '@/modules/costos/components/BotonesExportar';
 import { PanelObservaciones } from '@/modules/costos/components/PanelObservaciones';
@@ -47,6 +47,7 @@ import {
 } from '@/modules/costos/hooks/useCotizaciones';
 import { tareaDe } from '@/modules/costos/lib/estados';
 import { formatFechaCorta, orDash } from '@/shared/lib/format';
+import { Textarea } from '@/shared/ui/textarea';
 import type {
   AccionRequerimiento,
   CotizacionProveedor,
@@ -173,8 +174,8 @@ export function RequerimientoGestion() {
 
       {/* Lo que se espera de ti, con las puertas que el backend admite. */}
       {tarea && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-600/25 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
-          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/25 bg-warning-soft p-4">
+          <p className="text-sm font-medium text-warning-soft-foreground">
             {tarea}
           </p>
           <div className="flex flex-wrap gap-2">
@@ -405,12 +406,11 @@ export function RequerimientoGestion() {
           }
           onCerrar={() => setPorDescartar(null)}
         >
-          <textarea
+          <Textarea
             value={motivoDescartar}
             onChange={(e) => setMotivoDescartar(e.target.value)}
             rows={3}
             placeholder="Por qué se deja fuera (obligatorio). Ej.: llegó tres días después del plazo."
-            className={CLASES_TEXTAREA}
           />
         </DialogoConfirmar>
       )}

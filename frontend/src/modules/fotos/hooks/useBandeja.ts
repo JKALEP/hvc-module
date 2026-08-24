@@ -65,10 +65,13 @@ export function useClasificar() {
     mutationFn: ({
       fotoIds,
       destino,
+      album,
     }: {
       fotoIds: number[];
       destino: DestinoFotos;
-    }) => fotos.clasificarFotos(fotoIds, destino),
+      /** Nombre del álbum que recoge el lote, si el destino es carpeta. */
+      album?: { nombre?: string; descripcion?: string };
+    }) => fotos.clasificarFotos(fotoIds, destino, album),
     onSuccess: (r) => {
       invalidar();
       toast.success(`${r.clasificadas} foto(s) clasificada(s)`);

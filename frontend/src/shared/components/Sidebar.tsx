@@ -8,7 +8,6 @@ import {
   ShieldCheckIcon,
   Building2Icon,
   ClockIcon,
-  CameraIcon,
   LayoutTemplateIcon,
   FoldersIcon,
   ImagesIcon,
@@ -41,7 +40,7 @@ import {
 import { cn } from '@/shared/lib/utils';
 
 import { useAuth } from '@/modules/auth/hooks/useAuth';
-import { tieneModulo, rolCostosDe } from '@/shared/lib/modulos';
+import { tieneModulo, rolCostosDe, nivelFotosDe } from '@/shared/lib/modulos';
 
 import type { Modulo, RolCostos } from '@/modules/auth/types';
 
@@ -52,6 +51,16 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   rolesCostos?: RolCostos[];
+  /**
+   * Solo para quien NO tiene nivel global en Fotos (el supervisor de §4).
+   *
+   * «Mis carpetas» y «Compartido conmigo» son las dos secciones que la raíz
+   * devuelve a ese perfil; a quien tiene nivel global el backend le manda
+   * UNA sola, «Todas las carpetas» —separárselas le pondría en la segunda
+   * cosas que nadie le compartió—. Ofrecerle esos dos accesos sería llevarle
+   * a dos pantallas vacías.
+   */
+  soloSinNivelGlobalFotos?: boolean;
 }
 
 interface NavGrupo {
@@ -105,10 +114,26 @@ const NAV: NavGrupo[] = [
       // «Álbumes» era la etiqueta de v2, cuando se entraba a un álbum. Desde
       // v3 la puerta es el explorador de carpetas.
       { to: '/fotos', label: 'Carpetas', icon: FoldersIcon },
+      // §21 pide estos dos en el panel lateral. Son las dos secciones que la
+      // raíz ya devuelve; aquí solo se entra directamente a una.
+      {
+        to: '/fotos/mias',
+        label: 'Mis carpetas',
+        icon: FolderKanbanIcon,
+        soloSinNivelGlobalFotos: true,
+      },
+      {
+        to: '/fotos/compartidas',
+        label: 'Compartido conmigo',
+        icon: UsersRoundIcon,
+        soloSinNivelGlobalFotos: true,
+      },
+      // §21 lo llama «Fotos pendientes»; es la bandeja de §18, que vive en la
+      // misma pantalla que la captura rápida de §17 porque son un solo flujo.
+      { to: '/fotos/captura', label: 'Fotos pendientes', icon: InboxIcon },
       { to: '/fotos/recientes', label: 'Recientes', icon: ClockIcon },
       // §17 lo marca como «muy importante»: es la puerta del supervisor
       // en obra, así que va en el menú y no escondida dentro de una carpeta.
-      { to: '/fotos/captura', label: 'Captura rápida', icon: CameraIcon },
     ],
   },
   {
@@ -145,11 +170,35 @@ function FilaItem({
   const isActive = activa === to;
   return (
     <SidebarMenuItem>
+      {/*
+       * La barra del item activo — el detalle que más define este sidebar.
+       * NO es un `border-left`: es un `span` absoluto de 3px que SALE del
+       * padding del contenedor (`-left-3`, los mismos 12px que
+       * `SidebarContent` pone de `px`) hasta tocar el borde del sidebar,
+       * con `top-1.5 bottom-1.5` para no llegar a los extremos del item.
+       *
+       * ⚠️ Va aquí, en el `<li>`, y NO dentro de `SidebarMenuButton`.
+       * Ese botón lleva `tooltip`, y con tooltip se compone mediante el
+       * `render` de base-ui, que admite UN SOLO elemento: cualquier hermano
+       * que se le pase se descarta en silencio. El `<li>` es un elemento
+       * plano y además ya viene con `relative`, que es lo que la barra
+       * necesita para posicionarse.
+       *
+       * Solo en items de primer nivel: un sub-item activo se marca con
+       * fondo, no con barra. Si la llevaran los dos, la barra dejaría de
+       * indicar en qué SECCIÓN estás.
+       */}
+      {isActive && !indent && (
+        <span
+          aria-hidden
+          className="absolute -left-3 top-1.5 bottom-1.5 z-10 w-[3px] rounded-r-full bg-[var(--sidebar-primary)]"
+        />
+      )}
       <SidebarMenuButton
         isActive={isActive}
         tooltip={label}
         className={cn(
-          'h-[var(--sidebar-item-height)] rounded-[var(--sidebar-radius)] px-[var(--sidebar-padding-x)]',
+          'relative h-[var(--sidebar-item-height)] rounded-[var(--sidebar-radius)] px-[var(--sidebar-padding-x)]',
           'text-[length:var(--sidebar-text-item)] text-[var(--sidebar-muted)]',
           'transition-colors hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-foreground)]',
           'data-[active=true]:bg-[var(--sidebar-accent)] data-[active=true]:text-[var(--sidebar-accent-foreground)]',
@@ -252,6 +301,8 @@ function BloqueSeccion({
           // 2+ items -> acordeón
           const abierto = abiertos.has(grupo.titulo) || isIconMode;
           const GrupoIcon = grupo.icon;
+          /* ¿La ruta actual cae dentro de esta sección? */
+          const seccionActiva = grupo.items.some((i) => i.to === activa);
 
           return (
             <div key={grupo.titulo}>
@@ -260,11 +311,34 @@ function BloqueSeccion({
                   type="button"
                   onClick={() => onToggle(grupo.titulo)}
                   className={cn(
-                    'flex h-[var(--sidebar-item-height)] w-full items-center gap-2 rounded-[var(--sidebar-radius)]',
-                    'px-[var(--sidebar-padding-x)] text-left text-[var(--sidebar-muted)]',
-                    'transition-colors hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-foreground)]',
+                    'relative flex h-[var(--sidebar-item-height)] w-full items-center gap-2 rounded-[var(--sidebar-radius)]',
+                    'px-[var(--sidebar-padding-x)] text-left transition-colors',
+                    'hover:bg-[var(--sidebar-hover)] hover:text-[var(--sidebar-foreground)]',
+                    /* La sección que te contiene se aclara, pero NO se pinta
+                       de fondo: el fondo es del item concreto. Así se leen
+                       dos cosas distintas sin competir. */
+                    seccionActiva
+                      ? 'text-[var(--sidebar-foreground)]'
+                      : 'text-[var(--sidebar-muted)]',
                   )}
                 >
+                  {/*
+                   * La barra de 3px marca la SECCIÓN, no el item.
+                   *
+                   * En este proyecto la cabecera del grupo no navega —solo
+                   * pliega— y los destinos son los items indentados de
+                   * dentro. Así que la barra va aquí y el fondo va en el
+                   * item activo: la barra dice «estás en Personal y
+                   * proyectos» y el fondo dice «concretamente, en
+                   * Proyectos». Si ambas cosas fueran fondo, no se
+                   * distinguirían.
+                   */}
+                  {seccionActiva && (
+                    <span
+                      aria-hidden
+                      className="absolute -left-3 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-[var(--sidebar-primary)]"
+                    />
+                  )}
                   <GrupoIcon className="size-[var(--sidebar-icon-size)] shrink-0" strokeWidth={1.75} />
                   <span
                     className="min-w-0 flex-1 truncate"
@@ -317,6 +391,10 @@ export function Sidebar() {
   const rolCostos = rolCostosDe(usuario);
 
   /* ---------- permisos (sin cambios de lógica) ---------- */
+  // El SuperAdmin alcanza todo el árbol aunque no tenga fila de nivel.
+  const nivelFotos =
+    usuario?.rol === 'SUPERADMIN' ? 'ADMIN_GLOBAL' : nivelFotosDe(usuario);
+
   const visibles = NAV.filter((grupo) => {
     if (grupo.soloSuperAdmin) return usuario?.rol === 'SUPERADMIN';
     if (grupo.modulo) return tieneModulo(usuario, grupo.modulo);
@@ -324,12 +402,18 @@ export function Sidebar() {
   })
     .map((grupo) => ({
       ...grupo,
-      items: grupo.items.filter(
-        (item) =>
-          !item.rolesCostos ||
-          usuario?.rol === 'SUPERADMIN' ||
-          (rolCostos !== null && item.rolesCostos.includes(rolCostos)),
-      ),
+      items: grupo.items.filter((item) => {
+        if (
+          item.rolesCostos &&
+          usuario?.rol !== 'SUPERADMIN' &&
+          !(rolCostos !== null && item.rolesCostos.includes(rolCostos))
+        )
+          return false;
+        // Ver `soloSinNivelGlobalFotos`: a quien alcanza todo el árbol no se
+        // le parte en «mías» y «compartidas», porque no lo está.
+        if (item.soloSinNivelGlobalFotos && nivelFotos !== null) return false;
+        return true;
+      }),
     }))
     .filter((grupo) => grupo.items.length > 0);
 
@@ -342,20 +426,45 @@ export function Sidebar() {
   const seccionPrincipal = visibles.filter((g) => !g.soloSuperAdmin);
   const seccionAdmin = visibles.filter((g) => g.soloSuperAdmin);
 
-  /* ---------- acordeón: abierto por defecto si contiene la ruta activa ---------- */
-  const [abiertos, setAbiertos] = React.useState<Set<string>>(() => {
-    const inicial = new Set<string>();
-    visibles.forEach((g) => {
-      if (g.items.length > 1 && g.items.some((i) => i.to === activa)) inicial.add(g.titulo);
-    });
-    return inicial;
-  });
+  /* ---------- acordeón ---------- */
+
+  /** El grupo al que pertenece la ruta actual, o undefined en la raíz. */
+  const grupoActivo = visibles.find(
+    (g) => g.items.length > 1 && g.items.some((i) => i.to === activa),
+  )?.titulo;
+
+  /**
+   * Qué grupos están abiertos **se DERIVA, no se almacena**.
+   *
+   * ⚠️ Antes era un `useState` cuyo inicializador metía el grupo de la ruta
+   * activa. No funcionaba NUNCA: el inicializador corre una sola vez, al
+   * montar, y en ese instante `usuario` todavía es null porque la sesión se
+   * está revalidando — así que `visibles` sale vacío, el conjunto nace
+   * vacío y ya no se recalcula jamás. El menú arrancaba siempre con todo
+   * cerrado y no se veía en qué sección estabas.
+   *
+   * Tampoco vale arreglarlo con un `useEffect` que llame a `setAbiertos`:
+   * eso es sincronizar estado derivado y lo rechaza
+   * `react-hooks/set-state-in-effect`, con razón.
+   *
+   * La regla queda: **por defecto se abre el grupo de la ruta activa**, y
+   * `overrides` guarda solo lo que la persona ha tocado a mano, que manda
+   * sobre el automatismo para ese grupo concreto.
+   */
+  const [overrides, setOverrides] = React.useState<Map<string, boolean>>(
+    new Map(),
+  );
+
+  const abiertos = new Set(
+    visibles
+      .filter((g) => overrides.get(g.titulo) ?? g.titulo === grupoActivo)
+      .map((g) => g.titulo),
+  );
 
   const toggleGrupo = (titulo: string) => {
-    setAbiertos((prev) => {
-      const next = new Set(prev);
-      if (next.has(titulo)) next.delete(titulo);
-      else next.add(titulo);
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(titulo, !(prev.get(titulo) ?? titulo === grupoActivo));
       return next;
     });
   };
@@ -389,12 +498,6 @@ export function Sidebar() {
         <div className="flex items-center justify-between gap-2">
           <NavLink to="/" className="flex min-w-0 items-center gap-2.5">
             <img src={logoHvc} alt="HVC" className="h-8 w-8 shrink-0 object-contain" />
-            <span
-              className="truncate font-semibold tracking-tight group-data-[collapsible=icon]:hidden"
-              style={{ fontSize: 'var(--sidebar-text-logo)' }}
-            >
-              HVC
-            </span>
           </NavLink>
 
           <button
@@ -489,17 +592,24 @@ export function Sidebar() {
               {usuario.nombre?.charAt(0).toUpperCase()}
             </div>
 
-            <div className="min-w-0 flex-1 leading-none group-data-[collapsible=icon]:hidden">
+            {/*
+             * Jerarquía de TRES líneas (§7.4): nombre, identificador
+             * secundario y rol. El rol es el ÚNICO sitio del pie donde
+             * aparece color, y va en el acento del sidebar: funciona como
+             * recordatorio permanente del nivel de permisos con el que
+             * estás trabajando.
+             */}
+            <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
               <p
-                className="truncate font-semibold text-[var(--sidebar-foreground)]"
+                className="truncate font-semibold leading-tight text-white"
                 style={{ fontSize: 'var(--sidebar-text-profile-name)' }}
               >
                 {usuario.nombre}
               </p>
-              <p
-                className="mt-0.5 truncate text-[var(--sidebar-muted)]"
-                style={{ fontSize: 'var(--sidebar-text-profile-role)' }}
-              >
+              <p className="truncate text-[11px] leading-tight text-[var(--sidebar-muted)]">
+                {usuario.email}
+              </p>
+              <p className="mt-0.5 truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--sidebar-primary)]">
                 {usuario.rol === 'SUPERADMIN' ? 'SuperAdmin' : usuario.rol}
               </p>
             </div>
@@ -507,19 +617,29 @@ export function Sidebar() {
             <ChevronDownIcon className="size-4 shrink-0 text-[var(--sidebar-muted)] group-data-[collapsible=icon]:hidden" />
           </button>
 
+          {/*
+           * Cerrar sesión va CENTRADO y a ancho completo, al contrario que
+           * los items de navegación, que van a la izquierda. Esa diferencia
+           * de alineación es la que lo lee como una ACCIÓN y no como un
+           * destino más del menú (§7.4).
+           *
+           * Estilo «outline sobre oscuro» y `active:translate-y-px`, el
+           * mismo micro-hundimiento que usan todos los botones del sistema.
+           */}
           <button
             type="button"
             onClick={salir}
             className={cn(
-              'mt-1 flex h-[var(--sidebar-item-height)] w-full items-center gap-2.5 rounded-[var(--sidebar-radius)] px-1.5',
-              'text-[var(--sidebar-muted)] transition-colors hover:bg-destructive/15 hover:text-destructive',
+              'mt-2 flex h-[var(--sidebar-item-height)] w-full items-center justify-center gap-2',
+              'rounded-[var(--sidebar-radius)] border border-[var(--sidebar-border)]',
+              'bg-[var(--sidebar-accent)]/40 px-3 text-[12px] font-medium',
+              'text-[var(--sidebar-foreground)] transition-all',
+              'hover:bg-[var(--sidebar-accent)] hover:text-white active:translate-y-px',
+              'group-data-[collapsible=icon]:px-0',
             )}
           >
-            <LogOutIcon className="size-[var(--sidebar-icon-size)] shrink-0" strokeWidth={1.75} />
-            <span
-              className="truncate group-data-[collapsible=icon]:hidden"
-              style={{ fontSize: 'var(--sidebar-text-item)', fontWeight: 'var(--sidebar-font-weight-item)' }}
-            >
+            <LogOutIcon className="size-3.5 shrink-0" />
+            <span className="truncate group-data-[collapsible=icon]:hidden">
               Cerrar sesión
             </span>
           </button>

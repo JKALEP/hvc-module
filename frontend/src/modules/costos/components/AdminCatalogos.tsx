@@ -195,7 +195,7 @@ export function AdminCatalogos() {
                             className={
                               activo
                                 ? 'text-muted-foreground'
-                                : 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-success'
                             }
                           />
                         </Button>

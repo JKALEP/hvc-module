@@ -13,7 +13,10 @@ function Select({ className, ...props }: React.ComponentProps<'select'>) {
       <select
         data-slot="select"
         className={cn(
-          'flex h-8 w-full min-w-0 appearance-none rounded-lg border border-input bg-background py-1 pr-8 pl-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none',
+          // Fondo transparente por el mismo motivo que el `Input`: hereda el del
+        // contenedor —blanco sobre una card, gris sobre `muted`— en vez de
+        // recortar un rectángulo del color equivocado.
+        'flex h-8 w-full min-w-0 appearance-none rounded-lg border border-input bg-transparent py-1 pr-8 pl-2.5 text-sm shadow-xs transition-[color,box-shadow] outline-none',
           'focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50',
           'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
           'aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20',
