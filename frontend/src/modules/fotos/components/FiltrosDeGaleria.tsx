@@ -61,7 +61,7 @@ export function FiltrosDeGaleria({
             <option value="">Todos</option>
             {autores.map((a) => (
               <option key={a.usuarioId} value={a.usuarioId}>
-                {a.nombre} ({a.albumes})
+                {a.nombre} ({a.fotos})
               </option>
             ))}
           </Select>

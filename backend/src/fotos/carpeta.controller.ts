@@ -19,7 +19,7 @@ import { NavegacionService } from './navegacion.service';
 import { CarpetaService } from './carpeta.service';
 import type { CrearCarpetaDto, EditarCarpetaDto } from './carpeta.service';
 import { ValorCampoFotosService } from './valor-campo-fotos.service';
-import type { ArchivoSubido } from './album.service';
+import type { ArchivoSubido } from './foto.service';
 import { LIMITES } from './imagen.service';
 import { ErroresDeSubidaFilter } from './subida.filtro';
 import { RequiereModulo, UsuarioActual } from '../auth/decoradores';
@@ -34,7 +34,7 @@ import type { UsuarioAutenticado } from '../auth/tipos';
  * que `GET /fotos/carpeta` devolvía. Un mismo recurso con dos nombres en la
  * misma API.
  *
- * Las fotos se fueron a `AlbumController`: colgaban de aquí porque en v2 la
+ * Las fotos se fueron a `FotoController`: colgaban de aquí porque en v2 la
  * galería era de la carpeta, pero son otro recurso y otro service.
  *
  * `@Controller('fotos')` y no `('fotos/carpeta')` para que `recientes` sea

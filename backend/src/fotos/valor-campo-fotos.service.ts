@@ -570,7 +570,7 @@ export class ValorCampoFotosService {
    *
    * Lo segundo importa: estos campos describen un equipo, y admitirlos en
    * una carpeta corriente dejaría filas que ninguna pantalla enseña. Es la
-   * misma lectura estricta que hace `TareaService.crear` con §13.
+   * misma lectura estricta que hace `ActividadService.crear` con §13.
    *
    * El permiso lo resuelve `exigirPermiso`, así que una rama archivada
    * queda de solo lectura aquí también sin ninguna regla nueva.

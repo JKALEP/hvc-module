@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "seed:superadmin": "npm run build && node dist/src/cli/seed-superadmin.js",
     "seed:costos": "npm run build && node dist/src/cli/seed-costos.js",
+    "r2:vaciar": "node scripts/vaciar-r2.cjs",
     "verificar:fotos": "node scripts/verificar-fotos.cjs",
     "r2:huerfanos": "node scripts/limpiar-r2-huerfanos.cjs"
   },

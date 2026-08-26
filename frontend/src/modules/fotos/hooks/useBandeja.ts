@@ -5,7 +5,7 @@ import * as fotos from '@/modules/fotos/services/fotosService';
 import { getErrorMessage } from '@/shared/services/api';
 import { QUERY_KEYS } from '@/shared/lib/constants';
 import { useInvalidarFotos } from './useInvalidarFotos';
-import type { DestinoFotos } from '@/modules/fotos/types';
+import type { DestinoFotos, MomentoEvidencia } from '@/modules/fotos/types';
 
 // La bandeja de §18 y la captura rápida de §17. Un archivo por recurso, con
 // sus lecturas y sus escrituras dentro.
@@ -38,11 +38,14 @@ export function useSubirA() {
       destino,
       archivos,
       descripcion,
+      momento,
     }: {
       destino: DestinoFotos;
       archivos: File[];
       descripcion: string;
-    }) => fotos.subirA(destino, archivos, descripcion),
+      /** El hueco del antes/después (Fase 3), solo para actividades. */
+      momento?: MomentoEvidencia | null;
+    }) => fotos.subirA(destino, archivos, descripcion, momento),
     onSuccess: (r, { destino }) => {
       invalidar();
       const donde =
@@ -58,20 +61,23 @@ export function useSubirA() {
   });
 }
 
-/** Clasificar por lotes (§18): «20 fotos → Equipo ABC → Tarea Inspección». */
+/**
+ * Clasificar por lotes (§18): «20 fotos → Equipo ABC → Actividad Inspección».
+ *
+ * ⚠️ Ya no lleva `album`: era el nombre del álbum que recogía el lote cuando
+ * el destino era una carpeta (Fase 2c). Con los álbumes retirados el destino
+ * ya existe y ya tiene nombre — es la visita.
+ */
 export function useClasificar() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
       fotoIds,
       destino,
-      album,
     }: {
       fotoIds: number[];
       destino: DestinoFotos;
-      /** Nombre del álbum que recoge el lote, si el destino es carpeta. */
-      album?: { nombre?: string; descripcion?: string };
-    }) => fotos.clasificarFotos(fotoIds, destino, album),
+    }) => fotos.clasificarFotos(fotoIds, destino),
     onSuccess: (r) => {
       invalidar();
       toast.success(`${r.clasificadas} foto(s) clasificada(s)`);
@@ -81,21 +87,5 @@ export function useClasificar() {
   });
 }
 
-export function useCrearAlbum() {
-  const invalidar = useInvalidarFotos();
-  return useMutation({
-    mutationFn: ({
-      carpetaId,
-      payload,
-    }: {
-      carpetaId: number;
-      payload: { nombre: string; descripcion?: string; fecha?: string };
-    }) => fotos.crearAlbum(carpetaId, payload),
-    onSuccess: (a) => {
-      invalidar();
-      toast.success(`Álbum creado: ${a.nombre ?? 'sin título'}`);
-    },
-    onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo crear el álbum')),
-  });
-}
+// ⚠️ Aquí estaba `useCrearAlbum`, para nombrar el álbum al clasificar desde
+// la bandeja. Se fue con los álbumes en la Fase 4.

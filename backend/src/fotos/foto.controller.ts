@@ -14,8 +14,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { AlbumService } from './album.service';
-import type { ArchivoSubido } from './album.service';
+import { FotoService } from './foto.service';
+import type { ArchivoSubido } from './foto.service';
 import { LIMITES } from './imagen.service';
 import { ErroresDeSubidaFilter } from './subida.filtro';
 import { RequiereModulo, UsuarioActual } from '../auth/decoradores';
@@ -23,24 +23,23 @@ import { Modulo } from '../../generated/prisma/enums';
 import type { UsuarioAutenticado } from '../auth/tipos';
 
 /**
- * Álbumes y fotos.
+ * Las fotos.
  *
- * Vivía dentro de `CarpetaController` porque en v2 la galería era «las fotos
- * de esta carpeta» y no había álbum al que entrar. Con el álbum de vuelta
- * (§16) son dos recursos, dos services y dos ciclos de vida, y compartir
- * controller solo hacía que un archivo creciera con dos temas dentro.
+ * ⚠️ Se llamaba «Álbumes y fotos» y ya no hay álbumes (Fase 4). La galería
+ * volvió a ser una lista plana, pero colgando del CICLO y no de la carpeta:
+ * agrupar por visita es lo que HVC pregunta, y el álbum era un segundo
+ * agrupador que obligaba a elegir dónde mirar.
  *
- * Los álbumes cuelgan de la carpeta en la URL —`carpeta/:id/album`— porque
- * es donde se crean y por donde se listan; las fotos van por su id, que es
- * como llegan los enlaces de descarga.
+ * Las fotos van por su id —que es como llegan los enlaces de descarga— y lo
+ * que las agrupa va en la URL: `ciclo/:id/foto` o `actividad/:id/foto`.
  */
 @RequiereModulo(Modulo.FOTOS)
 @Controller('fotos')
-export class AlbumController {
-  constructor(private readonly album: AlbumService) {}
+export class FotoController {
+  constructor(private readonly fotos: FotoService) {}
 
-  /** Galería de la carpeta, paginada por álbum. */
-  @Get('carpeta/:id/album')
+  /** Las fotos sueltas de una visita, paginadas. */
+  @Get('ciclo/:id/foto')
   galeria(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
@@ -50,7 +49,7 @@ export class AlbumController {
     @Query('desde') desde?: string,
     @Query('hasta') hasta?: string,
   ) {
-    return this.album.galeria(usuario, id, {
+    return this.fotos.galeria(usuario, id, {
       cursor,
       subidaPorId,
       desde,
@@ -58,21 +57,23 @@ export class AlbumController {
     });
   }
 
-  /** Quiénes han publicado aquí, para el filtro. */
-  @Get('carpeta/:id/autores')
+  /** Quiénes han subido fotos a esta visita, para el filtro. */
+  @Get('ciclo/:id/autores')
   autores(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
   ) {
-    return this.album.autores(usuario, id);
+    return this.fotos.autores(usuario, id);
   }
 
   /**
-   * Subir fotos. El álbum se crea solo, sin paso de «nombrar» nada (§17).
-   * Multer las mantiene en memoria: nunca tocan el disco, que en Render es
-   * efímero.
+   * Subir fotos sueltas a la visita.
+   *
+   * Sin paso de «nombrar» nada (§17): con los álbumes retirados no hay
+   * agrupación que inventar, la foto entra directamente en el ciclo. Multer
+   * las mantiene en memoria: nunca tocan el disco, que en Render es efímero.
    */
-  @Post('carpeta/:id/album')
+  @Post('ciclo/:id/foto')
   @UseFilters(ErroresDeSubidaFilter)
   @UseInterceptors(
     FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
@@ -85,84 +86,36 @@ export class AlbumController {
     @UploadedFiles() archivos: ArchivoSubido[],
     @Body() dto: { descripcion?: string },
   ) {
-    return this.album.subir(
+    return this.fotos.subir(
       usuario,
-      { tipo: 'carpeta', carpetaId: id },
+      { tipo: 'ciclo', cicloId: id },
       archivos,
       dto?.descripcion,
     );
   }
 
-  // ── Álbumes con nombre (§16) ──
-
-  @Post('album/carpeta/:id')
-  crearAlbum(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) carpetaId: number,
-    @Body() dto: { nombre?: string; descripcion?: string; fecha?: string },
-  ) {
-    return this.album.crearAlbum(usuario, carpetaId, dto ?? {});
-  }
-
-  @Patch('album/:id')
-  editarAlbum(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) id: number,
-    @Body() dto: { nombre?: string; descripcion?: string; fecha?: string },
-  ) {
-    return this.album.editarAlbum(usuario, id, dto ?? {});
-  }
-
-  /** Elimina un álbum vacío (§16). Con fotos dentro se rechaza con 400. */
-  @Delete('album/:id')
-  eliminarAlbum(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.album.eliminarAlbum(usuario, id);
-  }
-
-  /** Subir a un álbum que YA existe (§16). */
-  @Post('album/:id/foto')
+  /** Fotos de una actividad (§15: «actividad relacionada»). */
+  @Post('actividad/:id/foto')
   @UseFilters(ErroresDeSubidaFilter)
   @UseInterceptors(
     FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
       limits: { fileSize: LIMITES.bytesMaximos },
     }),
   )
-  subirAAlbum(
+  subirAActividad(
     @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) albumId: number,
+    @Param('id', ParseIntPipe) actividadId: number,
     @UploadedFiles() archivos: ArchivoSubido[],
-    @Body() dto: { descripcion?: string },
+    @Body() dto: { descripcion?: string; momento?: string },
   ) {
-    return this.album.subir(
+    return this.fotos.subir(
       usuario,
-      { tipo: 'album', albumId },
+      { tipo: 'actividad', actividadId },
       archivos,
       dto?.descripcion,
-    );
-  }
-
-  /** Fotos de una tarea (§15: «tarea relacionada»). */
-  @Post('tarea/:id/foto')
-  @UseFilters(ErroresDeSubidaFilter)
-  @UseInterceptors(
-    FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
-      limits: { fileSize: LIMITES.bytesMaximos },
-    }),
-  )
-  subirATarea(
-    @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) tareaId: number,
-    @UploadedFiles() archivos: ArchivoSubido[],
-    @Body() dto: { descripcion?: string },
-  ) {
-    return this.album.subir(
-      usuario,
-      { tipo: 'tarea', tareaId },
-      archivos,
-      dto?.descripcion,
+      // El hueco del antes/después (Fase 3). Llega por multipart como un
+      // campo más, y el service lo valida contra lo que esa actividad espera.
+      dto?.momento,
     );
   }
 
@@ -184,7 +137,7 @@ export class AlbumController {
     @UploadedFiles() archivos: ArchivoSubido[],
     @Body() dto: { descripcion?: string },
   ) {
-    return this.album.subir(
+    return this.fotos.subir(
       usuario,
       { tipo: 'bandeja' },
       archivos,
@@ -194,7 +147,7 @@ export class AlbumController {
 
   @Get('bandeja')
   bandeja(@UsuarioActual() usuario: UsuarioAutenticado) {
-    return this.album.bandeja(usuario);
+    return this.fotos.bandeja(usuario);
   }
 
   /** Clasificar por lotes (§18). El destino llega en el cuerpo. */
@@ -204,35 +157,30 @@ export class AlbumController {
     @Body()
     dto: {
       fotoIds?: number[];
-      carpetaId?: number;
-      albumId?: number;
-      tareaId?: number;
-      /** Para el álbum que se crea al clasificar en una carpeta (Fase 2c). */
-      nombre?: unknown;
-      descripcion?: unknown;
+      cicloId?: number;
+      actividadId?: number;
     },
   ) {
     // El cuerpo llega con ids sueltos —es lo natural en JSON— y aquí se
     // convierte en el destino tipado que el service exige. Traducir en la
     // frontera evita que la unión se contamine con opcionales.
+    //
+    // ⚠️ Ya no llegan `nombre` ni `descripcion`: eran del álbum que se creaba
+    // al clasificar hacia una carpeta, y con los álbumes retirados el destino
+    // ya existe siempre.
     const destino =
-      dto?.tareaId !== undefined
-        ? ({ tipo: 'tarea', tareaId: Number(dto.tareaId) } as const)
-        : dto?.albumId !== undefined
-          ? ({ tipo: 'album', albumId: Number(dto.albumId) } as const)
-          : dto?.carpetaId !== undefined
-            ? ({ tipo: 'carpeta', carpetaId: Number(dto.carpetaId) } as const)
-            : null;
+      dto?.actividadId !== undefined
+        ? ({ tipo: 'actividad', actividadId: Number(dto.actividadId) } as const)
+        : dto?.cicloId !== undefined
+          ? ({ tipo: 'ciclo', cicloId: Number(dto.cicloId) } as const)
+          : null;
 
     if (!destino)
       throw new BadRequestException(
-        'Indica a dónde van las fotos: una tarea, un álbum o una carpeta.',
+        'Indica a dónde van las fotos: una actividad o una visita.',
       );
 
-    return this.album.clasificar(usuario, dto?.fotoIds ?? [], destino, {
-      nombre: dto?.nombre,
-      descripcion: dto?.descripcion,
-    });
+    return this.fotos.clasificar(usuario, dto?.fotoIds ?? [], destino);
   }
 
   @Get('foto/:fotoId/descarga')
@@ -240,7 +188,7 @@ export class AlbumController {
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('fotoId', ParseIntPipe) fotoId: number,
   ) {
-    return this.album.urlDeDescarga(usuario, fotoId);
+    return this.fotos.urlDeDescarga(usuario, fotoId);
   }
 
   /** Borra quien la subió (EDICION) o quien administra la carpeta (TOTAL). */
@@ -258,7 +206,7 @@ export class AlbumController {
     @Param('fotoId', ParseIntPipe) fotoId: number,
     @Body() dto: { descripcion?: unknown },
   ) {
-    return this.album.editarDescripcion(usuario, fotoId, dto?.descripcion);
+    return this.fotos.editarDescripcion(usuario, fotoId, dto?.descripcion);
   }
 
   /**
@@ -275,29 +223,29 @@ export class AlbumController {
     @Param('fotoId', ParseIntPipe) fotoId: number,
     @Body()
     dto: {
-      carpetaId?: number;
-      albumId?: number;
-      tareaId?: number;
+      cicloId?: number;
+      actividadId?: number;
       bandeja?: boolean;
     },
   ) {
     const destino =
       dto?.bandeja === true
         ? ({ tipo: 'bandeja' } as const)
-        : dto?.tareaId !== undefined
-          ? ({ tipo: 'tarea', tareaId: Number(dto.tareaId) } as const)
-          : dto?.albumId !== undefined
-            ? ({ tipo: 'album', albumId: Number(dto.albumId) } as const)
-            : dto?.carpetaId !== undefined
-              ? ({ tipo: 'carpeta', carpetaId: Number(dto.carpetaId) } as const)
-              : null;
+        : dto?.actividadId !== undefined
+          ? ({
+              tipo: 'actividad',
+              actividadId: Number(dto.actividadId),
+            } as const)
+          : dto?.cicloId !== undefined
+            ? ({ tipo: 'ciclo', cicloId: Number(dto.cicloId) } as const)
+            : null;
 
     if (!destino)
       throw new BadRequestException(
-        'Indica a dónde va la foto: una tarea, un álbum, una carpeta, o «sin clasificar».',
+        'Indica a dónde va la foto: una actividad, una visita, o «sin clasificar».',
       );
 
-    return this.album.mover(usuario, fotoId, destino);
+    return this.fotos.mover(usuario, fotoId, destino);
   }
 
   @Delete('foto/:fotoId')
@@ -305,6 +253,6 @@ export class AlbumController {
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('fotoId', ParseIntPipe) fotoId: number,
   ) {
-    return this.album.eliminar(usuario, fotoId);
+    return this.fotos.eliminar(usuario, fotoId);
   }
 }

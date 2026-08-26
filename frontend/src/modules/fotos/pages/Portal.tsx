@@ -10,14 +10,16 @@ import { PageHeader } from '@/shared/components/PageHeader';
 import { EmptyState } from '@/shared/components/EmptyState';
 import { TarjetaCarpeta } from '@/modules/fotos/components/TarjetaCarpeta';
 import { RutaSedes } from '@/modules/fotos/components/RutaSedes';
-import { GaleriaFotosPlanas } from '@/modules/fotos/components/GaleriaAlbumes';
-import { PanelTareas } from '@/modules/fotos/components/PanelTareas';
+import { GaleriaDeFotos } from '@/modules/fotos/components/GaleriaFotos';
+import { PanelActividades } from '@/modules/fotos/components/PanelActividades';
+import { SelectorDeCiclo } from '@/modules/fotos/components/SelectorDeCiclo';
+import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
 import { HiloComentarios } from '@/modules/fotos/components/HiloComentarios';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Skeleton } from '@/shared/ui/skeleton';
 import { useCarpeta } from '@/modules/fotos/hooks/useCarpetas';
-import { useGaleria } from '@/modules/fotos/hooks/useAlbumes';
+import { useGaleria } from '@/modules/fotos/hooks/useFotos';
 import type { FiltrosGaleria } from '@/modules/fotos/types';
 
 const SIN_FILTROS: FiltrosGaleria = {
@@ -41,10 +43,22 @@ export function Portal() {
   const [filtros, setFiltros] = useState<FiltrosGaleria>(SIN_FILTROS);
 
   const { data, isError } = useCarpeta(sedeId, { portal: true });
-  const galeria = useGaleria(sedeId ?? 0, filtros, true);
+  // El cliente ve el historial de visitas igual que un interno, en solo
+  // lectura: §22 le da el recorrido completo hasta las fotografías, y sin
+  // saber de qué visita son la lista no dice nada.
+  const { data: ciclos } = useCiclos(sedeId, {
+    habilitado: data?.carpetaActual?.tipo === 'EQUIPO',
+    portal: true,
+  });
+  const [cicloElegido, setCicloElegido] = useState<number | null>(null);
+  const ciclo =
+    (ciclos ?? []).find((c) => c.id === cicloElegido) ?? ciclos?.[0] ?? null;
+  // La galeria del portal es la de un CICLO desde la Fase 4, igual que la
+  // interna: el cliente recorre carpeta -> equipo -> visita -> fotos (§22).
+  const galeria = useGaleria(ciclo?.id ?? 0, filtros, true);
 
   const cargando = !data && !isError;
-  const albumes = galeria.data?.pages.flatMap((p) => p.albumes) ?? [];
+  const fotosDelCiclo = galeria.data?.pages.flatMap((p) => p.fotos) ?? [];
   const totalFotos = galeria.data?.pages[0]?.totalFotos ?? 0;
   const hayFiltro = filtros.desde !== '' || filtros.hasta !== '';
 
@@ -125,17 +139,29 @@ export function Portal() {
       {sedeId !== null && data && (
         <>
           {/* §22 describe el recorrido del cliente:
-              «… → Equipo ABC → Tareas → Álbumes → Fotografías → Comentarios».
-              Las tareas solo existen en un equipo (§13), así que la sección
+              «… → Equipo ABC → Actividades → Álbumes → Fotografías → Comentarios».
+              Las actividades solo existen en un equipo (§13), así que la sección
               aparece cuando la carpeta lo es — igual que en el módulo interno.
           */}
-          {data.carpetaActual?.tipo === 'EQUIPO' && (
-            <PanelTareas
-              carpetaId={sedeId}
-              permiso={data.permiso}
-              ramaCerrada={data.ramaCerrada}
-              portal
-            />
+          {data.carpetaActual?.tipo === 'EQUIPO' && ciclo && (
+            <>
+              <SelectorDeCiclo
+                carpetaId={sedeId}
+                ciclos={ciclos}
+                cicloId={ciclo.id}
+                onElegir={setCicloElegido}
+                permiso={data.permiso}
+                ramaCerrada={data.ramaCerrada}
+                portal
+              />
+              <PanelActividades
+                cicloId={ciclo.id}
+                cicloCerrado={ciclo.cerradoEn !== null}
+                permiso={data.permiso}
+                ramaCerrada={data.ramaCerrada}
+                portal
+              />
+            </>
           )}
 
           <PanelFotos as="section" denso>
@@ -203,8 +229,8 @@ export function Portal() {
             </p>
           </div>
 
-          <GaleriaFotosPlanas
-            albumes={albumes}
+          <GaleriaDeFotos
+            fotos={fotosDelCiclo}
             cargando={galeria.isLoading}
             hayMas={Boolean(galeria.hasNextPage)}
             cargandoMas={galeria.isFetchingNextPage}

@@ -12,7 +12,16 @@ import { limpiar, describir } from '../common/texto';
 import { rutaDe } from '../common/arbol-ruta';
 import type { TipoNodoPlantilla } from '../../generated/prisma/enums';
 
-const TIPOS = ['CARPETA', 'TAREA', 'ALBUM'] as const;
+/**
+ * Qué puede haber en una plantilla.
+ *
+ * ⚠️ `ALBUM` ya NO se admite al crear ni al editar: los álbumes se retiraron
+ * en la Fase 4 del rediseño. El VALOR sigue en el enum de la base porque hay
+ * plantillas guardadas que lo usan —mismo trato que los valores viejos de los
+ * enums de la bitácora—, y al aplicarlas esos nodos se OMITEN con aviso, como
+ * ya se hacía con una actividad fuera de un equipo.
+ */
+const TIPOS = ['CARPETA', 'ACTIVIDAD'] as const;
 
 /** Un nodo tal como llega del formulario, con sus hijos anidados. */
 export interface NodoPlantillaDto {
@@ -37,7 +46,7 @@ const MAX_NODOS = 200;
  *
  * Una plantilla es un **molde**: «Inspección de Equipo» = Estado general,
  * Pernos, Soldaduras, Estructura, Evidencia fotográfica. Se aplica sobre una
- * carpeta y el sistema crea de golpe esas carpetas, tareas y álbumes.
+ * carpeta y el sistema crea de golpe esas carpetas, actividades y álbumes.
  *
  * Resuelve dos problemas a la vez: el supervisor deja de teclear seis cosas
  * por equipo, y la nomenclatura sale igual en toda la empresa sin tener que
@@ -81,7 +90,7 @@ export class PlantillaService {
 
   private validarTipo(valor: unknown): TipoNodoPlantilla {
     const tipo = (limpiar(valor) ?? '').toUpperCase();
-    if (!TIPOS.includes(tipo as TipoNodoPlantilla))
+    if (!TIPOS.includes(tipo as (typeof TIPOS)[number]))
       throw new BadRequestException(
         `Tipo de nodo inválido: "${describir(valor)}". Valores permitidos: ${TIPOS.join(', ')}.`,
       );
@@ -111,7 +120,7 @@ export class PlantillaService {
       if (nombre === null)
         throw new BadRequestException('Cada elemento necesita un nombre.');
 
-      // Solo una CARPETA puede contener cosas: una tarea o un álbum son
+      // Solo una CARPETA puede contener cosas: una actividad o un álbum son
       // hojas. Sin esta comprobación se podría definir un molde imposible
       // que solo fallaría al aplicarlo, cuando ya es tarde.
       if (tipo !== 'CARPETA' && (nodo.hijos ?? []).length > 0)
@@ -381,11 +390,11 @@ export class PlantillaService {
       );
 
     const esEquipo = destino.tipo === 'EQUIPO';
-    const creado = { carpetas: 0, tareas: 0, albumes: 0 };
+    const creado = { carpetas: 0, actividades: 0 };
     // Lo que la plantilla traía pero no cabía aquí. Se DEVUELVE en vez de
     // callarse: quien aplica «Inspección de Equipo» sobre una carpeta
-    // corriente tiene que enterarse de que sus tareas no se crearon.
-    const omitidas = { tareas: 0 };
+    // corriente tiene que enterarse de que sus actividades no se crearon.
+    const omitidas = { actividades: 0, albumes: 0 };
 
     await this.prisma.$transaction(async (tx) => {
       // De cada nodo de la plantilla al id de la carpeta que se creó por él.
@@ -423,39 +432,46 @@ export class PlantillaService {
           });
           carpetaPorNodo.set(nodo.id, hija.id);
           creado.carpetas++;
-        } else if (nodo.tipo === 'TAREA') {
-          // ⚠️ Las tareas solo existen dentro de un EQUIPO (§13), y esa regla
-          // la hace cumplir `TareaService.crear`. Aquí se escribe con `tx`
+        } else if (nodo.tipo === 'ACTIVIDAD') {
+          // ⚠️ Las actividades solo existen dentro de un EQUIPO (§13), y esa regla
+          // la hace cumplir `ActividadService.crear`. Aquí se escribe con `tx`
           // directamente, así que hay que volver a comprobarla o la plantilla
           // sería una puerta trasera que la incumple.
           //
-          // Una tarea solo cabe si su padre es el DESTINO y el destino es un
+          // Una actividad solo cabe si su padre es el DESTINO y el destino es un
           // equipo: las carpetas que crea la propia plantilla son corrientes,
           // nunca de tipo EQUIPO —enlazarlas a un equipo del catálogo exige
           // elegir cuál, y un molde no puede saberlo—.
           if (padreId !== carpetaId || !esEquipo) {
-            omitidas.tareas++;
+            omitidas.actividades++;
             continue;
           }
-          await tx.tareaFotos.create({
+          // ⚠️ Una actividad cae en el ciclo EN CURSO del equipo. Sin ninguno
+          // abierto se omite igual que si la carpeta no fuera un equipo:
+          // estampar un checklist sobre una visita ya cerrada la reescribiría.
+          const cicloAbierto = await tx.cicloFotos.findFirst({
+            where: { carpetaId, cerradoEn: null },
+            select: { id: true },
+          });
+          if (!cicloAbierto) {
+            omitidas.actividades++;
+            continue;
+          }
+          await tx.actividadFotos.create({
             data: {
-              carpetaId: padreId,
+              cicloId: cicloAbierto.id,
               titulo: nodo.nombre,
               descripcion: nodo.descripcion,
               creadoPorId: usuario.id,
             },
           });
-          creado.tareas++;
+          creado.actividades++;
         } else {
-          await tx.albumFotos.create({
-            data: {
-              carpetaId: padreId,
-              nombre: nodo.nombre,
-              descripcion: nodo.descripcion,
-              creadoPorId: usuario.id,
-            },
-          });
-          creado.albumes++;
+          // ⚠️ Un nodo ALBUM de una plantilla vieja. No se crea nada —los
+          // álbumes se retiraron— y se cuenta como omitido, con el mismo
+          // criterio que una actividad que no cabe: una plantilla mixta
+          // sigue sirviendo para crear sus carpetas y sus actividades.
+          omitidas.albumes++;
         }
       }
     });
@@ -469,9 +485,12 @@ export class PlantillaService {
       accion: 'CREACION_DESDE_PLANTILLA',
       descripcion:
         `Aplicó "${plantilla.nombre}": ${creado.carpetas} carpeta(s), ` +
-        `${creado.tareas} tarea(s), ${creado.albumes} álbum(es).` +
-        (omitidas.tareas > 0
-          ? ` ${omitidas.tareas} tarea(s) omitida(s): el destino no es un equipo.`
+        `${creado.actividades} actividad(s).` +
+        (omitidas.actividades > 0
+          ? ` ${omitidas.actividades} actividad(s) omitida(s): el destino no es un equipo.`
+          : '') +
+        (omitidas.albumes > 0
+          ? ` ${omitidas.albumes} álbum(es) omitido(s): los álbumes se retiraron.`
           : ''),
     });
 
@@ -483,9 +502,16 @@ export class PlantillaService {
       // El motivo, en lenguaje de usuario, para que la pantalla no tenga que
       // deducirlo de un contador.
       aviso:
-        omitidas.tareas > 0
-          ? `Se omitieron ${omitidas.tareas} tarea(s): solo se pueden crear dentro de una carpeta de equipo (§13).`
-          : null,
+        [
+          omitidas.actividades > 0
+            ? `Se omitieron ${omitidas.actividades} actividad(s): solo se pueden crear dentro de una carpeta de equipo (§13).`
+            : null,
+          omitidas.albumes > 0
+            ? `Se omitieron ${omitidas.albumes} álbum(es): esta plantilla es anterior a que se retiraran, y ya no se crean.`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' ') || null,
     };
   }
 }

@@ -5,22 +5,23 @@ import * as fotos from '@/modules/fotos/services/fotosService';
 import { getErrorMessage } from '@/shared/services/api';
 import { QUERY_KEYS } from '@/shared/lib/constants';
 import { useInvalidarFotos } from './useInvalidarFotos';
-import type { EstadoTarea, NuevaTarea } from '@/modules/fotos/types';
+import type { EstadoActividad, NuevaActividad } from '@/modules/fotos/types';
 
-// Las tareas de §13: lecturas Y escrituras en un solo archivo, nombrado por
+// Las actividades de §13: lecturas Y escrituras en un solo archivo, nombrado por
 // el recurso. Un `…Mutations` aparte sería partir el mismo recurso en dos.
 
 /**
- * Las tareas de un equipo.
+ * Las actividades de UNA VISITA.
  *
- * `habilitado` porque la lista solo se pide dentro de una carpeta de tipo
- * EQUIPO: en una carpeta corriente el backend contestaría 200 con `[]`, pero
- * pedirlo sería una consulta por cada carpeta que se abre para nada.
+ * ⚠️ Van por `cicloId` y no por carpeta desde la Fase 1 del rediseño: el
+ * mismo equipo repite «Revisar filtros» en cada visita, así que la carpeta
+ * no identifica una lista. `habilitado` sigue haciendo falta porque solo hay
+ * ciclos dentro de un EQUIPO.
  */
-export function useTareas(
-  carpetaId: number | null,
+export function useActividades(
+  cicloId: number | null,
   opciones: {
-    estado?: EstadoTarea | '';
+    estado?: EstadoActividad | '';
     habilitado?: boolean;
     /** El portal del cliente pega a otras rutas y no filtra por estado. */
     portal?: boolean;
@@ -29,36 +30,36 @@ export function useTareas(
   const { estado = '', habilitado = true, portal = false } = opciones;
   return useQuery({
     queryKey: portal
-      ? QUERY_KEYS.portalTareas(carpetaId ?? 0)
-      : QUERY_KEYS.tareas(carpetaId ?? 0, estado),
+      ? QUERY_KEYS.portalActividades(cicloId ?? 0)
+      : QUERY_KEYS.actividades(cicloId ?? 0, estado),
     queryFn: () =>
       portal
-        ? fotos.verTareasPortal(carpetaId!)
-        : fotos.verTareas(carpetaId!, estado || undefined),
-    enabled: habilitado && carpetaId !== null,
+        ? fotos.verActividadesPortal(cicloId!)
+        : fotos.verActividades(cicloId!, estado || undefined),
+    enabled: habilitado && cicloId !== null,
   });
 }
 
-export function useCrearTarea() {
+export function useCrearActividad() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
-      carpetaId,
+      cicloId,
       payload,
     }: {
-      carpetaId: number;
-      payload: NuevaTarea;
-    }) => fotos.crearTarea(carpetaId, payload),
+      cicloId: number;
+      payload: NuevaActividad;
+    }) => fotos.crearActividad(cicloId, payload),
     onSuccess: (t) => {
       invalidar();
-      toast.success(`Tarea creada: ${t.titulo}`);
+      toast.success(`Actividad creada: ${t.titulo}`);
     },
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo crear la tarea')),
+      toast.error(getErrorMessage(error, 'No se pudo crear la actividad')),
   });
 }
 
-export function useEditarTarea() {
+export function useEditarActividad() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
@@ -66,29 +67,29 @@ export function useEditarTarea() {
       payload,
     }: {
       id: number;
-      payload: Partial<NuevaTarea>;
-    }) => fotos.editarTarea(id, payload),
+      payload: Partial<NuevaActividad>;
+    }) => fotos.editarActividad(id, payload),
     onSuccess: () => {
       invalidar();
-      toast.success('Tarea actualizada');
+      toast.success('Actividad actualizada');
     },
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo actualizar la tarea')),
+      toast.error(getErrorMessage(error, 'No se pudo actualizar la actividad')),
   });
 }
 
 /**
  * El check rápido de §13.
  *
- * Hook propio y no `useEditarTarea` con `{estado}`: el aviso es distinto
+ * Hook propio y no `useEditarActividad` con `{estado}`: el aviso es distinto
  * —nombra quién y cuándo, que es lo que §13 pide registrar— y se dispara
  * desde una casilla, no desde el formulario.
  */
-export function useMarcarTarea() {
+export function useMarcarActividad() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({ id, completada }: { id: number; completada: boolean }) =>
-      fotos.marcarTarea(id, completada),
+      fotos.marcarActividad(id, completada),
     onSuccess: (t) => {
       invalidar();
       toast.success(
@@ -98,28 +99,28 @@ export function useMarcarTarea() {
       );
     },
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo cambiar la tarea')),
+      toast.error(getErrorMessage(error, 'No se pudo cambiar la actividad')),
   });
 }
 
-export function useEliminarTarea() {
+export function useEliminarActividad() {
   const invalidar = useInvalidarFotos();
   return useMutation({
-    mutationFn: (id: number) => fotos.eliminarTarea(id),
+    mutationFn: (id: number) => fotos.eliminarActividad(id),
     onSuccess: () => {
       invalidar();
-      toast.success('Tarea eliminada');
+      toast.success('Actividad eliminada');
     },
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo eliminar la tarea')),
+      toast.error(getErrorMessage(error, 'No se pudo eliminar la actividad')),
   });
 }
 
 /**
- * Quién puede ser responsable de una tarea (§13).
+ * Quién puede ser responsable de una actividad (§13).
  *
  * Se pide una vez y se reutiliza: la lista no cambia mientras se rellena un
- * formulario, y pedirla por cada tarea abierta serían N llamadas iguales.
+ * formulario, y pedirla por cada actividad abierta serían N llamadas iguales.
  */
 export function useAsignables(habilitado = true) {
   return useQuery({
@@ -132,20 +133,20 @@ export function useAsignables(habilitado = true) {
   });
 }
 
-/** Las fotos que documentan una tarea (§15). */
-export function useFotosDeTarea(
-  tareaId: number | null,
+/** Las fotos que documentan una actividad (§15). */
+export function useFotosDeActividad(
+  actividadId: number | null,
   habilitado = true,
   portal = false,
 ) {
   return useQuery({
     queryKey: portal
-      ? QUERY_KEYS.portalFotosDeTarea(tareaId ?? 0)
-      : QUERY_KEYS.fotosDeTarea(tareaId ?? 0),
+      ? QUERY_KEYS.portalFotosDeActividad(actividadId ?? 0)
+      : QUERY_KEYS.fotosDeActividad(actividadId ?? 0),
     queryFn: () =>
       portal
-        ? fotos.verFotosDeTareaPortal(tareaId!)
-        : fotos.verFotosDeTarea(tareaId!),
-    enabled: habilitado && tareaId !== null,
+        ? fotos.verFotosDeActividadPortal(actividadId!)
+        : fotos.verFotosDeActividad(actividadId!),
+    enabled: habilitado && actividadId !== null,
   });
 }

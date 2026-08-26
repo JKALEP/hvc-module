@@ -88,7 +88,7 @@ export class AlmacenamientoService {
    * un grupo entero sea un prefijo.
    *
    * `grupo` es el id del álbum cuando la foto tiene uno, y `u<usuarioId>`
-   * cuando no —las de una tarea y las de la bandeja de §18—. Admite texto
+   * cuando no —las de una actividad y las de la bandeja de §18—. Admite texto
    * desde la Fase 6 por eso: es lo ÚNICO que cambió aquí.
    *
    * ⚠️ El prefijo sigue siendo `lotes/` aunque el modelo ya no tenga lotes.

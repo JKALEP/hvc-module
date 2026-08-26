@@ -51,7 +51,16 @@ export interface CarpetaListada {
   nombre: string;
   cerrada: boolean;
   subcarpetas: number;
-  albumes: number;
+  /**
+   * Cuántas fotos hay en todo el subárbol que este usuario ve.
+   *
+   * ⚠️ Aquí iba también `albumes`. Se fue con ellos en la Fase 4: la tarjeta
+   * contaba dos agrupadores —«3 álbumes · 12 fotos»— y con el álbum retirado
+   * el otro sería «3 visitas», que es un dato del equipo y no del subárbol.
+   * Cuenta las fotos SUELTAS de los ciclos y también las de las actividades:
+   * para quien mira una tarjeta, «12 fotos» son las que hay dentro, no las
+   * que están en un sitio concreto.
+   */
   fotos: number;
   /** Para "Act. hace 2 días": se propaga desde lo que pasa dentro. */
   actualizadoEn: Date;
@@ -68,6 +77,18 @@ export interface CarpetaListada {
    * `carpetaPorId` y no para las hijas—.
    */
   tipo: TipoCarpetaFotos;
+  /**
+   * El estado del equipo en su ciclo MÁS RECIENTE (§7), para pintar la
+   * tarjeta sin entrar. `null` en una carpeta corriente —no tiene ciclos— y
+   * en un equipo cuya visita en curso aún no se ha revisado.
+   *
+   * ⚠️ Se llama `estadoEquipo` y no `estado` a propósito: la tarjeta YA tuvo
+   * un campo `estado` que significaba otra cosa —el `EstadoSede`
+   * ACTIVA/INACTIVA que se retiró en v3—, y reusar el nombre para un
+   * concepto distinto es la clase de cosa que se lee mal año y medio
+   * después. El ciclo sí llama `estado` al suyo: ahí no hay ambigüedad.
+   */
+  estadoEquipo: { id: number; nombre: string; color: string } | null;
 }
 
 /**
@@ -119,6 +140,19 @@ const CAMPOS_CARPETA = {
   cerrada: true,
   actualizadoEn: true,
   tipo: true,
+  // ⚠️ El estado que se pinta en la tarjeta es el del ciclo MÁS RECIENTE
+  // (§7), abierto o cerrado. Se pide 1 ordenado por `numero` desc en vez de
+  // traer el historial entero: una rejilla con 40 equipos no puede cargar
+  // sus 40 historiales para enseñar un color.
+  ciclos: {
+    orderBy: { numero: 'desc' as const },
+    take: 1,
+    select: {
+      numero: true,
+      cerradoEn: true,
+      estado: { select: { id: true, nombre: true, color: true } },
+    },
+  },
 } as const;
 
 interface FilaCarpeta {
@@ -128,6 +162,11 @@ interface FilaCarpeta {
   cerrada: boolean;
   actualizadoEn: Date;
   tipo: TipoCarpetaFotos;
+  ciclos: {
+    numero: number;
+    cerradoEn: Date | null;
+    estado: { id: number; nombre: string; color: string } | null;
+  }[];
 }
 
 /** Opciones de listado que vienen de la query string (§11). */
@@ -227,8 +266,12 @@ export class NavegacionService {
         cerrada: actual.cerrada,
         actualizadoEn: actual.actualizadoEn,
         // Desde la Fase 5: quien abre la carpeta necesita saber si es un
-        // EQUIPO para ofrecer las tareas de §13.
+        // EQUIPO para ofrecer las actividades de §13.
         tipo: actual.tipo ?? 'CARPETA',
+        // Qué clase de sistema es (Fase 2). `null` en una carpeta corriente
+        // y en un equipo al que todavía nadie se lo ha puesto — es opcional
+        // como todo lo del equipo, para no trabar el alta en obra.
+        tipoSistema: actual.tipoSistema ?? null,
       },
       permiso,
       puedeEscribir: this.acceso.alcanza(permiso, 'EDICION') && !ramaCerrada,
@@ -471,7 +514,6 @@ export class NavegacionService {
         id: true,
         ruta: true,
         parentId: true,
-        _count: { select: { albumes: true } },
       },
     });
 
@@ -482,35 +524,69 @@ export class NavegacionService {
     );
     const idsVisibles = ramaVisible.map((d) => d.id);
 
-    // 2. Los álbumes de esas carpetas: hacen de puente para las fotos.
-    const albumes = await this.prisma.albumFotos.findMany({
+    // 2. Los CICLOS de esas carpetas: hacen de puente para las fotos, igual
+    // que lo hacían los álbumes antes de la Fase 4. Prisma no agrupa por
+    // campo de una relación, así que el puente sigue haciendo falta.
+    const ciclos = await this.prisma.cicloFotos.findMany({
       where: { carpetaId: { in: idsVisibles } },
       select: { id: true, carpetaId: true },
     });
-    const carpetaDeAlbum = new Map(albumes.map((a) => [a.id, a.carpetaId]));
+    const carpetaDeCiclo = new Map(ciclos.map((c) => [c.id, c.carpetaId]));
 
-    // 3. Fotos por álbum, acotadas a esos álbumes. Las fotos sin álbum son
-    // la bandeja de §18: no cuelgan de ninguna carpeta y no cuentan aquí.
-    const fotosPorAlbum =
-      albumes.length === 0
+    // 3. Fotos por ciclo, acotadas a esos ciclos. Las que no cuelgan de uno
+    // son las de la bandeja de §18 —que no están en ninguna carpeta— y las
+    // de una actividad, que se cuentan aparte en el paso siguiente.
+    const fotosPorCiclo =
+      ciclos.length === 0
         ? []
         : await this.prisma.foto.groupBy({
-            by: ['albumId'],
-            where: { albumId: { in: albumes.map((a) => a.id) } },
+            by: ['cicloId'],
+            where: { cicloId: { in: ciclos.map((c) => c.id) } },
             _count: { _all: true },
           });
 
     const fotosDe = new Map<number, number>();
-    for (const f of fotosPorAlbum) {
-      // `by: ['albumId']` lo tipa nullable aunque el where ya lo excluya.
-      if (f.albumId === null) continue;
-      const carpeta = carpetaDeAlbum.get(f.albumId);
+    const sumar = (carpetaId: number, cuantas: number) =>
+      fotosDe.set(carpetaId, (fotosDe.get(carpetaId) ?? 0) + cuantas);
+
+    for (const f of fotosPorCiclo) {
+      // `by: ['cicloId']` lo tipa nullable aunque el where ya lo excluya.
+      if (f.cicloId === null) continue;
+      const carpeta = carpetaDeCiclo.get(f.cicloId);
       if (carpeta === undefined) continue;
-      fotosDe.set(carpeta, (fotosDe.get(carpeta) ?? 0) + f._count._all);
+      sumar(carpeta, f._count._all);
     }
 
-    const albumesDe = new Map<number, number>();
-    for (const d of ramaVisible) albumesDe.set(d.id, d._count.albumes);
+    // 4. Y las de ACTIVIDAD, que desde la Fase 3 son evidencia y cuentan
+    // igual: para quien mira la tarjeta, «12 fotos» son las que hay dentro,
+    // no las que están en un sitio concreto. Antes no existía este paso
+    // porque toda foto de una carpeta colgaba de un álbum.
+    const actividades =
+      ciclos.length === 0
+        ? []
+        : await this.prisma.actividadFotos.findMany({
+            where: { cicloId: { in: ciclos.map((c) => c.id) } },
+            select: { id: true, cicloId: true },
+          });
+    const cicloDeActividad = new Map(actividades.map((a) => [a.id, a.cicloId]));
+
+    const fotosPorActividad =
+      actividades.length === 0
+        ? []
+        : await this.prisma.foto.groupBy({
+            by: ['actividadId'],
+            where: { actividadId: { in: actividades.map((a) => a.id) } },
+            _count: { _all: true },
+          });
+
+    for (const f of fotosPorActividad) {
+      if (f.actividadId === null) continue;
+      const ciclo = cicloDeActividad.get(f.actividadId);
+      if (ciclo === undefined) continue;
+      const carpeta = carpetaDeCiclo.get(ciclo);
+      if (carpeta === undefined) continue;
+      sumar(carpeta, f._count._all);
+    }
 
     return visibles.map(({ c, permiso }) => {
       const rama = ramaVisible.filter((d) => estaEnRama(d.ruta, c.ruta));
@@ -520,11 +596,14 @@ export class NavegacionService {
         cerrada: c.cerrada,
         // Las hijas directas que se ven, no todas las que hay.
         subcarpetas: ramaVisible.filter((d) => d.parentId === c.id).length,
-        albumes: rama.reduce((t, d) => t + (albumesDe.get(d.id) ?? 0), 0),
         fotos: rama.reduce((t, d) => t + (fotosDe.get(d.id) ?? 0), 0),
         actualizadoEn: c.actualizadoEn,
         permiso,
         tipo: c.tipo,
+        // El estado del ciclo más reciente (§7). `null` en una carpeta
+        // corriente —no tiene ciclos— y también en un equipo cuya visita en
+        // curso todavía no ha sido revisada: nace sin estado a propósito.
+        estadoEquipo: c.ciclos[0]?.estado ?? null,
       };
     });
   }

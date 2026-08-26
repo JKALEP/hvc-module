@@ -1,6 +1,6 @@
 import { api } from '@/shared/services/api';
 import type { RespuestaLogin } from '@/modules/auth/types';
-import type { ColoresDeCarpeta, CampoEquipo, CampoDeCarpeta, Persona, FotoDeTarea, EventoFotos, Plantilla, PlantillaResumen, NodoPlantillaNuevo, PreviaImportacion, DecisionImportacion, Album, Bandeja, DestinoFotos, Comentario, EntidadComentable, EstadoTarea, NuevaTarea, Tarea, AutorDeCarpeta, CarpetaCompartible, CarpetaListada, ContenidoCarpeta, FiltrosGaleria, Galeria, InvitacionAbierta, ListaCompartidos, Orden, PermisoCarpeta, ResultadoCompartir, ResultadoSubida } from '@/modules/fotos/types';
+import type { MomentoEvidencia, TipoEvidencia, FamiliaSistema, TipoSistema, DefinicionActividad, Ciclo, EstadoEquipo, ColorEstado, ColoresDeCarpeta, CampoEquipo, CampoDeCarpeta, Persona, FotoDeActividad, EventoFotos, Plantilla, PlantillaResumen, NodoPlantillaNuevo, PreviaImportacion, DecisionImportacion, Bandeja, DestinoFotos, Comentario, EntidadComentable, EstadoActividad, NuevaActividad, Actividad, AutorDeCarpeta, CarpetaCompartible, CarpetaListada, ContenidoCarpeta, FiltrosGaleria, Galeria, InvitacionAbierta, ListaCompartidos, Orden, PermisoCarpeta, ResultadoCompartir, ResultadoSubida } from '@/modules/fotos/types';
 
 // Módulo Fotos v3. Un recurso, un nombre: las carpetas se leen y se
 // escriben en `/fotos/carpeta`. La `/fotos/sede` de v2 desapareció —creaba
@@ -38,16 +38,22 @@ export async function verRecientes(): Promise<{ carpetas: CarpetaListada[] }> {
   return data;
 }
 
-// ── Álbumes y fotos ──
+// ── Las fotos de una visita ──
 
-/** Galería paginada POR ÁLBUM: un álbum son 10 fotos como máximo. */
+/**
+ * Galería de un CICLO: lista plana de fotos, paginada por cursor.
+ *
+ * ⚠️ Paginaba por ÁLBUM y devolvía las fotos anidadas. Los álbumes se
+ * retiraron en la Fase 4 y el agrupador pasó a ser el ciclo, que la pantalla
+ * ya eligió antes de pedir esto.
+ */
 export async function verGaleria(
-  carpetaId: number,
+  cicloId: number,
   filtros: FiltrosGaleria,
   cursor?: number,
 ): Promise<Galeria> {
   const { data } = await api.get<Galeria>(
-    `/fotos/carpeta/${carpetaId}/album`,
+    `/fotos/ciclo/${cicloId}/foto`,
     {
       params: {
         ...(cursor !== undefined ? { cursor } : {}),
@@ -62,20 +68,22 @@ export async function verGaleria(
   return data;
 }
 
-export async function verAutores(carpetaId: number): Promise<AutorDeCarpeta[]> {
+export async function verAutores(cicloId: number): Promise<AutorDeCarpeta[]> {
   const { data } = await api.get<AutorDeCarpeta[]>(
-    `/fotos/carpeta/${carpetaId}/autores`,
+    `/fotos/ciclo/${cicloId}/autores`,
   );
   return data;
 }
 
 /**
- * Sube fotos a una carpeta. El álbum se crea solo — no hay paso previo de
- * "crear álbum". Se manda multipart: el navegador pone el boundary del
- * Content-Type, así que NO se fija a mano.
+ * Sube fotos sueltas a una visita.
+ *
+ * Sin paso previo de «crear álbum» — ya no hay ninguno: el destino existe
+ * desde que el equipo se dio de alta. Se manda multipart: el navegador pone
+ * el boundary del Content-Type, así que NO se fija a mano.
  */
 export async function subirFotos(
-  carpetaId: number,
+  cicloId: number,
   archivos: File[],
   descripcion: string,
 ): Promise<ResultadoSubida> {
@@ -84,7 +92,7 @@ export async function subirFotos(
   if (descripcion.trim()) form.append('descripcion', descripcion.trim());
 
   const { data } = await api.post<ResultadoSubida>(
-    `/fotos/carpeta/${carpetaId}/album`,
+    `/fotos/ciclo/${cicloId}/foto`,
     form,
   );
   return data;
@@ -144,6 +152,16 @@ export async function crearCarpeta(payload: {
    * carpeta a medias si el segundo falla, que en obra es el que se pierde.
    */
   valores?: Record<string, unknown>;
+  /** Qué clase de sistema es (Fase 2). Solo con `tipo = 'EQUIPO'`. */
+  tipoSistemaId?: number | null;
+  /**
+   * Qué actividades del catálogo estampar en el Ciclo 1 (Fase 2).
+   *
+   * ⚠️ Omitirlo y mandar `[]` NO es lo mismo: sin el campo el servidor
+   * estampa la preselección del tipo de sistema; con lista vacía, ninguna.
+   * El formulario manda SIEMPRE la lista, porque enseña las casillas.
+   */
+  actividades?: number[];
 }) {
   const { data } = await api.post('/fotos/carpeta', payload);
   return data as { id: number; nombre: string };
@@ -152,7 +170,12 @@ export async function crearCarpeta(payload: {
 /** Renombrar y/o mover. Archivar tiene su propia ruta: otra regla. */
 export async function editarCarpeta(
   id: number,
-  payload: { nombre?: string; parentId?: number | null },
+  payload: {
+    nombre?: string;
+    parentId?: number | null;
+    /** Corregir el tipo de sistema de un equipo (Fase 2). */
+    tipoSistemaId?: number | null;
+  },
 ) {
   const { data } = await api.patch(`/fotos/carpeta/${id}`, payload);
   return data as { id: number; nombre: string; cerrada: boolean };
@@ -415,15 +438,16 @@ export async function verCarpetaPortal(
 }
 
 export async function verGaleriaPortal(
-  sedeId: number,
+  cicloId: number,
   filtros: FiltrosGaleria,
   cursor?: number,
 ): Promise<Galeria> {
-  // ⚠️ `/album`, no `/foto`. Pedía `/foto` y el backend expone
-  // `carpeta/:id/album`, así que la galería del portal devolvía 404 y el
-  // cliente veía CERO fotos, en silencio. No se detectó antes porque la
+  // ⚠️ Desde la Fase 4 la galería del portal es la de un CICLO, igual que la
+  // interna. Y sigue habiendo un motivo para mirar esta línea con atención:
+  // antes pedía `carpeta/:id/foto`, que el backend nunca expuso, así que el
+  // cliente veía CERO fotos en silencio. No se detectó en la Fase 7 porque la
   // carpeta con la que se probó el portal no tenía ninguna.
-  const { data } = await api.get<Galeria>(`/portal/carpeta/${sedeId}/album`, {
+  const { data } = await api.get<Galeria>(`/portal/ciclo/${cicloId}/foto`, {
     params: {
       ...(cursor !== undefined ? { cursor } : {}),
       ...(filtros.desde ? { desde: filtros.desde } : {}),
@@ -433,34 +457,255 @@ export async function verGaleriaPortal(
   return data;
 }
 
-// ── Tareas (§13) ──
+// ── Tipo de sistema y catálogo de actividades (Fase 2 del rediseño) ──
 
-export async function verTareas(
-  carpetaId: number,
-  estado?: EstadoTarea,
-): Promise<Tarea[]> {
-  const { data } = await api.get<Tarea[]>(`/fotos/carpeta/${carpetaId}/tarea`, {
-    params: estado ? { estado } : {},
+/** Las familias con sus tipos dentro: es como se pinta el desplegable. */
+export async function verSistemas(
+  soloActivos = false,
+): Promise<FamiliaSistema[]> {
+  const { data } = await api.get<FamiliaSistema[]>('/fotos/sistema', {
+    params: soloActivos ? { activos: 'true' } : {},
   });
   return data;
 }
 
-export async function crearTarea(
-  carpetaId: number,
-  payload: NuevaTarea,
-): Promise<Tarea> {
-  const { data } = await api.post<Tarea>(
-    `/fotos/carpeta/${carpetaId}/tarea`,
+export async function crearFamiliaSistema(payload: {
+  nombre: string;
+  orden?: number;
+}): Promise<FamiliaSistema> {
+  const { data } = await api.post<FamiliaSistema>(
+    '/fotos/sistema/familia',
     payload,
   );
   return data;
 }
 
-export async function editarTarea(
+export async function editarFamiliaSistema(
   id: number,
-  payload: Partial<NuevaTarea>,
-): Promise<Tarea> {
-  const { data } = await api.patch<Tarea>(`/fotos/tarea/${id}`, payload);
+  payload: { nombre?: string; orden?: number; activo?: boolean },
+): Promise<FamiliaSistema> {
+  const { data } = await api.patch<FamiliaSistema>(
+    `/fotos/sistema/familia/${id}`,
+    payload,
+  );
+  return data;
+}
+
+export async function eliminarFamiliaSistema(id: number): Promise<void> {
+  await api.delete(`/fotos/sistema/familia/${id}`);
+}
+
+export async function crearTipoSistema(payload: {
+  familiaId: number;
+  nombre: string;
+  orden?: number;
+}): Promise<TipoSistema> {
+  const { data } = await api.post<TipoSistema>('/fotos/sistema/tipo', payload);
+  return data;
+}
+
+export async function editarTipoSistema(
+  id: number,
+  payload: {
+    familiaId?: number;
+    nombre?: string;
+    orden?: number;
+    activo?: boolean;
+  },
+): Promise<TipoSistema> {
+  const { data } = await api.patch<TipoSistema>(
+    `/fotos/sistema/tipo/${id}`,
+    payload,
+  );
+  return data;
+}
+
+export async function eliminarTipoSistema(id: number): Promise<void> {
+  await api.delete(`/fotos/sistema/tipo/${id}`);
+}
+
+/**
+ * El catálogo de actividades.
+ *
+ * `tipoSistemaId` lo acota a lo que se propone para ese tipo, que es
+ * exactamente la preselección del formulario de alta de un equipo.
+ */
+export async function verCatalogoActividades(opciones: {
+  soloActivas?: boolean;
+  tipoSistemaId?: number | null;
+} = {}): Promise<DefinicionActividad[]> {
+  const { data } = await api.get<DefinicionActividad[]>(
+    '/fotos/catalogo-actividad',
+    {
+      params: {
+        ...(opciones.soloActivas ? { activas: 'true' } : {}),
+        ...(opciones.tipoSistemaId ? { tipoSistema: opciones.tipoSistemaId } : {}),
+      },
+    },
+  );
+  return data;
+}
+
+export async function crearDefinicionActividad(payload: {
+  nombre: string;
+  descripcion?: string | null;
+  orden?: number;
+  evidencia?: TipoEvidencia;
+  tiposSistema?: number[];
+}): Promise<DefinicionActividad> {
+  const { data } = await api.post<DefinicionActividad>(
+    '/fotos/catalogo-actividad',
+    payload,
+  );
+  return data;
+}
+
+export async function editarDefinicionActividad(
+  id: number,
+  payload: {
+    nombre?: string;
+    descripcion?: string | null;
+    orden?: number;
+    activo?: boolean;
+    evidencia?: TipoEvidencia;
+    tiposSistema?: number[];
+  },
+): Promise<DefinicionActividad> {
+  const { data } = await api.patch<DefinicionActividad>(
+    `/fotos/catalogo-actividad/${id}`,
+    payload,
+  );
+  return data;
+}
+
+export async function eliminarDefinicionActividad(id: number): Promise<void> {
+  await api.delete(`/fotos/catalogo-actividad/${id}`);
+}
+
+/** Trae actividades del catálogo a un ciclo abierto. */
+export async function anadirDesdeCatalogo(
+  cicloId: number,
+  definiciones: number[],
+): Promise<{ anadidas: number; omitidas: number }> {
+  const { data } = await api.post<{ anadidas: number; omitidas: number }>(
+    `/fotos/ciclo/${cicloId}/actividad/desde-catalogo`,
+    { definiciones },
+  );
+  return data;
+}
+
+// ── Ciclos y estado del equipo (Fase 1 del rediseño) ──
+
+/** El historial de visitas de un equipo, del más reciente al más antiguo. */
+export async function verCiclos(carpetaId: number): Promise<Ciclo[]> {
+  const { data } = await api.get<Ciclo[]>(`/fotos/carpeta/${carpetaId}/ciclo`);
+  return data;
+}
+
+/** Abre una visita nueva, heredando el checklist de la anterior (§4.3). */
+export async function abrirCiclo(carpetaId: number): Promise<Ciclo> {
+  const { data } = await api.post<Ciclo>(`/fotos/carpeta/${carpetaId}/ciclo`);
+  return data;
+}
+
+export async function cerrarCiclo(cicloId: number): Promise<Ciclo> {
+  const { data } = await api.post<Ciclo>(`/fotos/ciclo/${cicloId}/cerrar`);
+  return data;
+}
+
+export async function reabrirCiclo(cicloId: number): Promise<Ciclo> {
+  const { data } = await api.post<Ciclo>(`/fotos/ciclo/${cicloId}/reabrir`);
+  return data;
+}
+
+/** `null` lo deja sin definir, que es como nace cada ciclo. */
+export async function cambiarEstadoCiclo(
+  cicloId: number,
+  estadoId: number | null,
+): Promise<Ciclo> {
+  const { data } = await api.patch<Ciclo>(`/fotos/ciclo/${cicloId}/estado`, {
+    estadoId,
+  });
+  return data;
+}
+
+/**
+ * El catálogo de estados (§7).
+ *
+ * Leerlo NO exige ser administrador: hace falta para elegir el estado de una
+ * visita. `soloActivos` es lo que se ofrece en el formulario; la pantalla de
+ * administración los quiere todos, retirados incluidos.
+ */
+export async function verEstadosEquipo(
+  soloActivos = false,
+): Promise<EstadoEquipo[]> {
+  const { data } = await api.get<EstadoEquipo[]>('/fotos/estado-equipo', {
+    params: soloActivos ? { activos: 'true' } : {},
+  });
+  return data;
+}
+
+export async function crearEstadoEquipo(payload: {
+  nombre: string;
+  color: ColorEstado;
+  orden?: number;
+}): Promise<EstadoEquipo> {
+  const { data } = await api.post<EstadoEquipo>('/fotos/estado-equipo', payload);
+  return data;
+}
+
+export async function editarEstadoEquipo(
+  id: number,
+  payload: {
+    nombre?: string;
+    color?: ColorEstado;
+    orden?: number;
+    activo?: boolean;
+  },
+): Promise<EstadoEquipo> {
+  const { data } = await api.patch<EstadoEquipo>(
+    `/fotos/estado-equipo/${id}`,
+    payload,
+  );
+  return data;
+}
+
+export async function eliminarEstadoEquipo(id: number): Promise<void> {
+  await api.delete(`/fotos/estado-equipo/${id}`);
+}
+
+// ── Actividades (§13) ──
+//
+// ⚠️ Cuelgan de un CICLO desde la Fase 1, no de la carpeta: un equipo repite
+// la misma actividad en cada visita, así que «las actividades de esta
+// carpeta» dejó de tener una respuesta única.
+
+export async function verActividades(
+  cicloId: number,
+  estado?: EstadoActividad,
+): Promise<Actividad[]> {
+  const { data } = await api.get<Actividad[]>(`/fotos/ciclo/${cicloId}/actividad`, {
+    params: estado ? { estado } : {},
+  });
+  return data;
+}
+
+export async function crearActividad(
+  cicloId: number,
+  payload: NuevaActividad,
+): Promise<Actividad> {
+  const { data } = await api.post<Actividad>(
+    `/fotos/ciclo/${cicloId}/actividad`,
+    payload,
+  );
+  return data;
+}
+
+export async function editarActividad(
+  id: number,
+  payload: Partial<NuevaActividad>,
+): Promise<Actividad> {
+  const { data } = await api.patch<Actividad>(`/fotos/actividad/${id}`, payload);
   return data;
 }
 
@@ -469,18 +714,18 @@ export async function editarTarea(
  * tres columnas a la vez —estado, cuándo y quién— y se dispara desde una
  * casilla, no desde el formulario.
  */
-export async function marcarTarea(
+export async function marcarActividad(
   id: number,
   completada: boolean,
-): Promise<Tarea> {
-  const { data } = await api.post<Tarea>(
-    `/fotos/tarea/${id}/${completada ? 'completar' : 'reabrir'}`,
+): Promise<Actividad> {
+  const { data } = await api.post<Actividad>(
+    `/fotos/actividad/${id}/${completada ? 'completar' : 'reabrir'}`,
   );
   return data;
 }
 
-export async function eliminarTarea(id: number): Promise<void> {
-  await api.delete(`/fotos/tarea/${id}`);
+export async function eliminarActividad(id: number): Promise<void> {
+  await api.delete(`/fotos/actividad/${id}`);
 }
 
 // ── Comentarios (§14) ──
@@ -521,43 +766,11 @@ export async function eliminarComentario(id: number): Promise<void> {
   await api.delete(`/fotos/comentario/${id}`);
 }
 
-// ── Álbumes con nombre (§16) ──
+// ⚠️ Aquí vivían `crearAlbum`, `editarAlbum` y `eliminarAlbum` (§16). Se
+// fueron con los álbumes en la Fase 4: no hay ninguna ruta detrás, y el
+// agrupador que hacía falta —la visita— ya existe sin que nadie lo cree.
 
-export async function crearAlbum(
-  carpetaId: number,
-  payload: {
-    nombre: string;
-    descripcion?: string | null;
-    fecha?: string | null;
-  },
-): Promise<Album> {
-  const { data } = await api.post<Album>(
-    `/fotos/album/carpeta/${carpetaId}`,
-    payload,
-  );
-  return data;
-}
-
-export async function editarAlbum(
-  id: number,
-  payload: { nombre?: string | null; descripcion?: string | null; fecha?: string | null },
-): Promise<Album> {
-  const { data } = await api.patch<Album>(`/fotos/album/${id}`, payload);
-  return data;
-}
-
-/**
- * Elimina un álbum VACÍO. El backend rechaza con 400 uno que tenga fotos.
- *
- * No hay «borrar el álbum con todo lo de dentro»: las fotos se borran una a
- * una —cada una con su permiso— y al irse la última el álbum se retira solo.
- */
-export async function eliminarAlbum(id: number): Promise<{ ok: boolean }> {
-  const { data } = await api.delete<{ ok: boolean }>(`/fotos/album/${id}`);
-  return data;
-}
-
-// ── Subir a cualquiera de los cuatro destinos (§15-§18) ──
+// ── Subir a cualquiera de los TRES destinos (§15-§18) ──
 
 /**
  * La ruta de subida sale del destino, no de un `if` en cada pantalla.
@@ -567,12 +780,10 @@ export async function eliminarAlbum(id: number): Promise<{ ok: boolean }> {
  */
 function rutaDeSubida(destino: DestinoFotos): string {
   switch (destino.tipo) {
-    case 'carpeta':
-      return `/fotos/carpeta/${destino.carpetaId}/album`;
-    case 'album':
-      return `/fotos/album/${destino.albumId}/foto`;
-    case 'tarea':
-      return `/fotos/tarea/${destino.tareaId}/foto`;
+    case 'ciclo':
+      return `/fotos/ciclo/${destino.cicloId}/foto`;
+    case 'actividad':
+      return `/fotos/actividad/${destino.actividadId}/foto`;
     case 'bandeja':
       return '/fotos/bandeja';
   }
@@ -582,10 +793,16 @@ export async function subirA(
   destino: DestinoFotos,
   archivos: File[],
   descripcion: string,
+  /**
+   * El hueco del antes/después (Fase 3). Solo lo admite —y lo exige— una
+   * actividad de tipo ANTES_DESPUES; el servidor rechaza lo demás.
+   */
+  momento?: MomentoEvidencia | null,
 ): Promise<ResultadoSubida> {
   const form = new FormData();
   for (const archivo of archivos) form.append('fotos', archivo);
   if (descripcion.trim()) form.append('descripcion', descripcion.trim());
+  if (momento) form.append('momento', momento);
 
   const { data } = await api.post<ResultadoSubida>(
     rutaDeSubida(destino),
@@ -604,33 +821,30 @@ export async function verBandeja(): Promise<Bandeja> {
 /** Traduce el destino tipado a los ids sueltos que espera el cuerpo JSON. */
 function idsDeDestino(destino: DestinoFotos) {
   return {
-    ...(destino.tipo === 'carpeta' ? { carpetaId: destino.carpetaId } : {}),
-    ...(destino.tipo === 'album' ? { albumId: destino.albumId } : {}),
-    ...(destino.tipo === 'tarea' ? { tareaId: destino.tareaId } : {}),
+    ...(destino.tipo === 'ciclo' ? { cicloId: destino.cicloId } : {}),
+    ...(destino.tipo === 'actividad' ? { actividadId: destino.actividadId } : {}),
     ...(destino.tipo === 'bandeja' ? { bandeja: true } : {}),
   };
 }
 
+/**
+ * Saca fotos de la bandeja y las mete en una visita o en una actividad.
+ *
+ * ⚠️ Ya no lleva nombre ni descripción: eran del ÁLBUM que se creaba al
+ * clasificar hacia una carpeta (Fase 2c), y con los álbumes retirados el
+ * destino ya existe y ya tiene nombre — es la visita.
+ */
 export async function clasificarFotos(
   fotoIds: number[],
   destino: DestinoFotos,
-  /** Del álbum que se crea al clasificar en una CARPETA. Opcional (§17). */
-  album: { nombre?: string; descripcion?: string } = {},
-): Promise<{ clasificadas: number; albumId: number | null }> {
+): Promise<{ clasificadas: number; cicloId: number | null }> {
   if (destino.tipo === 'bandeja')
     throw new Error('Clasificar es sacarlas de la bandeja, no devolverlas.');
 
-  const { data } = await api.post<{ clasificadas: number; albumId: number | null }>(
-    '/fotos/bandeja/clasificar',
-    {
-      fotoIds,
-      ...idsDeDestino(destino),
-      ...(album.nombre?.trim() ? { nombre: album.nombre.trim() } : {}),
-      ...(album.descripcion?.trim()
-        ? { descripcion: album.descripcion.trim() }
-        : {}),
-    },
-  );
+  const { data } = await api.post<{
+    clasificadas: number;
+    cicloId: number | null;
+  }>('/fotos/bandeja/clasificar', { fotoIds, ...idsDeDestino(destino) });
   return data;
 }
 
@@ -724,16 +938,14 @@ export async function aplicarPlantilla(
 ): Promise<{
   plantilla: string;
   carpetas: number;
-  tareas: number;
-  albumes: number;
+  actividades: number;
   aviso: string | null;
 }> {
   const { data } = await api.post<{
     plantilla: string;
     carpetas: number;
-    tareas: number;
-    albumes: number;
-    aviso: string | null;
+    actividades: number;
+      aviso: string | null;
   }>(`/fotos/plantilla/${plantillaId}/aplicar/${carpetaId}`);
   return data;
 }
@@ -761,60 +973,66 @@ export async function confirmarImportacion(
   archivo: File,
   decisiones: Record<number, DecisionImportacion>,
 ): Promise<{
-  creado: { carpetas: number; tareas: number; albumes: number };
-  omitido: { tareas: number; albumes: number };
-  actualizado: { tareas: number; albumes: number };
+  creado: { carpetas: number; actividades: number };
+  omitido: { actividades: number };
+  actualizado: { actividades: number };
 }> {
   const form = new FormData();
   form.append('archivo', archivo);
   form.append('decisiones', JSON.stringify(decisiones));
   const { data } = await api.post<{
-    creado: { carpetas: number; tareas: number; albumes: number };
-    omitido: { tareas: number; albumes: number };
-    actualizado: { tareas: number; albumes: number };
+    creado: { carpetas: number; actividades: number };
+    omitido: { actividades: number };
+    actualizado: { actividades: number };
   }>(`/fotos/importacion/carpeta/${carpetaId}/confirmar`, form);
   return data;
 }
 
-// ── Tareas completas (§13) — 9b ──
+// ── Actividades completas (§13) — 9b ──
 
 /** Quién puede ser responsable. Solo id y nombre: sin correos. */
 export async function verAsignables(): Promise<Persona[]> {
-  const { data } = await api.get<Persona[]>('/fotos/tarea-asignables');
+  const { data } = await api.get<Persona[]>('/fotos/actividad-asignables');
   return data;
 }
 
 /**
- * Las fotos de una tarea (§15).
+ * Las fotos de una actividad (§15).
  *
  * Sin paginar: son las de UN trabajo concreto, no las del proyecto entero.
  */
-export async function verFotosDeTarea(
-  tareaId: number,
-): Promise<FotoDeTarea[]> {
-  const { data } = await api.get<FotoDeTarea[]>(`/fotos/tarea/${tareaId}/foto`);
+export async function verFotosDeActividad(
+  actividadId: number,
+): Promise<FotoDeActividad[]> {
+  const { data } = await api.get<FotoDeActividad[]>(`/fotos/actividad/${actividadId}/foto`);
   return data;
 }
 
-// ── Portal: tareas y comentarios en solo lectura (§22) ──
+// ── Portal: actividades y comentarios en solo lectura (§22) ──
 //
 // Funciones gemelas de las internas, como ya lo son `verCarpetaPortal` y
 // `verGaleriaPortal`. Se prefiere eso a una bandera porque lo que cambia no
 // es un parámetro sino el CONJUNTO de rutas: el portal no tiene escrituras,
-// así que no hay una función «crear tarea del portal» que pudiera existir.
+// así que no hay una función «crear actividad del portal» que pudiera existir.
 
-export async function verTareasPortal(carpetaId: number): Promise<Tarea[]> {
-  const { data } = await api.get<Tarea[]>(
-    `/portal/carpeta/${carpetaId}/tarea`,
+/** Las visitas del equipo, en solo lectura (§22). */
+export async function verCiclosPortal(carpetaId: number): Promise<Ciclo[]> {
+  const { data } = await api.get<Ciclo[]>(`/portal/carpeta/${carpetaId}/ciclo`);
+  return data;
+}
+
+export async function verActividadesPortal(cicloId: number): Promise<Actividad[]> {
+  const { data } = await api.get<Actividad[]>(
+    `/portal/ciclo/${cicloId}/actividad`,
   );
   return data;
 }
 
-export async function verFotosDeTareaPortal(
-  tareaId: number,
-): Promise<FotoDeTarea[]> {
-  const { data } = await api.get<FotoDeTarea[]>(
-    `/portal/tarea/${tareaId}/foto`,
+export async function verFotosDeActividadPortal(
+  actividadId: number,
+): Promise<FotoDeActividad[]> {
+  const { data } = await api.get<FotoDeActividad[]>(
+    `/portal/actividad/${actividadId}/foto`,
   );
   return data;
 }

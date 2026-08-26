@@ -40,8 +40,8 @@ export const ETIQUETA_PERMISO: Record<PermisoCarpeta, string> = {
 /** Qué significa cada grado, para el selector de §10. */
 export const DESCRIPCION_PERMISO: Record<PermisoCarpeta, string> = {
   SIN_ACCESO: 'No puede entrar.',
-  LECTURA: 'Ve carpetas, tareas y fotos, y las descarga. No modifica nada.',
-  EDICION: 'Además sube fotos, crea carpetas y tareas, y comenta.',
+  LECTURA: 'Ve carpetas, actividades y fotos, y las descarga. No modifica nada.',
+  EDICION: 'Además sube fotos, crea carpetas y actividades, y comenta.',
   TOTAL: 'Además comparte la carpeta y administra a sus colaboradores.',
 };
 

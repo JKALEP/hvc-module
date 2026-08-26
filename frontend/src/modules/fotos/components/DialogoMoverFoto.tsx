@@ -12,15 +12,15 @@ import { Button } from '@/shared/ui/button';
 import { Select } from '@/shared/ui/select';
 import { Spinner } from '@/shared/ui/spinner';
 import { useCarpeta } from '@/modules/fotos/hooks/useCarpetas';
-import { useGaleria } from '@/modules/fotos/hooks/useAlbumes';
-import { useTareas } from '@/modules/fotos/hooks/useTareas';
+import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
+import { useActividades } from '@/modules/fotos/hooks/useActividades';
 import type { DestinoFotos } from '@/modules/fotos/types';
 
 /**
  * A dónde mover una foto (§1.2 de gestión de contenido).
  *
  * Se elige navegando de arriba abajo —proyecto → subcarpeta → álbum o
- * tarea— igual que en la captura rápida, y por lo mismo: aquí se ELIGE un
+ * actividad— igual que en la captura rápida, y por lo mismo: aquí se ELIGE un
  * destino, no se navega, así que el árbol se pide desde la raíz y no desde
  * donde estaba el usuario.
  *
@@ -52,15 +52,16 @@ export function DialogoMoverFoto({
   const [carpetaId, setCarpetaId] = useState<number | null>(null);
   const { data: dentro } = useCarpeta(carpetaId);
 
-  // Álbumes y tareas del sitio elegido. `useGaleria` se desactiva sola con
-  // un id inválido, así que el 0 de «sin carpeta» no dispara consulta.
-  const albumes = useGaleria(carpetaId ?? 0, {
-    subidaPorId: null,
-    desde: '',
-    hasta: '',
-  });
+  // ⚠️ Desde la Fase 4 el destino de una foto es una VISITA, no una carpeta:
+  // por eso hace falta elegir el ciclo, y por eso solo un EQUIPO admite fotos.
   const esEquipo = dentro?.carpetaActual?.tipo === 'EQUIPO';
-  const { data: tareas } = useTareas(carpetaId, { habilitado: esEquipo });
+  const { data: ciclos } = useCiclos(carpetaId, { habilitado: esEquipo });
+  const [cicloId, setCicloId] = useState<number | null>(null);
+  const cicloElegido =
+    (ciclos ?? []).find((c) => c.id === cicloId) ?? ciclos?.[0] ?? null;
+  const { data: actividades } = useActividades(cicloElegido?.id ?? null, {
+    habilitado: cicloElegido !== null,
+  });
 
   const [destinoFino, setDestinoFino] = useState<string>('');
 
@@ -72,23 +73,22 @@ export function DialogoMoverFoto({
       ? []
       : (dentro?.secciones ?? []).flatMap((s) => s.carpetas);
 
-  const albumesDe = (albumes.data?.pages ?? []).flatMap((p) => p.albumes);
-
   /**
    * El destino final.
    *
-   * `destinoFino` codifica qué se eligió dentro de la carpeta: un álbum, una
-   * tarea, o nada —en cuyo caso la foto va a la carpeta y el servidor le
-   * crea un álbum, igual que al subir—.
+   * `destinoFino` codifica qué se eligió dentro de la visita: una actividad,
+   * o nada —en cuyo caso la foto queda suelta en el ciclo, que es el sitio
+   * por defecto—.
    */
   const destino: DestinoFotos | null = (() => {
     if (destinoFino === 'bandeja') return { tipo: 'bandeja' };
-    if (carpetaId === null) return null;
-    if (destinoFino.startsWith('album:'))
-      return { tipo: 'album', albumId: Number(destinoFino.slice(6)) };
-    if (destinoFino.startsWith('tarea:'))
-      return { tipo: 'tarea', tareaId: Number(destinoFino.slice(6)) };
-    return { tipo: 'carpeta', carpetaId };
+    if (cicloElegido === null) return null;
+    if (destinoFino.startsWith('actividad:'))
+      return {
+        tipo: 'actividad',
+        actividadId: Number(destinoFino.slice('actividad:'.length)),
+      };
+    return { tipo: 'ciclo', cicloId: cicloElegido.id };
   })();
 
   return (
@@ -159,24 +159,51 @@ export function DialogoMoverFoto({
             </p>
           )}
 
-          {carpetaId !== null && (
+          {/* Solo un equipo admite fotos: es la consecuencia de retirar los
+              álbumes, y decirlo evita que alguien elija una carpeta y se
+              quede mirando un desplegable vacío. */}
+          {carpetaId !== null && !esEquipo && (
+            <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              Una carpeta corriente no guarda fotos. Elige un equipo: las fotos
+              van a una de sus visitas.
+            </p>
+          )}
+
+          {esEquipo && (ciclos ?? []).length > 0 && (
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">
-                Álbum o tarea
+                Visita
+              </label>
+              <Select
+                value={cicloElegido?.id ?? ''}
+                onChange={(e) => {
+                  setCicloId(Number(e.target.value));
+                  setDestinoFino('');
+                }}
+              >
+                {(ciclos ?? []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    Ciclo {c.numero}
+                    {c.cerradoEn ? ' (cerrado)' : ' (en curso)'}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+
+          {cicloElegido !== null && (
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-foreground">
+                Dentro de la visita
               </label>
               <Select
                 value={destinoFino}
                 onChange={(e) => setDestinoFino(e.target.value)}
               >
-                <option value="">Álbum nuevo en esta carpeta</option>
-                {albumesDe.map((a) => (
-                  <option key={a.id} value={`album:${a.id}`}>
-                    Álbum: {a.nombre ?? a.descripcion ?? `del ${a.creadoEn.slice(0, 10)}`}
-                  </option>
-                ))}
-                {(tareas ?? []).map((t) => (
-                  <option key={t.id} value={`tarea:${t.id}`}>
-                    Tarea: {t.titulo}
+                <option value="">Suelta en la visita</option>
+                {(actividades ?? []).map((t) => (
+                  <option key={t.id} value={`actividad:${t.id}`}>
+                    Actividad: {t.titulo}
                   </option>
                 ))}
               </Select>

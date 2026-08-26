@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/shared/ui/card';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Spinner } from '@/shared/ui/spinner';
-import { useSubirFotos } from '@/modules/fotos/hooks/useAlbumes';
+import { useSubirFotos } from '@/modules/fotos/hooks/useFotos';
 import { CamaraFotos } from '@/modules/fotos/components/CamaraFotos';
 
 /** Máximo de fotos por lote (el backend también lo valida). */
@@ -33,7 +33,7 @@ function formatPeso(bytes: number): string {
  * siendo una sola llamada con `File[]`, así que no requiere cambios en
  * backend, servicios ni hooks existentes.
  */
-export function PanelSubida({ sedeId }: { sedeId: number }) {
+export function PanelSubida({ cicloId }: { cicloId: number }) {
   const subir = useSubirFotos();
 
   const [archivos, setArchivos] = useState<File[]>([]);
@@ -116,7 +116,7 @@ export function PanelSubida({ sedeId }: { sedeId: number }) {
 
     subir.mutate(
       {
-        sedeId,
+        cicloId,
         archivos,
         descripcion,
       },

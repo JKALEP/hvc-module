@@ -93,7 +93,7 @@ export function DialogoImportar({
           <DialogTitle>Importar estructura desde Excel</DialogTitle>
           <DialogDescription>
             Se creará dentro de «{carpetaNombre}». El Excel define carpetas,
-            equipos, tareas y álbumes — no lleva fotos. Columnas: Carpeta,
+            equipos, actividades y álbumes — no lleva fotos. Columnas: Carpeta,
             Subcarpeta, Equipo, Tipo, Nombre, Descripción.
           </DialogDescription>
         </DialogHeader>
@@ -125,7 +125,7 @@ export function DialogoImportar({
                   {resultado.resumen.carpetasExistentes} ya existían
                 </Badge>
                 <Badge variant="outline">
-                  {resultado.resumen.hojasNuevas} tarea(s)/álbum(es)
+                  {resultado.resumen.hojasNuevas} actividad(s)/álbum(es)
                 </Badge>
                 {resultado.resumen.conflictos > 0 && (
                   <Badge variant="warning">

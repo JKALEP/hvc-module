@@ -87,9 +87,9 @@ export function useEliminarPlantilla() {
 /**
  * «Crear desde plantilla» (§20).
  *
- * El aviso de las tareas omitidas se muestra como advertencia y no como
+ * El aviso de las actividades omitidas se muestra como advertencia y no como
  * error: la operación SÍ ocurrió, pero parte de la plantilla no cabía —y
- * callarlo dejaría a alguien buscando cuatro tareas que nunca se crearon—.
+ * callarlo dejaría a alguien buscando cuatro actividades que nunca se crearon—.
  */
 export function useAplicarPlantilla() {
   const invalidar = useInvalidarFotos();
@@ -104,7 +104,7 @@ export function useAplicarPlantilla() {
     onSuccess: (r) => {
       invalidar();
       toast.success(
-        `"${r.plantilla}": ${r.carpetas} carpeta(s), ${r.tareas} tarea(s), ${r.albumes} álbum(es)`,
+        `"${r.plantilla}": ${r.carpetas} carpeta(s), ${r.actividades} actividad(s)`,
       );
       if (r.aviso) toast.warning(r.aviso);
     },
@@ -137,7 +137,7 @@ export function useConfirmarImportacion() {
     onSuccess: (r) => {
       invalidar();
       toast.success(
-        `Importado: ${r.creado.carpetas} carpeta(s), ${r.creado.tareas} tarea(s), ${r.creado.albumes} álbum(es)`,
+        `Importado: ${r.creado.carpetas} carpeta(s), ${r.creado.actividades} actividad(s)`,
       );
     },
     onError: (error) =>

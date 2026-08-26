@@ -8,39 +8,43 @@ import { useInvalidarFotos } from './useInvalidarFotos';
 import type { DestinoFotos } from '@/modules/fotos/types';
 import type { FiltrosGaleria, ResultadoSubida } from '@/modules/fotos/types';
 
-// Galería y fotos. Se pagina por LOTE: un lote son 10 fotos como
-// máximo, así que acotar albumes acota las fotos solo.
+// Las fotos de una VISITA: lecturas y escrituras en un solo archivo,
+// nombrado por el recurso.
+//
+// ⚠️ Se llamaba `useAlbumes` y paginaba por álbum. Los álbumes se retiraron
+// en la Fase 4 del rediseño: el agrupador es el ciclo, que la pantalla ya
+// eligió antes de pedir esto, así que la galería es una lista plana.
 
 /**
- * Galería paginada por lote.
+ * Galería de un ciclo, paginada por cursor.
  *
  * `useInfiniteQuery` con el cursor que devuelve el backend: se pide más
  * cuando el usuario lo pide, no todo de golpe.
  */
 export function useGaleria(
-  sedeId: number,
+  cicloId: number,
   filtros: FiltrosGaleria,
   portal = false,
 ) {
   return useInfiniteQuery({
     queryKey: portal
-      ? QUERY_KEYS.portalGaleria(sedeId, filtros)
-      : QUERY_KEYS.galeria(sedeId, filtros),
+      ? QUERY_KEYS.portalGaleria(cicloId, filtros)
+      : QUERY_KEYS.galeria(cicloId, filtros),
     queryFn: ({ pageParam }) =>
       portal
-        ? fotos.verGaleriaPortal(sedeId, filtros, pageParam ?? undefined)
-        : fotos.verGaleria(sedeId, filtros, pageParam ?? undefined),
+        ? fotos.verGaleriaPortal(cicloId, filtros, pageParam ?? undefined)
+        : fotos.verGaleria(cicloId, filtros, pageParam ?? undefined),
     initialPageParam: null as number | null,
     getNextPageParam: (ultima) => ultima.siguiente,
-    enabled: Number.isFinite(sedeId) && sedeId > 0,
+    enabled: Number.isFinite(cicloId) && cicloId > 0,
   });
 }
 
-export function useAutores(sedeId: number, habilitado = true) {
+export function useAutores(cicloId: number, habilitado = true) {
   return useQuery({
-    queryKey: QUERY_KEYS.autores(sedeId),
-    queryFn: () => fotos.verAutores(sedeId),
-    enabled: habilitado && Number.isFinite(sedeId) && sedeId > 0,
+    queryKey: QUERY_KEYS.autores(cicloId),
+    queryFn: () => fotos.verAutores(cicloId),
+    enabled: habilitado && Number.isFinite(cicloId) && cicloId > 0,
   });
 }
 
@@ -64,14 +68,14 @@ export function useSubirFotos() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
-      sedeId,
+      cicloId,
       archivos,
       descripcion,
     }: {
-      sedeId: number;
+      cicloId: number;
       archivos: File[];
       descripcion: string;
-    }) => fotos.subirFotos(sedeId, archivos, descripcion),
+    }) => fotos.subirFotos(cicloId, archivos, descripcion),
     onSuccess: (r) => {
       invalidar();
       avisarSubida(r);
@@ -85,7 +89,7 @@ export function useSubirFotos() {
  * Corregir la descripción de una foto.
  *
  * Invalida todo lo de Fotos: la descripción se ve en la galería y en las
- * fotos de una tarea, que son dos consultas distintas sobre el mismo dato.
+ * fotos de una actividad, que son dos consultas distintas sobre el mismo dato.
  */
 export function useEditarDescripcionFoto() {
   const invalidar = useInvalidarFotos();
@@ -136,65 +140,6 @@ export function useEliminarFoto() {
   });
 }
 
-/**
- * Crear un álbum vacío con nombre (§16).
- *
- * Existe además de subir fotos: §16 quiere el álbum como tipo de contenido,
- * no solo como efecto de arrastrar archivos.
- */
-export function useCrearAlbum() {
-  const invalidar = useInvalidarFotos();
-  return useMutation({
-    mutationFn: ({
-      carpetaId,
-      payload,
-    }: {
-      carpetaId: number;
-      payload: { nombre: string; descripcion?: string | null; fecha?: string | null };
-    }) => fotos.crearAlbum(carpetaId, payload),
-    onSuccess: (a) => {
-      invalidar();
-      toast.success(`Álbum creado: ${a.nombre ?? 'sin título'}`);
-    },
-    onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo crear el álbum')),
-  });
-}
-
-export function useEliminarAlbum() {
-  const invalidar = useInvalidarFotos();
-  return useMutation({
-    mutationFn: (id: number) => fotos.eliminarAlbum(id),
-    onSuccess: () => {
-      invalidar();
-      toast.success('Álbum eliminado');
-    },
-    // El mensaje del backend dice cuántas fotos lo impiden; reescribirlo aquí
-    // sería tener dos versiones de la misma regla.
-    onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo eliminar el álbum')),
-  });
-}
-
-export function useEditarAlbum() {
-  const invalidar = useInvalidarFotos();
-  return useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: number;
-      payload: {
-        nombre?: string | null;
-        descripcion?: string | null;
-        fecha?: string | null;
-      };
-    }) => fotos.editarAlbum(id, payload),
-    onSuccess: () => {
-      invalidar();
-      toast.success('Álbum actualizado');
-    },
-    onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo actualizar el álbum')),
-  });
-}
+// ⚠️ Aquí vivían `useCrearAlbum`, `useEditarAlbum` y `useEliminarAlbum`.
+// Se fueron con los álbumes en la Fase 4: no queda ninguna ruta detrás, y el
+// agrupador que hacía falta —la visita— existe sin que nadie lo cree.

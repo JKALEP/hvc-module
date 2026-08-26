@@ -3,25 +3,26 @@ import type { UsuarioAutenticado } from '../auth/tipos';
 import type { Exportable } from '../common/exportacion.service';
 import type { AccionFotos, EntidadFotos } from '../../generated/prisma/enums';
 import { AccesoService } from './acceso.service';
-import { TareaService } from './tarea.service';
+import { CicloService } from './ciclo.service';
+import { ActividadService } from './actividad.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
 
 /**
  * ⚠️ **Hay DOS formateadores y no se pueden intercambiar**, porque las dos
  * clases de fecha del módulo no significan lo mismo:
  *
- * - `diaCalendario` es para los `@db.Date` —`TareaFotos.fecha`, y los
+ * - `diaCalendario` es para los `@db.Date` —`ActividadFotos.fecha`, y los
  *   `desde`/`hasta` de los filtros—. Se leen en **UTC**, que es la regla del
  *   proyecto (`common/fechas.ts`): un día calendario no tiene hora, así que
  *   pasarlo por una zona horaria solo puede correrlo.
  * - `instanteLima` es para los `DateTime` de verdad —`creadoEn` de la
- *   bitácora, `completadaEn` de una tarea—. Ésos SÍ son un momento, y hay
+ *   bitácora, `completadaEn` de una actividad—. Ésos SÍ son un momento, y hay
  *   que enseñarlos en la hora de quien lee.
  *
  * Mezclarlos no da un error, da un documento que miente: con el formateador
  * UTC, la bitácora fechaba a las 23:00 de Lima como del día siguiente a las
  * 04:00 —cinco horas de desfase en el archivo que responde «quién hizo qué y
- * cuándo»—, y una tarea completada al final de la tarde figuraba completada
+ * cuándo»—, y una actividad completada al final de la tarde figuraba completada
  * mañana. Se vio al leer el primer Excel generado.
  */
 const ZONA = 'America/Lima';
@@ -72,7 +73,7 @@ const guion = (v: string | null | undefined) => v ?? '—';
  * valor al enum NO compile hasta decidir cómo se dice en la exportación.
  * Es el mismo criterio que `INICIO_ROL_COSTOS` en el frontend.
  */
-const ETIQUETA_ESTADO_TAREA: Record<string, string> = {
+const ETIQUETA_ESTADO_ACTIVIDAD: Record<string, string> = {
   PENDIENTE: 'Pendiente',
   EN_PROCESO: 'En proceso',
   COMPLETADA: 'Completada',
@@ -91,8 +92,14 @@ const ETIQUETA_ACCION: Record<AccionFotos, string> = {
   MOVIMIENTO: 'Movimiento',
   ARCHIVADO: 'Archivado',
   REAPERTURA: 'Reapertura',
-  TAREA_COMPLETADA: 'Tarea completada',
-  TAREA_REABIERTA: 'Tarea reabierta',
+  // ⚠️ Los dos TAREA_* son históricos: nada nuevo los escribe desde la Fase
+  // 0, pero siguen en filas de la bitácora y necesitan etiqueta para poder
+  // exportarlas. Se rotulan igual que los nuevos porque describen el mismo
+  // hecho — lo que cambió es cómo lo llamamos, no lo que pasó.
+  TAREA_COMPLETADA: 'Actividad completada',
+  TAREA_REABIERTA: 'Actividad reabierta',
+  ACTIVIDAD_COMPLETADA: 'Actividad completada',
+  ACTIVIDAD_REABIERTA: 'Actividad reabierta',
   SUBIDA_FOTO: 'Subida de foto',
   DESCARGA_FOTO: 'Descarga de foto',
   CLASIFICACION: 'Clasificación',
@@ -104,20 +111,53 @@ const ETIQUETA_ACCION: Record<AccionFotos, string> = {
   IMPORTACION_EXCEL: 'Importación por Excel',
   CREACION_DESDE_PLANTILLA: 'Creación desde plantilla',
   EQUIPO_CREADO_DESDE_FOTOS: 'Equipo creado desde Fotos',
+  CICLO_ABIERTO: 'Ciclo abierto',
+  CICLO_CERRADO: 'Ciclo cerrado',
+  CICLO_REABIERTO: 'Ciclo reabierto',
 };
+
+/**
+ * Cómo se lee el estado de la evidencia de una actividad (Fase 3).
+ *
+ * Una función y no un `Record`, porque lo que se enseña no es el tipo sino si
+ * está CUBIERTO: «Antes/después» a secas no dice nada útil en una tabla, y
+ * «Falta el después» sí.
+ */
+function ETIQUETA_EVIDENCIA(t: {
+  evidencia: string;
+  tieneAntes: boolean;
+  tieneDespues: boolean;
+  faltaEvidencia: boolean;
+  _count: { fotos: number };
+}) {
+  if (t.evidencia === 'NINGUNA') return 'No se pide';
+  if (t.evidencia === 'UNA')
+    return t._count.fotos > 0 ? 'Una foto ✓' : 'Falta la foto';
+  if (t.tieneAntes && t.tieneDespues) return 'Antes y después ✓';
+  if (t.tieneAntes) return 'Falta el después';
+  if (t.tieneDespues) return 'Falta el antes';
+  return 'Faltan las dos';
+}
 
 const ETIQUETA_ENTIDAD: Record<EntidadFotos, string> = {
   CARPETA: 'Carpeta',
   CAMPO_EQUIPO: 'Campo de equipo',
   ALBUM: 'Álbum',
-  TAREA: 'Tarea',
+  // Histórica, ver arriba.
+  TAREA: 'Actividad',
+  ACTIVIDAD: 'Actividad',
   COMENTARIO: 'Comentario',
   FOTO: 'Foto',
   ACCESO: 'Acceso',
   INVITACION: 'Invitación',
   PLANTILLA: 'Plantilla',
   IMPORTACION: 'Importación',
+  CICLO: 'Ciclo',
+  ESTADO_EQUIPO: 'Estado de equipo',
   EQUIPO: 'Equipo',
+  FAMILIA_SISTEMA: 'Familia de sistemas',
+  TIPO_SISTEMA: 'Tipo de sistema',
+  DEFINICION_ACTIVIDAD: 'Actividad de catálogo',
 };
 
 /** Lo que la bitácora devuelve, visto desde aquí. */
@@ -141,13 +181,13 @@ interface EventoExportable {
  * Service de solo lectura, hermano del `ExportableService` de Costos y con
  * su misma regla, que es la que da sentido a §69: **no recalcula ni vuelve a
  * consultar nada**. Traduce a `Exportable` lo que ya respondieron
- * `TareaService` y `AuditoriaFotosService`, así que el archivo dice
+ * `ActividadService` y `AuditoriaFotosService`, así que el archivo dice
  * exactamente lo que dice la pantalla. Si armara sus propias consultas
  * habría dos verdades, y la de papel es la que se archiva.
  *
  * ⚠️ Y **tampoco vuelve a decidir permisos**, que es la otra mitad de la
  * misma idea. Cada método entra por la puerta normal del service que lee
- * —`tareas.listar` exige LECTURA sobre la carpeta, `auditoria.consultar`
+ * —`actividades.listar` exige LECTURA sobre la carpeta, `auditoria.consultar`
  * exige ADMIN_GLOBAL, `auditoria.deCarpeta` exige LECTURA— así que exportar
  * no puede enseñar nada que la pantalla no enseñe. Una exportación con su
  * propia comprobación de acceso es una segunda política que mantener a la
@@ -161,12 +201,13 @@ interface EventoExportable {
 export class ExportableFotosService {
   constructor(
     private readonly acceso: AccesoService,
-    private readonly tareas: TareaService,
+    private readonly actividades: ActividadService,
     private readonly auditoria: AuditoriaFotosService,
+    private readonly ciclos: CicloService,
   ) {}
 
   /**
-   * El listado de tareas de una carpeta (§13, §69).
+   * El listado de actividades de una carpeta (§13, §69).
    *
    * Es lo que un supervisor se lleva a obra o adjunta a un informe: qué hay
    * que hacer en este equipo, quién lo tiene y qué falta.
@@ -175,58 +216,87 @@ export class ExportableFotosService {
    * que estoy viendo» es lo que se espera al pulsar el botón; un archivo con
    * más filas que la tabla de al lado parece un fallo.
    */
-  async tareasDeCarpeta(
+  async actividadesDeCiclo(
     usuario: UsuarioAutenticado,
-    carpetaId: number,
+    cicloId: number,
     filtros: { estado?: string | null } = {},
   ): Promise<Exportable> {
     // `listar` ya exige LECTURA: si no la tiene, no llegamos a la línea
     // siguiente y la negativa es el 404 uniforme del módulo.
-    const tareas = await this.tareas.listar(usuario, carpetaId, filtros);
-    const carpeta = await this.acceso.carpetaPorId(carpetaId);
+    const actividades = await this.actividades.listar(
+      usuario,
+      cicloId,
+      filtros,
+    );
+    // ⚠️ Se exporta UN ciclo, no el historial entero: el archivo tiene que
+    // decir lo mismo que la pantalla de al lado, y la pantalla siempre está
+    // mirando una visita concreta. Un Excel con las actividades de las seis
+    // visitas mezcladas parecería un error de duplicados.
+    const ciclo = await this.ciclos.detalle(usuario, cicloId);
+    const carpeta = await this.acceso.carpetaPorId(ciclo.carpetaId);
 
-    const pendientes = tareas.filter((t) => t.estado !== 'COMPLETADA').length;
+    const pendientes = actividades.filter(
+      (t) => t.estado !== 'COMPLETADA',
+    ).length;
 
     return {
-      titulo: `Tareas · ${carpeta.nombre}`,
-      nombreArchivo: `tareas-${carpeta.nombre}`,
+      titulo: `Actividades · ${carpeta.nombre} · ciclo ${ciclo.numero}`,
+      nombreArchivo: `actividades-${carpeta.nombre}-ciclo-${ciclo.numero}`,
       datos: [
         { etiqueta: 'Carpeta', valor: carpeta.nombre },
+        { etiqueta: 'Ciclo', valor: String(ciclo.numero) },
+        {
+          etiqueta: 'Estado del equipo',
+          valor: ciclo.estado?.nombre ?? 'Sin definir',
+        },
+        {
+          etiqueta: 'Ciclo cerrado',
+          valor: ciclo.cerradoEn ? instanteLima(ciclo.cerradoEn) : 'En curso',
+        },
         // ⚠️ Aquí iba una fila «Equipo» con el `codigoInterno` del catálogo
         // de Gestión de Equipos. Se retiró en la Fase 1a de «Gestión de
         // contenido» junto con la FK, y no se sustituye por `tipo`: las
-        // tareas solo existen dentro de una carpeta de tipo EQUIPO (§13),
+        // actividades solo existen dentro de una carpeta de tipo EQUIPO (§13),
         // así que esa fila diría siempre lo mismo, y el nombre de la
         // carpeta YA es el del equipo. Cuando la Fase 1b traiga los campos
         // configurables, este encabezado es el sitio donde ponerlos.
         {
           etiqueta: 'Filtro de estado',
           valor: filtros.estado
-            ? (ETIQUETA_ESTADO_TAREA[filtros.estado] ?? filtros.estado)
+            ? (ETIQUETA_ESTADO_ACTIVIDAD[filtros.estado] ?? filtros.estado)
             : 'Todas',
         },
-        { etiqueta: 'Total de tareas', valor: String(tareas.length) },
+        { etiqueta: 'Total de actividades', valor: String(actividades.length) },
         { etiqueta: 'Sin completar', valor: String(pendientes) },
+        {
+          etiqueta: 'Sin evidencia completa',
+          valor: String(actividades.filter((t) => t.faltaEvidencia).length),
+        },
         { etiqueta: 'Generado', valor: instanteLima(new Date()) },
       ],
       bloques: [
         {
-          titulo: 'Tareas',
-          vacio: 'Esta carpeta no tiene tareas registradas.',
+          titulo: 'Actividades',
+          vacio: 'Esta carpeta no tiene actividades registradas.',
           columnas: [
             { titulo: '#', ancho: 6, anchoPdf: 24 },
-            { titulo: 'Tarea', ancho: 34, anchoPdf: 150 },
+            { titulo: 'Actividad', ancho: 34, anchoPdf: 150 },
             { titulo: 'Estado', ancho: 13, anchoPdf: 62 },
             { titulo: 'Prioridad', ancho: 11, anchoPdf: 52 },
             { titulo: 'Responsable', ancho: 22, anchoPdf: 92 },
             { titulo: 'Fecha', ancho: 12, anchoPdf: 58 },
             { titulo: 'Fotos', ancho: 8, anchoPdf: 36, derecha: true },
+            // ⚠️ La evidencia se exporta porque es LO QUE FALTA lo que se
+            // lleva a una reunión: «pendiente» dice que no se hizo, y
+            // «completada sin el después» dice que se hizo y no se documentó,
+            // que es un problema distinto y el que HVC no podía ver.
+            { titulo: 'Evidencia', ancho: 18, anchoPdf: 78 },
             { titulo: 'Completada', ancho: 24, anchoPdf: 96 },
           ],
-          filas: tareas.map((t, n) => [
+          filas: actividades.map((t, n) => [
             n + 1,
             t.titulo,
-            ETIQUETA_ESTADO_TAREA[t.estado] ?? t.estado,
+            ETIQUETA_ESTADO_ACTIVIDAD[t.estado] ?? t.estado,
             // §13 marca la prioridad OPCIONAL, así que aquí llega null a
             // menudo — HVC no la exige para el flujo básico.
             t.prioridad
@@ -235,6 +305,7 @@ export class ExportableFotosService {
             guion(t.responsable?.nombre),
             diaCalendario(t.fecha),
             t._count.fotos,
+            ETIQUETA_EVIDENCIA(t),
             // Las tres columnas de `marcaDeCompletada` se llenan y se vacían
             // juntas, así que basta preguntar por una.
             t.completadaEn

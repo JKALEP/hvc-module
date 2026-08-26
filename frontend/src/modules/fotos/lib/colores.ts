@@ -1,4 +1,4 @@
-import type { ColorCarpeta } from '@/modules/fotos/types';
+import type { ColorCarpeta, ColorEstado } from '@/modules/fotos/types';
 
 /**
  * De un color de la paleta a sus clases. ÚNICO sitio.
@@ -37,4 +37,39 @@ export const ETIQUETA_COLOR: Record<ColorCarpeta, string> = {
 export const COLOR_POR_DEFECTO: Record<'CARPETA' | 'EQUIPO', ColorCarpeta> = {
   CARPETA: 'AMARILLO',
   EQUIPO: 'CELESTE',
+};
+
+// ── Estados de equipo (§7, Fase 1 del rediseño) ──
+
+/**
+ * De un color de estado a una VARIANTE del `Badge`, no a clases.
+ *
+ * ⚠️ Es a propósito distinto de `COLOR_A_CLASES`, y la diferencia es la que
+ * el sistema de diseño ya hace en Personal: el dominio dice *qué* pasa y la
+ * presentación decide *cómo* se ve. Aquí el color SÍ significa algo
+ * —operativo, con observaciones, inoperativo— y el sistema ya tiene la
+ * familia semántica que lo dice. Escribir tokens `--verde` / `--rojo` habría
+ * dejado dos maneras de pintar «esto va mal», que es exactamente lo que la
+ * paleta semántica existe para evitar.
+ *
+ * El de las CARPETAS no puede hacer esto porque allí el significado ES el
+ * color: amarillo no quiere decir nada más que «carpeta».
+ *
+ * `Record` completo: añadir un valor a `ColorEstado` no compila hasta
+ * decidir su variante.
+ */
+export const ESTADO_A_VARIANTE: Record<
+  ColorEstado,
+  'success' | 'warning' | 'destructive'
+> = {
+  VERDE: 'success',
+  NARANJA: 'warning',
+  ROJO: 'destructive',
+};
+
+/** Cómo se lee cada color en la pantalla de administración. */
+export const ETIQUETA_COLOR_ESTADO: Record<ColorEstado, string> = {
+  VERDE: 'Verde — operativo',
+  NARANJA: 'Naranja — con observaciones',
+  ROJO: 'Rojo — inoperativo',
 };

@@ -41,7 +41,7 @@ export function CrearEstructura({
     <section className="rounded-xl border border-dashed border-border p-4">
       <h2 className="mb-1 font-medium text-foreground">Crear estructura</h2>
       <p className="mb-3 text-sm text-muted-foreground">
-        Genera carpetas, equipos, tareas y álbumes de una vez, en vez de uno a
+        Genera carpetas, equipos, actividades y álbumes de una vez, en vez de uno a
         uno.
       </p>
 

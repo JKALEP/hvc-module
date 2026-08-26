@@ -9,9 +9,14 @@ import { AlmacenamientoService } from './almacenamiento.service';
 import { ImagenService, LIMITES } from './imagen.service';
 import { AccesoService, noExisteOSinAcceso } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
-import { claveDia, aFechaUTC } from '../common/fechas';
+import { CicloService } from './ciclo.service';
+import { claveDia } from '../common/fechas';
 import type { UsuarioAutenticado } from '../auth/tipos';
-import { limpiar } from '../common/texto';
+import { limpiar, describir } from '../common/texto';
+import type {
+  TipoEvidenciaFotos,
+  MomentoEvidenciaFotos,
+} from '../../generated/prisma/enums';
 
 /**
  * Fotos y álbumes (§15, §16).
@@ -31,44 +36,37 @@ export interface ArchivoSubido {
 }
 
 /**
- * A dónde van las fotos de una subida. Los cuatro sitios donde §15-§18
- * admiten que aparezca una foto, y **es una unión y no cuatro parámetros
- * opcionales** a propósito: con `albumId?`, `tareaId?` y `carpetaId?` sueltos
- * existirían combinaciones imposibles —dos destinos a la vez, ninguno— que
- * habría que rechazar a mano en cada rama. Aquí el tipo ya no las admite.
+ * A dónde van las fotos de una subida.
+ *
+ * Los TRES sitios donde puede estar una foto desde la Fase 4: suelta en la
+ * visita, como evidencia de una actividad, o sin clasificar en la bandeja de
+ * §18. Los destinos `carpeta` y `album` se retiraron con los álbumes.
+ *
+ * **Es una unión y no parámetros opcionales** a propósito: con `cicloId?` y
+ * `actividadId?` sueltos existirían combinaciones imposibles —dos destinos a
+ * la vez, ninguno— que habría que rechazar a mano en cada rama. Aquí el tipo
+ * ya no las admite, y el CHECK de la base dice lo mismo.
  */
 export type DestinoSubida =
-  | { tipo: 'carpeta'; carpetaId: number }
-  | { tipo: 'album'; albumId: number }
-  | { tipo: 'tarea'; tareaId: number }
+  | { tipo: 'ciclo'; cicloId: number }
+  | { tipo: 'actividad'; actividadId: number }
   | { tipo: 'bandeja' };
 
-/** Cuántos álbumes trae una página de galería. */
-const ALBUMES_POR_PAGINA = 12;
+/** Cuántas fotos trae una página de galería. */
+const FOTOS_POR_PAGINA = 24;
 
 /** Tope de la clasificación por lotes de §18, y de la bandeja. */
 const LIMITE_LOTE = 200;
 
-/** Lo que se devuelve de un álbum. Nunca la fila cruda. */
-const SELECT_ALBUM = {
-  id: true,
-  carpetaId: true,
-  nombre: true,
-  descripcion: true,
-  fecha: true,
-  creadoEn: true,
-  creadoPor: { select: { id: true, nombre: true } },
-  _count: { select: { fotos: true, comentarios: true } },
-} as const;
-
 @Injectable()
-export class AlbumService {
+export class FotoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly almacenamiento: AlmacenamientoService,
     private readonly imagen: ImagenService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
+    private readonly ciclos: CicloService,
   ) {}
 
   /**
@@ -78,9 +76,22 @@ export class AlbumService {
    * fotos como máximo por definición, así que una página de 12 álbumes
    * nunca pasa de 120 fotos ni de 240 URLs firmadas.
    */
+  /**
+   * Las fotos SUELTAS de una visita, paginadas (Fase 4).
+   *
+   * ⚠️ Antes esto paginaba ÁLBUMES y devolvía sus fotos anidadas. Con los
+   * álbumes retirados el agrupador es el ciclo, así que la galería es una
+   * lista plana de fotos con cursor por id. Se gana lo que costaba el nivel
+   * de más: una foto se busca por su fecha o por quién la subió, no por en
+   * qué tanda entró.
+   *
+   * Solo las del CICLO: la evidencia de una actividad se ve en su actividad
+   * (§15), donde el antes y el después significan algo. Mezclarlas aquí
+   * volvería a juntar dos cosas que la Fase 3 acaba de separar.
+   */
   async galeria(
     usuario: UsuarioAutenticado,
-    carpetaId: number,
+    cicloId: number,
     opciones: {
       cursor?: number;
       subidaPorId?: number;
@@ -89,7 +100,9 @@ export class AlbumService {
       anonimo?: boolean;
     } = {},
   ) {
-    await this.acceso.exigirPermiso(usuario, carpetaId, 'LECTURA');
+    // `exigirCiclo` resuelve la carpeta y exige LECTURA sobre ella: la
+    // negativa es el 404 uniforme del módulo, escrito en un solo sitio.
+    await this.ciclos.exigirCiclo(usuario, cicloId, 'LECTURA');
 
     const rango =
       opciones.desde || opciones.hasta
@@ -107,350 +120,232 @@ export class AlbumService {
         : {};
 
     const where = {
-      carpetaId,
+      cicloId,
       ...rango,
       ...(opciones.subidaPorId !== undefined
-        ? { creadoPorId: opciones.subidaPorId }
+        ? { subidaPorId: opciones.subidaPorId }
         : {}),
     };
 
-    const albumes = await this.prisma.albumFotos.findMany({
+    const filas = await this.prisma.foto.findMany({
       where,
       orderBy: [{ creadoEn: 'desc' }, { id: 'desc' }],
-      // Uno de más para saber si queda página siguiente sin contar todo.
-      take: ALBUMES_POR_PAGINA + 1,
+      // Una de más para saber si queda página siguiente sin contar todo.
+      take: FOTOS_POR_PAGINA + 1,
       ...(opciones.cursor ? { cursor: { id: opciones.cursor }, skip: 1 } : {}),
       select: {
         id: true,
-        // `nombre` y `fecha` desde §16: un álbum ya puede tener título, y la
-        // galería tiene que enseñarlo. Siguen siendo nullable —la captura
-        // rápida sube sin título— y ahí la cabecera cae a la fecha.
-        nombre: true,
-        fecha: true,
-        descripcion: true,
+        claveImagen: true,
+        claveMiniatura: true,
+        anchoPx: true,
+        altoPx: true,
+        bytes: true,
+        tomadaEn: true,
         creadoEn: true,
-        creadoPor: { select: { id: true, nombre: true } },
+        descripcion: true,
+        subidaPor: { select: { id: true, nombre: true } },
         _count: { select: { comentarios: true } },
-        fotos: {
-          orderBy: { creadoEn: 'asc' },
-          select: {
-            id: true,
-            claveImagen: true,
-            claveMiniatura: true,
-            anchoPx: true,
-            altoPx: true,
-            bytes: true,
-            tomadaEn: true,
-            creadoEn: true,
-            // ⚠️ La galería NO devolvía la descripción de cada foto, aunque
-            // la columna existe desde v2 y `subir` la escribe. Se veía en
-            // las fotos de una tarea —`TareaService.fotosDe` sí la manda— y
-            // aquí no, así que el mismo dato estaba visible en una pantalla
-            // e invisible en la otra. Hacía falta para poder corregirla
-            // (Fase 2b): no se edita lo que no se ve.
-            descripcion: true,
-            subidaPor: { select: { id: true, nombre: true } },
-          },
-        },
       },
     });
 
-    const hayMas = albumes.length > ALBUMES_POR_PAGINA;
-    const pagina = hayMas ? albumes.slice(0, ALBUMES_POR_PAGINA) : albumes;
+    const hayMas = filas.length > FOTOS_POR_PAGINA;
+    const pagina = hayMas ? filas.slice(0, FOTOS_POR_PAGINA) : filas;
 
-    const conUrls = await Promise.all(
-      pagina.map(async (l) => ({
-        id: l.id,
-        nombre: l.nombre,
-        fecha: l.fecha ? claveDia(l.fecha) : null,
-        descripcion: l.descripcion,
-        creadoEn: l.creadoEn,
-        comentarios: l._count.comentarios,
+    const fotos = await Promise.all(
+      pagina.map(async (f) => ({
+        id: f.id,
+        anchoPx: f.anchoPx,
+        altoPx: f.altoPx,
+        bytes: f.bytes,
+        tomadaEn: f.tomadaEn ? claveDia(f.tomadaEn) : null,
+        creadoEn: f.creadoEn,
+        descripcion: f.descripcion,
+        comentarios: f._count.comentarios,
         // A un cliente no se le enseña qué persona de HVC subió qué.
-        subidoPor: opciones.anonimo ? null : l.creadoPor,
-        fotos: await Promise.all(
-          l.fotos.map(async (f) => ({
-            id: f.id,
-            anchoPx: f.anchoPx,
-            altoPx: f.altoPx,
-            bytes: f.bytes,
-            tomadaEn: f.tomadaEn ? claveDia(f.tomadaEn) : null,
-            creadoEn: f.creadoEn,
-            descripcion: f.descripcion,
-            subidaPor: opciones.anonimo ? null : f.subidaPor,
-            url: await this.almacenamiento.urlFirmada(f.claveImagen),
-            urlMiniatura: await this.almacenamiento.urlFirmada(
-              f.claveMiniatura,
-            ),
-          })),
-        ),
+        subidaPor: opciones.anonimo ? null : f.subidaPor,
+        url: await this.almacenamiento.urlFirmada(f.claveImagen),
+        urlMiniatura: await this.almacenamiento.urlFirmada(f.claveMiniatura),
       })),
     );
 
     return {
-      albumes: conUrls,
+      fotos,
       // Cursor para la siguiente página; null cuando ya no queda nada.
       siguiente: hayMas ? pagina[pagina.length - 1].id : null,
-      totalFotos: await this.prisma.foto.count({ where: { album: where } }),
+      totalFotos: await this.prisma.foto.count({ where }),
     };
   }
 
-  /** Quiénes han publicado en esta carpeta, para el filtro. */
-  async autores(usuario: UsuarioAutenticado, carpetaId: number) {
-    await this.acceso.exigirPermiso(usuario, carpetaId, 'LECTURA');
+  /** Quiénes han subido fotos a esta visita, para el filtro. */
+  async autores(usuario: UsuarioAutenticado, cicloId: number) {
+    await this.ciclos.exigirCiclo(usuario, cicloId, 'LECTURA');
 
-    const filas = await this.prisma.albumFotos.groupBy({
-      by: ['creadoPorId'],
-      where: { carpetaId },
+    const filas = await this.prisma.foto.groupBy({
+      by: ['subidaPorId'],
+      where: { cicloId },
       _count: { _all: true },
     });
     if (filas.length === 0) return [];
 
     const usuarios = await this.prisma.usuario.findMany({
-      where: { id: { in: filas.map((f) => f.creadoPorId) } },
+      where: { id: { in: filas.map((f) => f.subidaPorId) } },
       select: { id: true, nombre: true },
     });
     const nombres = new Map(usuarios.map((u) => [u.id, u.nombre]));
 
     return filas
       .map((f) => ({
-        usuarioId: f.creadoPorId,
-        nombre: nombres.get(f.creadoPorId) ?? '—',
-        albumes: f._count._all,
+        usuarioId: f.subidaPorId,
+        nombre: nombres.get(f.subidaPorId) ?? '—',
+        fotos: f._count._all,
       }))
-      .sort((a, b) => b.albumes - a.albumes);
+      .sort((a, b) => b.fotos - a.fotos);
+  }
+
+  /**
+   * Valida el hueco del antes/después contra lo que espera la actividad.
+   *
+   * ⚠️ Tres reglas, y cada una responde a una manera distinta de
+   * equivocarse:
+   *
+   *  - **Un momento fuera de una actividad se rechaza.** Una foto de álbum o
+   *    de la bandeja no tiene antes ni después, y el CHECK de la base lo
+   *    impide igual; esto es solo para decirlo en español.
+   *  - **Una actividad de tipo ANTES_DESPUES EXIGE el momento.** Sin él, la
+   *    foto entra sin hueco y la actividad sigue diciendo que le falta el
+   *    antes — un silencio que parece un fallo de la app.
+   *  - **Las de tipo UNA y NINGUNA lo rechazan**: no hay dos huecos que
+   *    distinguir, así que un momento ahí solo puede ser un cliente
+   *    desactualizado.
+   */
+  private momentoValido(
+    valor: unknown,
+    resuelto: { actividadId?: number; evidencia?: TipoEvidenciaFotos },
+  ): MomentoEvidenciaFotos | null {
+    const texto = limpiar(valor)?.toUpperCase() ?? null;
+
+    if (resuelto.actividadId === undefined) {
+      if (texto !== null)
+        throw new BadRequestException(
+          'El antes/después solo tiene sentido en la foto de una actividad.',
+        );
+      return null;
+    }
+
+    if (resuelto.evidencia === 'ANTES_DESPUES') {
+      if (texto === null)
+        throw new BadRequestException(
+          'Esta actividad pide un antes y un después: indica cuál de los dos es.',
+        );
+      if (texto !== 'ANTES' && texto !== 'DESPUES')
+        throw new BadRequestException(
+          `Momento inválido: "${describir(valor)}". Valores permitidos: ANTES, DESPUES.`,
+        );
+      return texto;
+    }
+
+    if (texto !== null)
+      throw new BadRequestException(
+        'Esta actividad no pide un antes y un después, así que la foto no lleva momento.',
+      );
+    return null;
   }
 
   /**
    * Traduce un destino a «dónde cuelga la foto» y exige el permiso.
    *
-   * Los cuatro casos acaban en lo mismo: un `albumId` o un `tareaId` con los
+   * Los tres casos acaban en lo mismo: un `cicloId` o un `actividadId` con el
    * que crear la fila, y la `ruta` de la carpeta para marcar actividad. La
    * bandeja de §18 es el único que no tiene carpeta, y por eso `ruta` es
    * nullable.
+   *
+   * ⚠️ Los dos destinos de álbum —`carpeta`, que creaba uno, y `album`, que
+   * añadía a uno existente— se retiraron en la Fase 4. Con ellos se fue el
+   * `crearAlbum` que devolvía esta función y que obligaba a `subir` a
+   * inventar una fila antes de procesar el primer byte.
    */
   private async resolverDestino(
     usuario: UsuarioAutenticado,
     destino: DestinoSubida,
   ): Promise<{
-    crearAlbum: boolean;
+    cicloId?: number;
+    actividadId?: number;
+    /** La carpeta a la que pertenece el destino. Solo para la bitácora. */
     carpetaId?: number;
-    albumId?: number;
-    tareaId?: number;
+    /** Qué evidencia espera la actividad de destino (Fase 3), si es una. */
+    evidencia?: TipoEvidenciaFotos;
     ruta: string | null;
   }> {
     if (destino.tipo === 'bandeja') {
       // Sin carpeta no hay permiso de carpeta que pedir: la bandeja es de
       // quien sube, y cualquiera con el módulo puede tener la suya (§17).
-      return { crearAlbum: false, ruta: null };
+      return { ruta: null };
     }
 
-    if (destino.tipo === 'carpeta') {
-      const carpeta = await this.acceso.exigirPermiso(
+    if (destino.tipo === 'ciclo') {
+      // `exigirCiclo` pide EDICION sobre la carpeta y contesta el 404
+      // uniforme si no se ve; `exigirAbierto` es el otro candado, el del
+      // historial: en una visita cerrada no entra una foto nueva.
+      const ciclo = await this.ciclos.exigirCiclo(
         usuario,
-        destino.carpetaId,
+        destino.cicloId,
         'EDICION',
       );
+      this.exigirCicloAbiertoParaFotos(ciclo);
       return {
-        crearAlbum: true,
-        carpetaId: destino.carpetaId,
-        ruta: carpeta.ruta,
+        cicloId: ciclo.id,
+        carpetaId: ciclo.carpetaId,
+        ruta: ciclo.carpeta.ruta,
       };
     }
 
-    if (destino.tipo === 'album') {
-      const album = await this.prisma.albumFotos.findUnique({
-        where: { id: destino.albumId },
-        select: { id: true, carpetaId: true },
-      });
-      if (!album) throw new NotFoundException(noExisteOSinAcceso('Ese álbum'));
-      const carpeta = await this.acceso.exigirPermiso(
-        usuario,
-        album.carpetaId,
-        'EDICION',
-      );
-      return { crearAlbum: false, albumId: album.id, ruta: carpeta.ruta };
-    }
-
-    const tarea = await this.prisma.tareaFotos.findUnique({
-      where: { id: destino.tareaId },
-      select: { id: true, carpetaId: true },
-    });
-    if (!tarea) throw new NotFoundException(noExisteOSinAcceso('Esa tarea'));
-    const carpeta = await this.acceso.exigirPermiso(
-      usuario,
-      tarea.carpetaId,
-      'EDICION',
-    );
-    return { crearAlbum: false, tareaId: tarea.id, ruta: carpeta.ruta };
-  }
-
-  /**
-   * Crea un álbum vacío con nombre (§16).
-   *
-   * Existe además de la subida porque §16 pide el álbum como un tipo de
-   * contenido —«Equipo ABC → Álbum "Estado inicial"»—, no como el efecto
-   * secundario de arrastrar fotos. Se puede crear primero y llenarlo
-   * después, que es como se trabaja cuando la estructura se planea antes de
-   * ir a obra.
-   *
-   * El nombre sigue siendo OPCIONAL en el modelo por la captura rápida de
-   * §17, pero por ESTA puerta se exige: quien abre «Nuevo álbum» y no
-   * escribe nada está creando un álbum que no sabrá distinguir luego.
-   */
-  async crearAlbum(
-    usuario: UsuarioAutenticado,
-    carpetaId: number,
-    dto: {
-      nombre?: string | null;
-      descripcion?: string | null;
-      fecha?: string | null;
-    },
-  ) {
-    const carpeta = await this.acceso.exigirPermiso(
-      usuario,
-      carpetaId,
-      'EDICION',
-    );
-
-    const nombre = limpiar(dto.nombre);
-    if (nombre === null)
-      throw new BadRequestException('El álbum necesita un nombre.');
-
-    const album = await this.prisma.albumFotos.create({
-      data: {
-        carpetaId,
-        nombre,
-        descripcion: limpiar(dto.descripcion),
-        fecha: dto.fecha ? aFechaUTC(dto.fecha, 'La fecha del álbum') : null,
-        creadoPorId: usuario.id,
-      },
-      select: SELECT_ALBUM,
-    });
-
-    await this.acceso.marcarActividad(carpeta.ruta);
-
-    // §23, acción 7 de 13.
-    await this.auditoria.registrar(usuario, {
-      carpetaId,
-      entidad: 'ALBUM',
-      entidadId: album.id,
-      accion: 'CREACION',
-      descripcion: `Creó el álbum "${album.nombre ?? 'sin título'}".`,
-    });
-    return album;
-  }
-
-  /** Renombrar o redescribir un álbum. Los campos que no llegan no se tocan. */
-  async editarAlbum(
-    usuario: UsuarioAutenticado,
-    albumId: number,
-    dto: {
-      nombre?: string | null;
-      descripcion?: string | null;
-      fecha?: string | null;
-    },
-  ) {
-    const album = await this.prisma.albumFotos.findUnique({
-      where: { id: albumId },
-      select: { carpetaId: true },
-    });
-    if (!album) throw new NotFoundException(noExisteOSinAcceso('Ese álbum'));
-
-    const carpeta = await this.acceso.exigirPermiso(
-      usuario,
-      album.carpetaId,
-      'EDICION',
-    );
-
-    const datos: Record<string, unknown> = {};
-    // Aquí el nombre SÍ puede vaciarse: un álbum nacido de la captura
-    // rápida no tiene, y quitarle el que se le puso es volver a ese estado.
-    if ('nombre' in dto) datos.nombre = limpiar(dto.nombre);
-    if ('descripcion' in dto) datos.descripcion = limpiar(dto.descripcion);
-    if ('fecha' in dto)
-      datos.fecha = dto.fecha
-        ? aFechaUTC(dto.fecha, 'La fecha del álbum')
-        : null;
-
-    const actualizado = await this.prisma.albumFotos.update({
-      where: { id: albumId },
-      data: datos,
-      select: SELECT_ALBUM,
-    });
-
-    await this.acceso.marcarActividad(carpeta.ruta);
-    return actualizado;
-  }
-
-  /**
-   * Elimina un álbum VACÍO.
-   *
-   * Existe porque desde §16 un álbum se puede crear vacío (9a) y no había
-   * forma de retirarlo: uno creado por error se quedaba para siempre y
-   * además **bloqueaba el borrado de su carpeta**, porque
-   * `carpetas_fotos ← albumes_fotos` es `Restrict`. Se descubrió al intentar
-   * limpiar los datos de una prueba.
-   *
-   * ⚠️ Solo si está vacío. Un álbum con fotos NO se borra por aquí: se
-   * borran las fotos —que es una decisión por foto, con su propio permiso— y
-   * entonces el álbum se retira solo, como ya hace `eliminar`. Es el mismo
-   * criterio que la carpeta, donde el `Restrict` es lo que hace que borrar
-   * no sea peligroso.
-   *
-   * El propio con EDICION, el ajeno con TOTAL: la distinción de §5 que ya
-   * siguen las fotos y las tareas.
-   */
-  async eliminarAlbum(usuario: UsuarioAutenticado, albumId: number) {
-    const album = await this.prisma.albumFotos.findUnique({
-      where: { id: albumId },
+    const actividad = await this.prisma.actividadFotos.findUnique({
+      where: { id: destino.actividadId },
       select: {
-        carpetaId: true,
-        nombre: true,
-        creadoPorId: true,
-        _count: { select: { fotos: true } },
+        id: true,
+        evidencia: true,
+        // ⚠️ Y el ciclo, para no dejar subir fotos a una visita ya cerrada:
+        // el permiso dice quién eres, esto dice si esa visita sigue viva.
+        ciclo: { select: { numero: true, cerradoEn: true, carpetaId: true } },
       },
     });
-    if (!album) throw new NotFoundException(noExisteOSinAcceso('Ese álbum'));
-
-    const esPropio = album.creadoPorId === usuario.id;
+    if (!actividad)
+      throw new NotFoundException(noExisteOSinAcceso('Esa actividad'));
+    this.exigirCicloAbiertoParaFotos(actividad.ciclo);
     const carpeta = await this.acceso.exigirPermiso(
       usuario,
-      album.carpetaId,
-      esPropio ? 'EDICION' : 'TOTAL',
+      actividad.ciclo.carpetaId,
+      'EDICION',
     );
-
-    if (album._count.fotos > 0)
-      throw new BadRequestException(
-        `No se puede eliminar: "${album.nombre ?? 'el álbum'}" tiene ${album._count.fotos} foto(s). ` +
-          'Elimínalas primero y vuelve a intentarlo.',
-      );
-
-    await this.prisma.albumFotos.delete({ where: { id: albumId } });
-    await this.acceso.marcarActividad(carpeta.ruta);
-
-    await this.auditoria.registrar(usuario, {
-      carpetaId: album.carpetaId,
-      entidad: 'ALBUM',
-      entidadId: albumId,
-      accion: 'ELIMINACION',
-      descripcion: `Eliminó el álbum "${album.nombre ?? 'sin título'}".`,
-    });
-
-    return { ok: true, id: albumId };
+    return {
+      actividadId: actividad.id,
+      evidencia: actividad.evidencia,
+      carpetaId: actividad.ciclo.carpetaId,
+      ruta: carpeta.ruta,
+    };
   }
 
   /**
-   * La bandeja de §18: lo que subí y todavía no he clasificado.
+   * En una visita cerrada no entran fotos nuevas.
    *
-   * Es SIEMPRE la del usuario que pregunta —no recibe un id de nadie—,
-   * porque una foto sin clasificar no está en el árbol y no hay permiso de
-   * carpeta que pueda dar acceso a ella. Ver `AccesoService.exigirSobreFoto`
-   * para el porqué completo, incluido por qué tampoco la ve un ADMIN_GLOBAL.
+   * Mensaje propio y no el de `CicloService.exigirAbierto` porque aquí lo que
+   * se está intentando es SUBIR, y decirlo con esas palabras evita que quien
+   * lo lee busque qué «cambio» hizo.
    */
+  private exigirCicloAbiertoParaFotos(ciclo: {
+    numero: number;
+    cerradoEn: Date | null;
+  }) {
+    if (ciclo.cerradoEn)
+      throw new BadRequestException(
+        `El ciclo ${ciclo.numero} está cerrado y no admite fotos nuevas. ` +
+          'Si hay que corregir algo, reábrelo primero: queda registrado.',
+      );
+  }
+
   async bandeja(usuario: UsuarioAutenticado) {
     const fotos = await this.prisma.foto.findMany({
-      where: { subidaPorId: usuario.id, albumId: null, tareaId: null },
+      where: { subidaPorId: usuario.id, cicloId: null, actividadId: null },
       orderBy: { creadoEn: 'desc' },
       take: LIMITE_LOTE,
       select: {
@@ -468,7 +363,7 @@ export class AlbumService {
 
     return {
       total: await this.prisma.foto.count({
-        where: { subidaPorId: usuario.id, albumId: null, tareaId: null },
+        where: { subidaPorId: usuario.id, cicloId: null, actividadId: null },
       }),
       fotos: await Promise.all(
         fotos.map(async (f) => ({
@@ -487,7 +382,7 @@ export class AlbumService {
   }
 
   /**
-   * Clasificar por lotes (§18): «20 fotos → Equipo ABC → Tarea Inspección».
+   * Clasificar por lotes (§18): «20 fotos → Equipo ABC → Actividad Inspección».
    *
    * Solo mueve fotos que estén EN LA BANDEJA DE QUIEN LLAMA. Se comprueba
    * con un `where` que ya incluye `subidaPorId`, así que una foto ajena o ya
@@ -502,20 +397,6 @@ export class AlbumService {
     usuario: UsuarioAutenticado,
     fotoIds: number[],
     destino: DestinoSubida,
-    /**
-     * Nombre y descripción del álbum que recoge el lote (Fase 2c).
-     *
-     * Solo se usan cuando el destino es una CARPETA, que es el único caso en
-     * que se crea un álbum aquí. Los dos son opcionales: la captura rápida de
-     * §17 sigue pudiendo clasificar sin escribir nada, y entonces el álbum
-     * nace sin título como hasta ahora —la pantalla lo distingue por su
-     * fecha—.
-     *
-     * Antes NO había forma de ponerle nombre: había que clasificar y después
-     * ir a editar el álbum, y el flujo de §18 es justo el que quiere evitar
-     * pasos de más.
-     */
-    album: { nombre?: unknown; descripcion?: unknown } = {},
   ) {
     if (!Array.isArray(fotoIds) || fotoIds.length === 0)
       throw new BadRequestException('No se indicó ninguna foto.');
@@ -530,61 +411,37 @@ export class AlbumService {
 
     const resuelto = await this.resolverDestino(usuario, destino);
 
-    // ⚠️ El nombre solo se admite cuando de verdad se va a crear un álbum.
-    // Mandarlo hacia un álbum que ya existe sería una renombrada encubierta:
-    // para eso está `PATCH /fotos/album/:id`, que es otra decisión y otro
-    // aviso en pantalla.
-    const nombre = limpiar(album.nombre);
-    const descripcion = limpiar(album.descripcion);
-    if ((nombre || descripcion) && !resuelto.crearAlbum)
-      throw new BadRequestException(
-        'El nombre es para el álbum que se crea al clasificar en una carpeta. ' +
-          'Para renombrar uno que ya existe, edítalo.',
-      );
-
-    // Un destino de tipo `carpeta` crea aquí el álbum que las recoge, igual
-    // que lo haría una subida directa.
-    const albumId =
-      resuelto.albumId ??
-      (resuelto.crearAlbum
-        ? (
-            await this.prisma.albumFotos.create({
-              data: {
-                carpetaId: resuelto.carpetaId!,
-                creadoPorId: usuario.id,
-                nombre,
-                descripcion,
-              },
-              select: { id: true },
-            })
-          ).id
-        : null);
-
+    // ⚠️ Ya no se crea nada al clasificar. Cuando el destino era una CARPETA
+    // había que inventar un álbum aquí —con su nombre, su descripción, y el
+    // borrado de cortesía si el lote acababa vacío—; con los álbumes
+    // retirados el destino ya existe siempre: un ciclo o una actividad.
+    //
+    // Sigue siendo un `updateMany` con `subidaPorId` en el `where` y no un
+    // bucle que valide foto a foto: una foto ajena o ya clasificada
+    // sencillamente no entra en el update.
     const movidas = await this.prisma.foto.updateMany({
       where: {
         id: { in: fotoIds },
         subidaPorId: usuario.id,
-        albumId: null,
-        tareaId: null,
+        cicloId: null,
+        actividadId: null,
       },
-      data: { albumId, tareaId: resuelto.tareaId ?? null },
+      data: {
+        cicloId: resuelto.cicloId ?? null,
+        actividadId: resuelto.actividadId ?? null,
+      },
     });
 
-    // Si no se movió ninguna, el álbum recién creado se queda vacío y sin
-    // sentido: se retira, igual que hace `subir` cuando todo falla.
-    if (movidas.count === 0) {
-      if (resuelto.crearAlbum && albumId !== null)
-        await this.prisma.albumFotos.delete({ where: { id: albumId } });
+    if (movidas.count === 0)
       throw new BadRequestException(
         'Ninguna de esas fotos está en tu bandeja. ¿Ya se clasificaron?',
       );
-    }
 
     if (resuelto.ruta) await this.acceso.marcarActividad(resuelto.ruta);
     return {
       clasificadas: movidas.count,
-      albumId,
-      tareaId: resuelto.tareaId ?? null,
+      cicloId: resuelto.cicloId ?? null,
+      actividadId: resuelto.actividadId ?? null,
     };
   }
 
@@ -599,11 +456,16 @@ export class AlbumService {
     destino: DestinoSubida,
     archivos: ArchivoSubido[],
     descripcion?: string | null,
+    momentoCrudo?: string | null,
   ) {
     // Dónde aterrizan las fotos y qué permiso hace falta se resuelve ANTES
     // de tocar un solo byte: procesar diez imágenes para descubrir al final
     // que no se podía escribir sería gastar CPU y R2 para nada.
     const resuelto = await this.resolverDestino(usuario, destino);
+
+    // El hueco del antes/después (Fase 3), validado contra lo que esa
+    // actividad espera. Se comprueba ANTES de procesar, como el permiso.
+    const momento = this.momentoValido(momentoCrudo, resuelto);
 
     if (!archivos || archivos.length === 0)
       throw new BadRequestException('No se recibió ninguna imagen.');
@@ -621,31 +483,22 @@ export class AlbumService {
       [];
     const fallidas: { archivo: string; motivo: string }[] = [];
 
-    // El álbum se crea antes de procesar: si todo falla se borra al final.
-    // Solo cuando el destino es una carpeta —los otros tres ya tienen dónde
-    // colgar la foto, y crear un álbum vacío para ellos sería inventarse una
-    // agrupación que nadie pidió.
-    const album =
-      resuelto.crearAlbum === true
-        ? await this.prisma.albumFotos.create({
-            data: {
-              carpetaId: resuelto.carpetaId!,
-              descripcion: texto,
-              creadoPorId: usuario.id,
-            },
-            select: { id: true },
-          })
-        : null;
+    // ⚠️ Aquí se creaba el álbum que recogía el lote, antes de procesar y
+    // con borrado de cortesía si todo fallaba. Con los álbumes retirados
+    // (Fase 4) el destino ya existe siempre —un ciclo o una actividad—, así
+    // que no hay nada que crear ni nada que deshacer.
+    const cicloId = resuelto.cicloId ?? null;
+    const actividadId = resuelto.actividadId ?? null;
 
-    const albumId = album?.id ?? resuelto.albumId ?? null;
-    const tareaId = resuelto.tareaId ?? null;
-
-    // La clave en R2 se agrupa por álbum. Sin álbum —tarea o bandeja— se
+    // La clave en R2 se agrupa por CICLO. Sin ciclo —actividad o bandeja— se
     // agrupa por quien subió: el bucket sigue siendo navegable y una foto
     // NO cambia de clave al clasificarse después (§18), que es lo que
     // importa —mover el objeto obligaría a copiar y borrar en R2 por cada
     // foto de un lote de 50—.
-    const grupo = albumId !== null ? albumId : `u${usuario.id}`;
+    //
+    // El prefijo `lotes/` que pone `construirClave` se conserva aunque los
+    // lotes ya no existan: cambiarlo partiría el bucket en dos para siempre.
+    const grupo = cicloId !== null ? cicloId : `u${usuario.id}`;
 
     for (const archivo of archivos) {
       try {
@@ -678,8 +531,9 @@ export class AlbumService {
 
         const foto = await this.prisma.foto.create({
           data: {
-            albumId,
-            tareaId,
+            cicloId,
+            actividadId,
+            momento,
             descripcion: texto,
             subidaPorId: usuario.id,
             claveImagen,
@@ -703,11 +557,6 @@ export class AlbumService {
     }
 
     if (guardadas.length === 0) {
-      // Un álbum sin fotos no significa nada: no se deja el rastro. Solo se
-      // borra el que ESTA subida creó — a un álbum que ya existía no se le
-      // toca porque una subida posterior fallara.
-      if (album)
-        await this.prisma.albumFotos.delete({ where: { id: album.id } });
       throw new BadRequestException(
         `No se pudo subir ninguna foto. ${fallidas.map((f) => `${f.archivo}: ${f.motivo}`).join(' · ')}`,
       );
@@ -721,11 +570,13 @@ export class AlbumService {
     // §23, acción 5. UN evento por subida y no uno por foto: subir diez
     // fotos es un acto, y diez filas idénticas ahogarían la bitácora.
     await this.auditoria.registrar(usuario, {
+      // La carpeta se deduce del destino: `resolverDestino` ya la resolvió
+      // para exigir el permiso, y de ella sale el hilo de §23.
       carpetaId: resuelto.carpetaId ?? null,
       entidad: 'FOTO',
-      // Sin álbum ni tarea —la bandeja— no hay id de contenedor: se usa el
-      // de la primera foto, que es lo único que identifica la subida.
-      entidadId: albumId ?? tareaId ?? guardadas[0].id,
+      // Sin ciclo ni actividad —la bandeja— no hay id de contenedor: se usa
+      // el de la primera foto, que es lo único que identifica la subida.
+      entidadId: cicloId ?? actividadId ?? guardadas[0].id,
       accion: 'SUBIDA_FOTO',
       descripcion: `Subió ${guardadas.length} foto(s)${
         destino.tipo === 'bandeja' ? ' sin asignar' : ''
@@ -733,8 +584,8 @@ export class AlbumService {
     });
 
     return {
-      albumId,
-      tareaId,
+      cicloId,
+      actividadId,
       enBandeja: destino.tipo === 'bandeja',
       subidas: guardadas.length,
       fallidas,
@@ -760,7 +611,7 @@ export class AlbumService {
   /**
    * La foto, con el permiso ya exigido y su carpeta si la tiene.
    *
-   * Los tres casos —álbum, tarea y bandeja— los resuelve
+   * Los tres casos —álbum, actividad y bandeja— los resuelve
    * `AccesoService.exigirSobreFoto`, que es el único sitio que sabe qué
    * significa cada uno. Aquí solo se recuperan los campos que hacen falta
    * para servirla o borrarla.
@@ -784,8 +635,8 @@ export class AlbumService {
         claveImagen: true,
         claveMiniatura: true,
         creadoEn: true,
-        albumId: true,
-        tareaId: true,
+        cicloId: true,
+        actividadId: true,
         // Para poder anotar el valor ANTERIOR al editar la descripción: una
         // auditoría que solo dice «cambió» no responde a qué cambió.
         descripcion: true,
@@ -813,7 +664,7 @@ export class AlbumService {
    * Mueve UNA foto de sitio (§1.2 del documento de gestión de contenido).
    *
    * Reutiliza `DestinoSubida`, así que los cuatro sitios donde puede vivir
-   * una foto son los mismos que al subirla —álbum, tarea, carpeta (crea
+   * una foto son los mismos que al subirla —álbum, actividad, carpeta (crea
    * álbum) y bandeja—: mover no inventa destinos nuevos, y `resolverDestino`
    * ya sabe validarlos y exigir EDICION en cada uno.
    *
@@ -853,37 +704,25 @@ export class AlbumService {
 
     const resuelto = await this.resolverDestino(usuario, destino);
 
-    // El álbum que recoge la foto cuando el destino es una CARPETA: igual
-    // que hacen `subir` y `clasificar`, se crea aquí.
-    const albumDestino =
-      resuelto.albumId ??
-      (resuelto.crearAlbum
-        ? (
-            await this.prisma.albumFotos.create({
-              data: {
-                carpetaId: resuelto.carpetaId!,
-                creadoPorId: usuario.id,
-              },
-              select: { id: true },
-            })
-          ).id
-        : null);
-    const tareaDestino = resuelto.tareaId ?? null;
+    const cicloDestino = resuelto.cicloId ?? null;
+    const actividadDestino = resuelto.actividadId ?? null;
 
     // Mover algo a donde ya está no es un error, pero tampoco es un
-    // movimiento: se contesta sin escribir ni ensuciar la bitácora. Si el
-    // destino era una carpeta, el álbum que se acaba de crear sobra.
-    if (foto.albumId === albumDestino && foto.tareaId === tareaDestino) {
-      if (resuelto.crearAlbum && albumDestino !== null)
-        await this.prisma.albumFotos.delete({ where: { id: albumDestino } });
+    // movimiento: se contesta sin escribir ni ensuciar la bitácora. Ya no hay
+    // nada que deshacer al salir por aquí — antes había que retirar el álbum
+    // que se acababa de crear para recibirla.
+    if (
+      foto.cicloId === cicloDestino &&
+      foto.actividadId === actividadDestino
+    ) {
       return { ok: true, id: fotoId, sinCambios: true };
     }
 
-    const origen = await this.nombreDeSitio(foto.albumId, foto.tareaId);
+    const origen = await this.nombreDeSitio(foto.cicloId, foto.actividadId);
 
     await this.prisma.foto.update({
       where: { id: fotoId },
-      data: { albumId: albumDestino, tareaId: tareaDestino },
+      data: { cicloId: cicloDestino, actividadId: actividadDestino },
     });
 
     // Las DOS líneas de ancestros marcan actividad: la carpeta de la que
@@ -891,7 +730,7 @@ export class AlbumService {
     if (foto.carpeta) await this.acceso.marcarActividad(foto.carpeta.ruta);
     if (resuelto.ruta) await this.acceso.marcarActividad(resuelto.ruta);
 
-    const hacia = await this.nombreDeSitio(albumDestino, tareaDestino);
+    const hacia = await this.nombreDeSitio(cicloDestino, actividadDestino);
 
     // §23. `MOVIMIENTO` ya existía en el enum desde la Fase 1 y hasta ahora
     // solo lo escribían las carpetas.
@@ -909,32 +748,42 @@ export class AlbumService {
     return {
       ok: true,
       id: fotoId,
-      albumId: albumDestino,
-      tareaId: tareaDestino,
+      cicloId: cicloDestino,
+      actividadId: actividadDestino,
       sinCambios: false,
     };
   }
 
   /** Cómo se lee el sitio de una foto en la bitácora. */
   private async nombreDeSitio(
-    albumId: number | null,
-    tareaId: number | null,
+    cicloId: number | null,
+    actividadId: number | null,
   ): Promise<string> {
-    if (albumId !== null) {
-      const a = await this.prisma.albumFotos.findUnique({
-        where: { id: albumId },
-        select: { nombre: true, carpeta: { select: { nombre: true } } },
+    if (cicloId !== null) {
+      const c = await this.prisma.cicloFotos.findUnique({
+        where: { id: cicloId },
+        select: { numero: true, carpeta: { select: { nombre: true } } },
       });
-      const album = a?.nombre ?? `álbum #${albumId}`;
-      return a?.carpeta ? `${a.carpeta.nombre} / ${album}` : album;
+      return c
+        ? `${c.carpeta.nombre} / ciclo ${c.numero}`
+        : `ciclo #${cicloId}`;
     }
-    if (tareaId !== null) {
-      const t = await this.prisma.tareaFotos.findUnique({
-        where: { id: tareaId },
-        select: { titulo: true, carpeta: { select: { nombre: true } } },
+    if (actividadId !== null) {
+      const t = await this.prisma.actividadFotos.findUnique({
+        where: { id: actividadId },
+        select: {
+          titulo: true,
+          ciclo: {
+            select: { numero: true, carpeta: { select: { nombre: true } } },
+          },
+        },
       });
-      const tarea = t?.titulo ?? `tarea #${tareaId}`;
-      return t?.carpeta ? `${t.carpeta.nombre} / ${tarea}` : tarea;
+      const actividad = t?.titulo ?? `actividad #${actividadId}`;
+      // Se nombra el ciclo además de la carpeta: en un equipo con historial,
+      // «UPC / Inspección» no distingue la visita de marzo de la de agosto.
+      return t
+        ? `${t.ciclo.carpeta.nombre} / ciclo ${t.ciclo.numero} / ${actividad}`
+        : actividad;
     }
     return 'sin clasificar';
   }
@@ -1020,24 +869,6 @@ export class AlbumService {
     await this.prisma.foto.delete({ where: { id: fotoId } });
     await this.almacenamiento.borrar([foto.claveImagen, foto.claveMiniatura]);
 
-    // ⚠️ Un álbum que se queda vacío SE QUEDA VACÍO. No se borra solo.
-    //
-    // Hasta la Fase 2b sí lo hacía, y era un fallo latente: ese
-    // comportamiento se escribió cuando un álbum solo podía nacer de una
-    // subida, así que uno sin fotos era basura. Desde §16 se puede crear
-    // vacío Y CON NOMBRE, de modo que el auto-borrado destruía algo que
-    // alguien había titulado a propósito —y el nombre no se recupera—.
-    //
-    // Quien quiera deshacerse de él tiene `DELETE /fotos/album/:id`, que es
-    // una decisión explícita. Vaciar no es borrar.
-    //
-    // `albumId` es nullable —una foto de la bandeja de §18 no cuelga de
-    // ninguno, y una de tarea tampoco—, así que hay que preguntarlo.
-    const albumId = foto.albumId;
-    let albumVacio = false;
-    if (albumId !== null)
-      albumVacio = (await this.prisma.foto.count({ where: { albumId } })) === 0;
-
     if (foto.carpeta) await this.acceso.marcarActividad(foto.carpeta.ruta);
 
     // §23, acción 6. Se registra también la de la bandeja, que no tiene
@@ -1051,9 +882,10 @@ export class AlbumService {
         ? 'Eliminó una foto suya.'
         : 'Eliminó una foto de otro usuario.',
     });
-    // ⚠️ `albumVacio` dice «el álbum se quedó SIN FOTOS», no «se borró».
-    // Significaba lo segundo hasta la Fase 2b. Hoy nadie lo consume, pero
-    // el nombre se presta a confusión y por eso queda dicho aquí.
-    return { ok: true, id: fotoId, albumVacio };
+    // ⚠️ Aquí se devolvía `albumVacio`, que decía «el álbum se quedó SIN
+    // FOTOS». Se fue con los álbumes en la Fase 4: un ciclo sin fotos sigue
+    // siendo una visita, así que no hay nada que avisar — y nadie lo
+    // consumía ya.
+    return { ok: true, id: fotoId };
   }
 }

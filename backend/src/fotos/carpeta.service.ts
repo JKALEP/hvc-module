@@ -9,9 +9,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
 import { ValorCampoFotosService } from './valor-campo-fotos.service';
+import { CicloService } from './ciclo.service';
+import { SistemaFotosService } from './sistema.service';
+import { CatalogoActividadService } from './catalogo-actividad.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar, describir } from '../common/texto';
-import { aIdOpcional } from '../common/validacion';
+import { aId, aIdOpcional } from '../common/validacion';
 import { estaEnRama, reprefijar, rutaDe } from '../common/arbol-ruta';
 import type { TipoCarpetaFotos } from '../../generated/prisma/enums';
 
@@ -26,6 +29,24 @@ export interface CrearCarpetaDto {
    * información del equipo es propia de Fotos y llega en la Fase 1b.
    */
   tipo?: string | null;
+  /**
+   * Qué clase de sistema es (Fase 2). Solo con `tipo = EQUIPO`.
+   *
+   * Es una FK a `TipoSistemaFotos` y no un campo configurable porque de él
+   * cuelga el catálogo de actividades: de un texto libre no se puede
+   * preseleccionar nada.
+   */
+  tipoSistemaId?: number | string | null;
+  /**
+   * Qué actividades del catálogo estampar en el Ciclo 1 (Fase 2).
+   *
+   * ⚠️ **Omitirlo y mandar `[]` NO es lo mismo.** Sin el campo se estampa la
+   * PRESELECCIÓN del tipo de sistema —lo que quiere quien da de alta un
+   * equipo y no toca nada—; con lista vacía, ninguna, porque alguien las
+   * desmarcó a propósito. Colapsar los dos casos obligaría a elegir entre no
+   * preseleccionar nunca o no poder decir que no.
+   */
+  actividades?: unknown;
   /**
    * Los campos configurables del equipo, indexados por CLAVE (Fase 1b).
    *
@@ -43,6 +64,17 @@ export interface CrearCarpetaDto {
 export interface EditarCarpetaDto {
   nombre?: string | null;
   parentId?: number | string | null;
+  /**
+   * Corregir el tipo de sistema de un equipo (Fase 2). `null` lo deja sin
+   * definir.
+   *
+   * ⚠️ Cambiarlo **NO reescribe las visitas ya hechas ni la que está en
+   * curso**: lo que hace es cambiar qué se propone la próxima vez. Un tipo
+   * mal elegido se corrige, pero el checklist que alguien ya recorrió es
+   * historial. Para traer las nuevas al ciclo abierto está
+   * `POST ciclo/:id/actividad/desde-catalogo`, que es una decisión explícita.
+   */
+  tipoSistemaId?: number | string | null;
 }
 
 @Injectable()
@@ -52,6 +84,9 @@ export class CarpetaService {
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
     private readonly valores: ValorCampoFotosService,
+    private readonly ciclos: CicloService,
+    private readonly sistemas: SistemaFotosService,
+    private readonly catalogo: CatalogoActividadService,
   ) {}
 
   /** Ruta materializada del nodo: la de su madre más su propio id. */
@@ -113,6 +148,31 @@ export class CarpetaService {
     );
     const tipo = this.tipoValido(dto);
 
+    // El tipo de sistema y las actividades preseleccionadas describen un
+    // EQUIPO, igual que los campos configurables: en una carpeta corriente no
+    // hay dónde enseñarlos ni ciclo donde estampar nada.
+    const tipoSistemaId = await this.sistemas.validarTipo(dto.tipoSistemaId);
+    if (tipoSistemaId !== null && tipo !== 'EQUIPO')
+      throw new BadRequestException(
+        'Solo una carpeta de tipo Equipo lleva tipo de sistema.',
+      );
+    if (dto.actividades !== undefined && tipo !== 'EQUIPO')
+      throw new BadRequestException(
+        'Solo una carpeta de tipo Equipo lleva actividades.',
+      );
+    const elegidas =
+      dto.actividades === undefined
+        ? undefined
+        : Array.isArray(dto.actividades)
+          ? dto.actividades.map((v) =>
+              aId(v, 'Una de las actividades elegidas no es válida.'),
+            )
+          : (() => {
+              throw new BadRequestException(
+                'Las actividades tienen que llegar como una lista.',
+              );
+            })();
+
     // Los campos configurables describen un EQUIPO. En una carpeta
     // corriente no hay dónde enseñarlos, así que se rechaza en vez de
     // guardarlos donde nadie los verá.
@@ -155,6 +215,7 @@ export class CarpetaService {
           ruta: '',
           propietarioId: usuario.id,
           tipo,
+          tipoSistemaId,
         },
       });
       const ruta = await this.calcularRuta(carpeta.id, parentId);
@@ -172,6 +233,28 @@ export class CarpetaService {
       // daría el 404 uniforme sobre algo que sí existe.
       if (valoresDeEquipo)
         await this.valores.escribirEn(tx, carpeta.id, valoresDeEquipo);
+
+      // ⚠️ Un EQUIPO nace con su Ciclo 1 abierto (§4.3), en la MISMA
+      // transacción. Sin ciclo no habría dónde colgar una actividad, así que
+      // los dos nacen juntos o no nace ninguno. Una carpeta corriente no
+      // lleva ciclos: no es una visita, es una estructura.
+      if (tipo === 'EQUIPO') {
+        const ciclo = await this.ciclos.abrirPrimeroEn(
+          tx,
+          carpeta.id,
+          usuario.id,
+        );
+        // Y con el checklist que propone su tipo de sistema (Fase 2), en la
+        // misma transacción por lo mismo: un equipo con ciclo pero sin
+        // checklist obliga a repetir a mano lo que el catálogo ya sabía.
+        await this.catalogo.estamparEn(
+          tx,
+          ciclo.id,
+          usuario.id,
+          tipoSistemaId,
+          elegidas,
+        );
+      }
 
       return actualizada;
     });
@@ -218,6 +301,14 @@ export class CarpetaService {
         );
       data.nombre = nombre;
       nombreFinal = nombre;
+    }
+
+    if ('tipoSistemaId' in dto) {
+      if (actual.tipo !== 'EQUIPO')
+        throw new BadRequestException(
+          'Solo una carpeta de tipo Equipo lleva tipo de sistema.',
+        );
+      data.tipoSistemaId = await this.sistemas.validarTipo(dto.tipoSistemaId);
     }
 
     // ¿Se mueve de sitio?
@@ -383,7 +474,7 @@ export class CarpetaService {
       select: {
         nombre: true,
         parentId: true,
-        _count: { select: { hijas: true, albumes: true } },
+        _count: { select: { hijas: true } },
       },
     });
     if (!carpeta) throw new NotFoundException('Esa carpeta ya no existe.');
@@ -392,9 +483,24 @@ export class CarpetaService {
       throw new BadRequestException(
         `No se puede eliminar: esta carpeta tiene ${carpeta._count.hijas} carpeta(s) dentro. Muévelas o elimínalas primero.`,
       );
-    if (carpeta._count.albumes > 0)
+    // ⚠️ El candado que antes daba el `Restrict` de los álbumes.
+    //
+    // Con los álbumes retirados (Fase 4) las fotos cuelgan de los ciclos, y
+    // los ciclos van con `Cascade`: sin esta comprobación, borrar un equipo
+    // se llevaría por delante sus visitas, sus actividades y TODAS sus fotos
+    // en silencio. Se cuentan las dos clases —las sueltas del ciclo y las de
+    // sus actividades—, porque las dos son contenido que alguien subió.
+    const conFotos = await this.prisma.foto.count({
+      where: {
+        OR: [
+          { ciclo: { carpetaId: id } },
+          { actividad: { ciclo: { carpetaId: id } } },
+        ],
+      },
+    });
+    if (conFotos > 0)
       throw new BadRequestException(
-        `No se puede eliminar: esta carpeta tiene ${carpeta._count.albumes} álbum(es) de fotos dentro. Archívala en su lugar.`,
+        `No se puede eliminar: esta carpeta tiene ${conFotos} foto(s) dentro. Archívala en su lugar.`,
       );
 
     // ⚠️ Las imágenes de los campos de tipo FOTO se retiran de R2 ANTES de

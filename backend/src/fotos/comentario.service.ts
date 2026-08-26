@@ -12,7 +12,7 @@ import { limpiar, describir } from '../common/texto';
 /**
  * Dónde se puede comentar.
  *
- * §14 nombra CUATRO —carpeta, equipo, tarea, álbum— y aquí hay tres, y no
+ * §14 nombra CUATRO —carpeta, equipo, actividad, álbum— y aquí hay tres, y no
  * es un recorte: en este módulo **un equipo ES una carpeta** de
  * `tipo = EQUIPO` (§12), así que comentar un equipo y comentar una carpeta
  * son la misma fila con la misma FK. Inventar una cuarta columna
@@ -21,11 +21,11 @@ import { limpiar, describir } from '../common/texto';
  *
  * `foto` entró en la Fase 6, que es lo que §14 marca como OPCIONAL. Su
  * permiso NO se resuelve aquí: lo hace `AccesoService.exigirSobreFoto`,
- * porque una foto tiene tres casos —álbum, tarea y la bandeja de §18, que
+ * porque una foto tiene tres casos —álbum, actividad y la bandeja de §18, que
  * no cuelga de ninguna carpeta y es solo de quien la subió—. Ese era el
  * cabo que la Fase 5 dejó suelto.
  */
-const ENTIDADES = ['carpeta', 'tarea', 'album', 'foto'] as const;
+const ENTIDADES = ['carpeta', 'actividad', 'album', 'foto'] as const;
 export type EntidadComentable = (typeof ENTIDADES)[number];
 
 const SELECT_COMENTARIO = {
@@ -35,7 +35,7 @@ const SELECT_COMENTARIO = {
   creadoEn: true,
   editadoEn: true,
   carpetaId: true,
-  tareaId: true,
+  actividadId: true,
   albumId: true,
   fotoId: true,
   autor: { select: { id: true, nombre: true } },
@@ -89,13 +89,14 @@ export class ComentarioService {
       return entidadId;
     }
 
-    if (entidad === 'tarea') {
-      const tarea = await this.prisma.tareaFotos.findUnique({
+    if (entidad === 'actividad') {
+      const actividad = await this.prisma.actividadFotos.findUnique({
         where: { id: entidadId },
-        select: { carpetaId: true },
+        select: { ciclo: { select: { carpetaId: true } } },
       });
-      if (!tarea) throw new NotFoundException(noExisteOSinAcceso('Esa tarea'));
-      return tarea.carpetaId;
+      if (!actividad)
+        throw new NotFoundException(noExisteOSinAcceso('Esa actividad'));
+      return actividad.ciclo.carpetaId;
     }
 
     if (entidad === 'album') {
@@ -116,7 +117,7 @@ export class ComentarioService {
   private dueño(entidad: EntidadComentable, entidadId: number) {
     return {
       carpetaId: entidad === 'carpeta' ? entidadId : null,
-      tareaId: entidad === 'tarea' ? entidadId : null,
+      actividadId: entidad === 'actividad' ? entidadId : null,
       albumId: entidad === 'album' ? entidadId : null,
       fotoId: entidad === 'foto' ? entidadId : null,
     };
@@ -236,7 +237,7 @@ export class ComentarioService {
         id: true,
         autorId: true,
         carpetaId: true,
-        tareaId: true,
+        actividadId: true,
         albumId: true,
         fotoId: true,
       },
@@ -247,8 +248,8 @@ export class ComentarioService {
     const dueño: { entidad: EntidadComentable; id: number } | null =
       comentario.carpetaId !== null
         ? { entidad: 'carpeta', id: comentario.carpetaId }
-        : comentario.tareaId !== null
-          ? { entidad: 'tarea', id: comentario.tareaId }
+        : comentario.actividadId !== null
+          ? { entidad: 'actividad', id: comentario.actividadId }
           : comentario.albumId !== null
             ? { entidad: 'album', id: comentario.albumId }
             : comentario.fotoId !== null
@@ -305,7 +306,7 @@ export class ComentarioService {
   /**
    * Borrar: el propio con EDICION, el ajeno con TOTAL.
    *
-   * Misma distinción que §5 hace con las fotos y que sigue `TareaService`:
+   * Misma distinción que §5 hace con las fotos y que sigue `ActividadService`:
    * retirar lo de uno es trabajar, retirar lo de otro es moderar.
    */
   async eliminar(usuario: UsuarioAutenticado, comentarioId: number) {

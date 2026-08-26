@@ -122,7 +122,7 @@ export function useEliminarOpcionCampo() {
  *
  * `habilitado` porque solo se pide en una carpeta de tipo EQUIPO: en una
  * corriente el backend contestaría 400, y pedirlo en cada carpeta que se
- * abre sería una consulta para nada. Mismo criterio que `useTareas`.
+ * abre sería una consulta para nada. Mismo criterio que `useActividades`.
  */
 export function useCamposDeCarpeta(
   carpetaId: number | null,

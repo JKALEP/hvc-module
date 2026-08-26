@@ -18,6 +18,15 @@ import { PlantillaService } from './plantilla.service';
 import type { GuardarPlantillaDto } from './plantilla.service';
 import { ImportacionFotosService } from './importacion.service';
 import { CampoFotosService } from './campo.service';
+import { EstadoEquipoService } from './estado-equipo.service';
+import { SistemaFotosService } from './sistema.service';
+import type {
+  GuardarFamiliaDto,
+  GuardarTipoSistemaDto,
+} from './sistema.service';
+import { CatalogoActividadService } from './catalogo-actividad.service';
+import type { GuardarDefinicionActividadDto } from './catalogo-actividad.service';
+import type { GuardarEstadoDto } from './estado-equipo.service';
 import { ConfiguracionFotosService } from './configuracion.service';
 import type { GuardarCampoDto, EditarCampoDto } from './campo.service';
 import type { Decision } from './importacion.service';
@@ -51,6 +60,9 @@ export class AdministracionFotosController {
     private readonly importacion: ImportacionFotosService,
     private readonly campos: CampoFotosService,
     private readonly configuracion: ConfiguracionFotosService,
+    private readonly estados: EstadoEquipoService,
+    private readonly sistemas: SistemaFotosService,
+    private readonly catalogo: CatalogoActividadService,
   ) {}
 
   // ── Auditoría (§23) ──
@@ -104,6 +116,143 @@ export class AdministracionFotosController {
     @Body() dto: { tipo?: unknown; color?: unknown },
   ) {
     return this.configuracion.cambiarColor(usuario, dto?.tipo, dto?.color);
+  }
+
+  // ── Familias y tipos de sistema (Fase 2) ──
+  //
+  // Vocabulario del módulo, como los estados y los campos: leerlo es de
+  // cualquiera —hace falta para dar de alta un equipo— y cambiarlo, de
+  // ADMIN_GLOBAL, que lo hace cumplir el service.
+
+  @Get('sistema')
+  listarSistemas(@Query('activos') activos?: string) {
+    return this.sistemas.listarFamilias(activos === 'true');
+  }
+
+  @Post('sistema/familia')
+  crearFamilia(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: GuardarFamiliaDto,
+  ) {
+    return this.sistemas.crearFamilia(usuario, dto);
+  }
+
+  @Patch('sistema/familia/:id')
+  editarFamilia(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: GuardarFamiliaDto,
+  ) {
+    return this.sistemas.editarFamilia(usuario, id, dto);
+  }
+
+  @Delete('sistema/familia/:id')
+  eliminarFamilia(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.sistemas.eliminarFamilia(usuario, id);
+  }
+
+  @Post('sistema/tipo')
+  crearTipoSistema(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: GuardarTipoSistemaDto,
+  ) {
+    return this.sistemas.crearTipo(usuario, dto);
+  }
+
+  @Patch('sistema/tipo/:id')
+  editarTipoSistema(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: GuardarTipoSistemaDto,
+  ) {
+    return this.sistemas.editarTipo(usuario, id, dto);
+  }
+
+  @Delete('sistema/tipo/:id')
+  eliminarTipoSistema(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.sistemas.eliminarTipo(usuario, id);
+  }
+
+  // ── Catálogo de actividades (Fase 2) ──
+
+  /** `tipoSistema` lo acota a lo que se propone para ese tipo. */
+  @Get('catalogo-actividad')
+  listarCatalogo(
+    @Query('activas') activas?: string,
+    @Query('tipoSistema') tipoSistema?: string,
+  ) {
+    return this.catalogo.listar({
+      soloActivas: activas === 'true',
+      tipoSistemaId: tipoSistema,
+    });
+  }
+
+  @Post('catalogo-actividad')
+  crearDefinicion(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: GuardarDefinicionActividadDto,
+  ) {
+    return this.catalogo.crear(usuario, dto);
+  }
+
+  @Patch('catalogo-actividad/:id')
+  editarDefinicion(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: GuardarDefinicionActividadDto,
+  ) {
+    return this.catalogo.editar(usuario, id, dto);
+  }
+
+  @Delete('catalogo-actividad/:id')
+  eliminarDefinicion(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.catalogo.eliminar(usuario, id);
+  }
+
+  // ── Catálogo de estados de equipo (Fase 1) ──
+  //
+  // Configuración del módulo, como los campos y los colores: no cuelga de
+  // ninguna carpeta. Leer es de cualquiera —hace falta para elegir el estado
+  // de una visita—; cambiar, de ADMIN_GLOBAL, y lo hace cumplir el service.
+
+  @Get('estado-equipo')
+  listarEstados(@Query('activos') activos?: string) {
+    return this.estados.listar(activos === 'true');
+  }
+
+  @Post('estado-equipo')
+  crearEstado(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: GuardarEstadoDto,
+  ) {
+    return this.estados.crear(usuario, dto);
+  }
+
+  @Patch('estado-equipo/:id')
+  editarEstado(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: GuardarEstadoDto,
+  ) {
+    return this.estados.editar(usuario, id, dto);
+  }
+
+  /** Solo si ningún ciclo lo usa; si no, el service manda retirarlo. */
+  @Delete('estado-equipo/:id')
+  eliminarEstado(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.estados.eliminar(usuario, id);
   }
 
   // ── Campos configurables del EQUIPO (Fase 1b) ──

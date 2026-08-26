@@ -90,7 +90,7 @@ const NO_EXISTE_O_SIN_ACCESO =
   'Esa carpeta no existe o no tienes acceso a ella.';
 
 /**
- * La misma negativa, para lo que cuelga de una carpeta (tareas, álbumes,
+ * La misma negativa, para lo que cuelga de una carpeta (actividades, álbumes,
  * comentarios).
  *
  * El nombre del recurso SÍ varía, y eso no filtra nada: quien pregunta ya
@@ -140,13 +140,22 @@ export interface CarpetaMinima {
    * la carpeta que se está abriendo—, pero `NavegacionService` construye
    * las hijas con su propia consulta y no lo necesita para decidir
    * permisos. Nada de la cascada de §25 lo mira; está para que quien abre
-   * una carpeta sepa si es un EQUIPO y pueda ofrecer las tareas de §13.
+   * una carpeta sepa si es un EQUIPO y pueda ofrecer las actividades de §13.
    *
    * ⚠️ Aquí acompañaba un `equipo` con el código del catálogo de Gestión de
    * Equipos. Se retiró en la Fase 1a de «Gestión de contenido» junto con la
    * FK.
    */
   tipo?: TipoCarpetaFotos;
+  /**
+   * Qué clase de sistema es (Fase 2). Opcional por lo mismo que `tipo`, y
+   * `null` cuando la carpeta no es un equipo o nadie se lo ha puesto.
+   */
+  tipoSistema?: {
+    id: number;
+    nombre: string;
+    familia: { id: number; nombre: string };
+  } | null;
 }
 
 /** Una carpeta ya resuelta: con el permiso efectivo de quien preguntó. */
@@ -349,10 +358,21 @@ export class AccesoService {
         cerrada: true,
         actualizadoEn: true,
         // `tipo` viaja con la carpeta desde la Fase 5: quien la abre
-        // necesita saber si es un EQUIPO para ofrecer las tareas de §13.
+        // necesita saber si es un EQUIPO para ofrecer las actividades de §13.
         // Es una columna más y esto se llama una vez por petición —las
         // hijas las carga `conContadores`—.
         tipo: true,
+        // Y el tipo de sistema desde la Fase 2, por lo mismo: la ficha del
+        // equipo lo enseña y el catálogo se propone a partir de él. Va aquí
+        // y NO en `conContadores` porque en la tarjeta de una lista no se
+        // pinta: lo que ahí importa es el estado, no la clase de máquina.
+        tipoSistema: {
+          select: {
+            id: true,
+            nombre: true,
+            familia: { select: { id: true, nombre: true } },
+          },
+        },
       },
     });
     if (!carpeta) throw new NotFoundException(NO_EXISTE_O_SIN_ACCESO);
@@ -563,7 +583,7 @@ export class AccesoService {
    * hay tres caminos:
    *
    *   1. cuelga de un álbum → la carpeta del álbum;
-   *   2. cuelga de una tarea → la carpeta de la tarea;
+   *   2. cuelga de una actividad → la carpeta de la actividad;
    *   3. **ninguno de los dos** → está en la bandeja de §18.
    *
    * El tercero es el que la Fase 5 dejó sin resolver, y la respuesta está en
@@ -595,13 +615,20 @@ export class AccesoService {
       where: { id: fotoId },
       select: {
         subidaPorId: true,
-        album: { select: { carpetaId: true } },
-        tarea: { select: { carpetaId: true } },
+        // ⚠️ Los TRES casos desde la Fase 4: suelta en un ciclo, evidencia de
+        // una actividad —que cuelga de un ciclo—, o en la bandeja. El caso
+        // del álbum desapareció con los álbumes.
+        //
+        // La actividad tampoco guarda `carpetaId`: cuelga de un ciclo y el
+        // ciclo de la carpeta. Un salto más, y a cambio una sola verdad.
+        ciclo: { select: { carpetaId: true } },
+        actividad: { select: { ciclo: { select: { carpetaId: true } } } },
       },
     });
     if (!foto) throw new NotFoundException(noExisteOSinAcceso('Esa foto'));
 
-    const carpetaId = foto.album?.carpetaId ?? foto.tarea?.carpetaId ?? null;
+    const carpetaId =
+      foto.ciclo?.carpetaId ?? foto.actividad?.ciclo.carpetaId ?? null;
 
     if (carpetaId === null) {
       // Bandeja: solo quien la subió, y con el MISMO 404 que si no

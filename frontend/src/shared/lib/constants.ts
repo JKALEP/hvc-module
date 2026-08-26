@@ -145,10 +145,24 @@ export const QUERY_KEYS = {
   camposEquipo: ['fotos', 'campos-equipo'] as const,
   camposDeCarpeta: (carpetaId: number) =>
     ['fotos', 'campos-carpeta', carpetaId] as const,
-  // Tareas (§13) y comentarios (§14). Bajo la misma raíz 'fotos', así que
+  // Actividades (§13) y comentarios (§14). Bajo la misma raíz 'fotos', así que
   // `useInvalidarFotos` las refresca sin tener que enumerarlas.
-  tareas: (carpetaId: number, estado = '') =>
-    ['fotos', 'tareas', carpetaId, estado] as const,
+  // ⚠️ La clave es por CICLO desde la Fase 1 del rediseño, no por carpeta:
+  // el mismo equipo repite «Revisar filtros» en cada visita, y con la carpeta
+  // por clave las dos visitas compartían caché.
+  actividades: (cicloId: number, estado = '') =>
+    ['fotos', 'actividades', cicloId, estado] as const,
+  // Ciclos (visitas) de un equipo, y el catálogo de estados (§7). El catálogo
+  // no lleva parámetros: es el mismo para todo el módulo.
+  ciclos: (carpetaId: number) => ['fotos', 'ciclos', carpetaId] as const,
+  // El vocabulario de la Fase 2. `catalogoActividades` lleva el tipo en la
+  // clave porque acotar es pedir OTRA cosa, no recortar lo ya pedido — el
+  // mismo criterio que los filtros de auditoría.
+  sistemas: (soloActivos = false) => ['fotos', 'sistemas', soloActivos] as const,
+  catalogoActividades: (tipoSistemaId: number | null = null, soloActivas = false) =>
+    ['fotos', 'catalogo-actividad', tipoSistemaId, soloActivas] as const,
+  estadosEquipo: (soloActivos = false) =>
+    ['fotos', 'estados-equipo', soloActivos] as const,
   comentarios: (entidad: string, entidadId: number) =>
     ['fotos', 'comentarios', entidad, entidadId] as const,
   // La bandeja de §18 no lleva id de usuario en la clave: es siempre la de
@@ -161,21 +175,23 @@ export const QUERY_KEYS = {
   plantillasFotos: (soloActivas: boolean) =>
     ['fotos', 'plantillas', soloActivas] as const,
   plantillaFotos: (id: number) => ['fotos', 'plantilla', id] as const,
-  // Tareas completas (§13). `asignables` no lleva parámetros: es la misma
+  // Actividades completas (§13). `asignables` no lleva parámetros: es la misma
   // lista para todo el módulo.
   asignablesFotos: ['fotos', 'asignables'] as const,
-  fotosDeTarea: (tareaId: number) => ['fotos', 'tarea-fotos', tareaId] as const,
+  fotosDeActividad: (actividadId: number) => ['fotos', 'actividad-fotos', actividadId] as const,
   // Las del portal (§22) van con `'portal'` en 2.ª posición, como
   // `portalCarpeta` y `portalGaleria`. Clave distinta y no la misma con un
   // parámetro: lo que devuelve el portal está ANONIMIZADO en la galería, así
   // que compartir caché con la vista interna daría datos distintos bajo la
   // misma clave según quién preguntara primero.
-  portalTareas: (carpetaId: number) =>
-    ['fotos', 'portal', 'tareas', carpetaId] as const,
+  portalCiclos: (carpetaId: number) =>
+    ['fotos', 'portal', 'ciclos', carpetaId] as const,
+  portalActividades: (cicloId: number) =>
+    ['fotos', 'portal', 'actividades', cicloId] as const,
   portalComentarios: (entidad: string, entidadId: number) =>
     ['fotos', 'portal', 'comentarios', entidad, entidadId] as const,
-  portalFotosDeTarea: (tareaId: number) =>
-    ['fotos', 'portal', 'tarea-fotos', tareaId] as const,
+  portalFotosDeActividad: (actividadId: number) =>
+    ['fotos', 'portal', 'actividad-fotos', actividadId] as const,
 };
 
 // Debounce de los buscadores (ms).

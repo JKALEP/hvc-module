@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderIcon, HistoryIcon, LayoutTemplateIcon, PlusIcon, Trash2Icon, WrenchIcon, XIcon } from 'lucide-react';
+import { ActivityIcon, FolderIcon, HistoryIcon, LayersIcon, LayoutTemplateIcon, ListChecksIcon, PlusIcon, Trash2Icon, WrenchIcon, XIcon } from 'lucide-react';
 
 
 import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
@@ -27,7 +27,27 @@ import {
   COLOR_POR_DEFECTO,
   ETIQUETA_COLOR,
 } from '@/modules/fotos/lib/colores';
-import type { TipoCampoFotos } from '@/modules/fotos/types';
+import type { ColorEstado, TipoEvidencia, TipoCampoFotos } from '@/modules/fotos/types';
+import { ESTADO_A_VARIANTE, ETIQUETA_COLOR_ESTADO } from '@/modules/fotos/lib/colores';
+import {
+  useSistemas,
+  useCrearFamiliaSistema,
+  useEditarFamiliaSistema,
+  useEliminarFamiliaSistema,
+  useCrearTipoSistema,
+  useEditarTipoSistema,
+  useEliminarTipoSistema,
+  useCatalogoActividades,
+  useCrearDefinicionActividad,
+  useEditarDefinicionActividad,
+  useEliminarDefinicionActividad,
+} from '@/modules/fotos/hooks/useCatalogoFotos';
+import {
+  useEstadosEquipo,
+  useCrearEstadoEquipo,
+  useEditarEstadoEquipo,
+  useEliminarEstadoEquipo,
+} from '@/modules/fotos/hooks/useEstadosEquipo';
 import {
   useAuditoria,
   usePlantillas,
@@ -45,8 +65,12 @@ const ETIQUETA_ACCION: Record<string, string> = {
   MOVIMIENTO: 'Movimiento',
   ARCHIVADO: 'Archivado',
   REAPERTURA: 'Reapertura',
-  TAREA_COMPLETADA: 'Tarea completada',
-  TAREA_REABIERTA: 'Tarea reabierta',
+  // ⚠️ Históricas: nada nuevo las escribe desde la Fase 0, pero siguen en
+  // filas ya grabadas y sin etiqueta saldrían crudas en la tabla.
+  TAREA_COMPLETADA: 'Actividad completada',
+  TAREA_REABIERTA: 'Actividad reabierta',
+  ACTIVIDAD_COMPLETADA: 'Actividad completada',
+  ACTIVIDAD_REABIERTA: 'Actividad reabierta',
   SUBIDA_FOTO: 'Subida de fotos',
   DESCARGA_FOTO: 'Descarga',
   CLASIFICACION: 'Clasificación',
@@ -61,8 +85,7 @@ const ETIQUETA_ACCION: Record<string, string> = {
 };
 
 const TIPOS_NODO: { valor: TipoNodoPlantilla; etiqueta: string }[] = [
-  { valor: 'TAREA', etiqueta: 'Tarea' },
-  { valor: 'ALBUM', etiqueta: 'Álbum' },
+  { valor: 'ACTIVIDAD', etiqueta: 'Actividad' },
   { valor: 'CARPETA', etiqueta: 'Carpeta' },
 ];
 
@@ -77,20 +100,23 @@ const TIPOS_NODO: { valor: TipoNodoPlantilla; etiqueta: string }[] = [
  */
 export function AdminFotos() {
   const [pestana, setPestana] = useState<
-    'campos' | 'plantillas' | 'auditoria'
+    'campos' | 'sistemas' | 'catalogo' | 'estados' | 'plantillas' | 'auditoria'
   >('campos');
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Administración de Fotos"
-        description="Los datos que se piden de cada equipo, las plantillas de estructura y el registro de quién hizo qué."
+        description="El vocabulario del módulo —tipos de sistema, catálogo de actividades, estados y campos de equipo—, las plantillas de estructura y el registro de quién hizo qué."
       />
 
       <div className="flex gap-1 border-b border-border">
         {(
           [
             ['campos', 'Campos de equipo', WrenchIcon],
+            ['sistemas', 'Tipos de sistema', LayersIcon],
+            ['catalogo', 'Catálogo de actividades', ListChecksIcon],
+            ['estados', 'Estados de equipo', ActivityIcon],
             ['plantillas', 'Plantillas', LayoutTemplateIcon],
             ['auditoria', 'Auditoría', HistoryIcon],
           ] as const
@@ -113,6 +139,9 @@ export function AdminFotos() {
       </div>
 
       {pestana === 'campos' && <CamposDeEquipoAdmin />}
+      {pestana === 'sistemas' && <TiposDeSistema />}
+      {pestana === 'catalogo' && <CatalogoDeActividades />}
+      {pestana === 'estados' && <EstadosDeEquipo />}
       {pestana === 'plantillas' && <Plantillas />}
       {pestana === 'auditoria' && <Auditoria />}
     </div>
@@ -212,6 +241,539 @@ const TIPOS_CAMPO: { valor: TipoCampoFotos; etiqueta: string }[] = [
 const ETIQUETA_TIPO = Object.fromEntries(
   TIPOS_CAMPO.map((t) => [t.valor, t.etiqueta]),
 ) as Record<TipoCampoFotos, string>;
+
+/**
+ * El catálogo de estados de equipo (§7).
+ *
+ * ⚠️ Los tres que trae el sistema —Operativo, Operativo con observaciones,
+ * Inoperativo— son DATOS sembrados por la migración, no constantes: HVC
+ * puede renombrarlos, reordenarlos, retirar uno o añadir un cuarto sin que
+ * nadie toque código. Lo único cerrado es la PALETA, porque Tailwind solo
+ * genera las clases que ve escritas.
+ *
+ * Retirar (`activo`) y eliminar son dos cosas distintas y las dos existen:
+ * retirado deja de ofrecerse pero los ciclos que ya lo tenían lo conservan
+ * —son historial—; eliminar solo cabe si no lo usa ninguno, y el backend lo
+ * rechaza con un mensaje que ya dice cuántos son.
+ */
+function EstadosDeEquipo() {
+  const { data: estados, isError } = useEstadosEquipo();
+  const crear = useCrearEstadoEquipo();
+  const editar = useEditarEstadoEquipo();
+  const eliminar = useEliminarEstadoEquipo();
+
+  const [nombre, setNombre] = useState('');
+  const [color, setColor] = useState<ColorEstado>('VERDE');
+
+  const anadir = () => {
+    const limpio = nombre.trim();
+    if (!limpio) return;
+    crear.mutate(
+      { nombre: limpio, color, orden: (estados?.length ?? 0) + 1 },
+      { onSuccess: () => setNombre('') },
+    );
+  };
+
+  if (!estados && !isError)
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner />
+      </div>
+    );
+
+  return (
+    <PanelFotos as="section">
+      <h2 className="mb-1 font-medium text-foreground">Estados de equipo</h2>
+      <p className="mb-4 text-sm text-muted-foreground">
+        En qué condición quedó el equipo tras cada visita. Se elige dentro del
+        ciclo en curso y se ve en la tarjeta del explorador sin entrar.
+      </p>
+
+      <div className="mb-4 flex flex-wrap items-end gap-2">
+        <Input
+          className="w-56"
+          placeholder="Nombre del estado…"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+        />
+        <Select
+          className="w-64"
+          value={color}
+          onChange={(e) => setColor(e.target.value as ColorEstado)}
+        >
+          {(Object.keys(ETIQUETA_COLOR_ESTADO) as ColorEstado[]).map((c) => (
+            <option key={c} value={c}>
+              {ETIQUETA_COLOR_ESTADO[c]}
+            </option>
+          ))}
+        </Select>
+        <Button onClick={anadir} disabled={!nombre.trim() || crear.isPending}>
+          <PlusIcon className="size-4" />
+          Añadir
+        </Button>
+      </div>
+
+      {estados?.length === 0 && (
+        <EmptyState
+          icon={ActivityIcon}
+          title="Sin estados"
+          description="Añade al menos uno para poder calificar una visita."
+        />
+      )}
+
+      <ul className="space-y-2">
+        {(estados ?? []).map((e) => (
+          <li
+            key={e.id}
+            className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 px-3 py-2"
+          >
+            <Badge variant={ESTADO_A_VARIANTE[e.color]}>{e.nombre}</Badge>
+            {!e.activo && (
+              <span className="text-xs text-muted-foreground">Retirado</span>
+            )}
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {e._count?.ciclos ?? 0} ciclo(s)
+            </span>
+
+            <div className="ml-auto flex items-center gap-2">
+              <Select
+                className="w-56"
+                value={e.color}
+                onChange={(ev) =>
+                  editar.mutate({
+                    id: e.id,
+                    payload: { color: ev.target.value as ColorEstado },
+                  })
+                }
+              >
+                {(Object.keys(ETIQUETA_COLOR_ESTADO) as ColorEstado[]).map(
+                  (c) => (
+                    <option key={c} value={c}>
+                      {ETIQUETA_COLOR_ESTADO[c]}
+                    </option>
+                  ),
+                )}
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  editar.mutate({ id: e.id, payload: { activo: !e.activo } })
+                }
+              >
+                {e.activo ? 'Retirar' : 'Reactivar'}
+              </Button>
+              {/* Solo si nadie lo usa. Con ciclos detrás el backend contesta
+                  400 diciendo cuántos, y ofrecer un botón que responde 400 es
+                  peor que no ofrecerlo — el mismo criterio que el borrado de
+                  un álbum con fotos. */}
+              {(e._count?.ciclos ?? 0) === 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Eliminar ${e.nombre}`}
+                  onClick={() => eliminar.mutate(e.id)}
+                >
+                  <Trash2Icon className="size-4" />
+                </Button>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </PanelFotos>
+  );
+}
+
+/**
+ * Familias y tipos de sistema (§ Fase 2).
+ *
+ * ⚠️ Dos niveles y no una lista plana: con un solo desplegable de «Split»,
+ * «VRF», «Inyector», «Extractor»… nadie encuentra nada en obra. La familia es
+ * un dato administrable, no un enum: HVC puede añadir la tercera sin que
+ * nadie toque código.
+ */
+function TiposDeSistema() {
+  const { data: familias, isError } = useSistemas();
+  const crearFamilia = useCrearFamiliaSistema();
+  const editarFamilia = useEditarFamiliaSistema();
+  const eliminarFamilia = useEliminarFamiliaSistema();
+  const crearTipo = useCrearTipoSistema();
+  const editarTipo = useEditarTipoSistema();
+  const eliminarTipo = useEliminarTipoSistema();
+
+  const [nombreFamilia, setNombreFamilia] = useState('');
+  const [nuevoTipo, setNuevoTipo] = useState<Record<number, string>>({});
+
+  if (!familias && !isError)
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner />
+      </div>
+    );
+
+  return (
+    <PanelFotos as="section">
+      <h2 className="mb-1 font-medium text-foreground">Tipos de sistema</h2>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Qué clase de equipo es cada uno. De aquí sale la preselección del
+        checklist: el catálogo de actividades se asocia a estos tipos.
+      </p>
+
+      <div className="mb-4 flex flex-wrap items-end gap-2">
+        <Input
+          className="w-64"
+          placeholder="Nueva familia (p. ej. Refrigeración)…"
+          value={nombreFamilia}
+          onChange={(e) => setNombreFamilia(e.target.value)}
+        />
+        <Button
+          disabled={!nombreFamilia.trim() || crearFamilia.isPending}
+          onClick={() =>
+            crearFamilia.mutate(
+              { nombre: nombreFamilia.trim(), orden: (familias?.length ?? 0) + 1 },
+              { onSuccess: () => setNombreFamilia('') },
+            )
+          }
+        >
+          <PlusIcon className="size-4" />
+          Añadir familia
+        </Button>
+      </div>
+
+      {familias?.length === 0 && (
+        <EmptyState
+          icon={LayersIcon}
+          title="Sin familias"
+          description="Añade una para poder crear tipos de sistema dentro."
+        />
+      )}
+
+      <div className="space-y-4">
+        {(familias ?? []).map((f) => (
+          <div key={f.id} className="rounded-md border border-border/60 p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="font-medium text-foreground">{f.nombre}</span>
+              {!f.activo && (
+                <span className="text-xs text-muted-foreground">Retirada</span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    editarFamilia.mutate({
+                      id: f.id,
+                      payload: { activo: !f.activo },
+                    })
+                  }
+                >
+                  {f.activo ? 'Retirar' : 'Reactivar'}
+                </Button>
+                {/* Solo si está vacía: con tipos dentro el backend contesta
+                    400 y ofrecer el botón sería prometer un error. */}
+                {(f.tipos ?? []).length === 0 && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Eliminar ${f.nombre}`}
+                    onClick={() => eliminarFamilia.mutate(f.id)}
+                  >
+                    <Trash2Icon className="size-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <ul className="space-y-1">
+              {(f.tipos ?? []).map((t) => (
+                <li
+                  key={t.id}
+                  className="flex flex-wrap items-center gap-2 rounded-md bg-muted/30 px-2 py-1 text-sm"
+                >
+                  <span>{t.nombre}</span>
+                  {!t.activo && (
+                    <span className="text-xs text-muted-foreground">
+                      Retirado
+                    </span>
+                  )}
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {t._count?.carpetas ?? 0} equipo(s) ·{' '}
+                    {t._count?.actividades ?? 0} actividad(es)
+                  </span>
+                  <div className="ml-auto flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        editarTipo.mutate({
+                          id: t.id,
+                          payload: { activo: !t.activo },
+                        })
+                      }
+                    >
+                      {t.activo ? 'Retirar' : 'Reactivar'}
+                    </Button>
+                    {(t._count?.carpetas ?? 0) === 0 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Eliminar ${t.nombre}`}
+                        onClick={() => eliminarTipo.mutate(t.id)}
+                      >
+                        <Trash2Icon className="size-4" />
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <div className="mt-2 flex gap-2">
+              <Input
+                className="w-56"
+                placeholder="Nuevo tipo…"
+                value={nuevoTipo[f.id] ?? ''}
+                onChange={(e) =>
+                  setNuevoTipo((s) => ({ ...s, [f.id]: e.target.value }))
+                }
+              />
+              <Button
+                variant="outline"
+                disabled={!(nuevoTipo[f.id] ?? '').trim() || crearTipo.isPending}
+                onClick={() =>
+                  crearTipo.mutate(
+                    {
+                      familiaId: f.id,
+                      nombre: (nuevoTipo[f.id] ?? '').trim(),
+                      orden: (f.tipos?.length ?? 0) + 1,
+                    },
+                    {
+                      onSuccess: () =>
+                        setNuevoTipo((s) => ({ ...s, [f.id]: '' })),
+                    },
+                  )
+                }
+              >
+                <PlusIcon className="size-4" />
+                Añadir tipo
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </PanelFotos>
+  );
+}
+
+/**
+ * El catálogo de actividades estándar (§ Fase 2).
+ *
+ * ⚠️ Lo que se define aquí es una PROPUESTA. Al dar de alta un equipo se
+ * preselecciona lo de su tipo de sistema y quien lo crea lo ajusta; y lo que
+ * acaba en una visita es una COPIA del nombre. Por eso renombrar o borrar
+ * aquí no cambia ni una inspección ya hecha — y por eso el borrado no está
+ * bloqueado como el de un tipo de sistema, donde sí hay filas apuntando.
+ */
+/**
+ * Cómo se lee cada tipo de evidencia. Los MISMOS textos que el diálogo de una
+ * actividad: si divergen, la propuesta y lo propuesto dejan de parecer lo
+ * mismo. `Record` completo, así que añadir un tipo no compila hasta nombrarlo.
+ */
+const ETIQUETA_EVIDENCIA: Record<TipoEvidencia, string> = {
+  NINGUNA: 'No se pide foto',
+  UNA: 'Una foto',
+  ANTES_DESPUES: 'Antes y después',
+};
+
+function CatalogoDeActividades() {
+  const { data: catalogo, isError } = useCatalogoActividades();
+  const { data: familias } = useSistemas();
+  const crear = useCrearDefinicionActividad();
+  const editar = useEditarDefinicionActividad();
+  const eliminar = useEliminarDefinicionActividad();
+
+  const [nombre, setNombre] = useState('');
+  const [descripcion, setDescripcion] = useState('');
+  const [evidencia, setEvidencia] = useState<TipoEvidencia>('UNA');
+
+  const todosLosTipos = (familias ?? []).flatMap((f) =>
+    (f.tipos ?? []).map((t) => ({ ...t, familiaNombre: f.nombre })),
+  );
+
+  if (!catalogo && !isError)
+    return (
+      <div className="flex justify-center py-8">
+        <Spinner />
+      </div>
+    );
+
+  return (
+    <PanelFotos as="section">
+      <h2 className="mb-1 font-medium text-foreground">
+        Catálogo de actividades
+      </h2>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Lo que se propone al dar de alta un equipo, según su tipo de sistema.
+        Se puede añadir o quitar en cada visita: esto es la propuesta, no la
+        obligación.
+      </p>
+
+      <div className="mb-4 flex flex-wrap items-end gap-2">
+        <Input
+          className="w-64"
+          placeholder="Nombre de la actividad…"
+          value={nombre}
+          onChange={(e) => setNombre(e.target.value)}
+        />
+        <Input
+          className="w-72"
+          placeholder="Descripción (opcional)…"
+          value={descripcion}
+          onChange={(e) => setDescripcion(e.target.value)}
+        />
+        <Select
+          className="w-44"
+          aria-label="Evidencia que se propone"
+          value={evidencia}
+          onChange={(e) => setEvidencia(e.target.value as TipoEvidencia)}
+        >
+          {Object.entries(ETIQUETA_EVIDENCIA).map(([valor, etiqueta]) => (
+            <option key={valor} value={valor}>
+              {etiqueta}
+            </option>
+          ))}
+        </Select>
+        <Button
+          disabled={!nombre.trim() || crear.isPending}
+          onClick={() =>
+            crear.mutate(
+              {
+                nombre: nombre.trim(),
+                descripcion: descripcion.trim() || null,
+                orden: (catalogo?.length ?? 0) + 1,
+                evidencia,
+              },
+              {
+                onSuccess: () => {
+                  setNombre('');
+                  setDescripcion('');
+                },
+              },
+            )
+          }
+        >
+          <PlusIcon className="size-4" />
+          Añadir
+        </Button>
+      </div>
+
+      {catalogo?.length === 0 && (
+        <EmptyState
+          icon={ListChecksIcon}
+          title="Catálogo vacío"
+          description="Añade actividades y asígnalas a los tipos de sistema para que se propongan solas."
+        />
+      )}
+
+      <ul className="space-y-2">
+        {(catalogo ?? []).map((d) => (
+          <li key={d.id} className="rounded-md border border-border/60 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-foreground">{d.nombre}</span>
+              {!d.activo && (
+                <span className="text-xs text-muted-foreground">Retirada</span>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                {/* ⚠️ Cambiarla aquí NO reescribe las actividades ya creadas:
+                    la evidencia se COPIA al estamparla, como el nombre. Lo
+                    que cambia es lo que se propondrá la próxima vez. */}
+                <Select
+                  className="w-40"
+                  aria-label={`Evidencia de ${d.nombre}`}
+                  value={d.evidencia}
+                  onChange={(ev) =>
+                    editar.mutate({
+                      id: d.id,
+                      payload: { evidencia: ev.target.value as TipoEvidencia },
+                    })
+                  }
+                >
+                  {Object.entries(ETIQUETA_EVIDENCIA).map(([valor, etq]) => (
+                    <option key={valor} value={valor}>
+                      {etq}
+                    </option>
+                  ))}
+                </Select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    editar.mutate({ id: d.id, payload: { activo: !d.activo } })
+                  }
+                >
+                  {d.activo ? 'Retirar' : 'Reactivar'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Eliminar ${d.nombre}`}
+                  onClick={() => eliminar.mutate(d.id)}
+                >
+                  <Trash2Icon className="size-4" />
+                </Button>
+              </div>
+            </div>
+
+            {d.descripcion && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {d.descripcion}
+              </p>
+            )}
+
+            {/* La asociación a tipos, con casillas: es M:N porque «Limpieza de
+                filtros» aplica a casi todo, y duplicar la definición por tipo
+                devolvería el problema de los nombres parecidos. */}
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {todosLosTipos.length === 0 && (
+                <span className="text-xs text-muted-foreground">
+                  Todavía no hay tipos de sistema a los que asociarla.
+                </span>
+              )}
+              {todosLosTipos.map((t) => {
+                const puesto = d.tipos.some((x) => x.id === t.id);
+                return (
+                  <label
+                    key={t.id}
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={puesto}
+                      onChange={(e) =>
+                        editar.mutate({
+                          id: d.id,
+                          payload: {
+                            tiposSistema: e.target.checked
+                              ? [...d.tipos.map((x) => x.id), t.id]
+                              : d.tipos
+                                  .map((x) => x.id)
+                                  .filter((x) => x !== t.id),
+                          },
+                        })
+                      }
+                    />
+                    {t.familiaNombre} · {t.nombre}
+                  </label>
+                );
+              })}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </PanelFotos>
+  );
+}
 
 /**
  * Qué datos se piden de cada equipo.
@@ -444,7 +1006,7 @@ function Plantillas() {
   const [descripcion, setDescripcion] = useState('');
   const [nodos, setNodos] = useState<NodoPlantillaNuevo[]>([]);
   const [nuevoNodo, setNuevoNodo] = useState('');
-  const [tipoNodo, setTipoNodo] = useState<TipoNodoPlantilla>('TAREA');
+  const [tipoNodo, setTipoNodo] = useState<TipoNodoPlantilla>('ACTIVIDAD');
 
   const limpiar = () => {
     setNombre('');

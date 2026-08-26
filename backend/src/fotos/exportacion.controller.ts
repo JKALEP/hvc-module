@@ -24,7 +24,7 @@ const TIPO_EXCEL =
 /**
  * Las descargas del módulo Fotos (§69).
  *
- * Controller propio y no un endpoint más en `TareaController` y
+ * Controller propio y no un endpoint más en `ActividadController` y
  * `AdministracionFotosController`, por lo mismo que en Costos: los tres
  * documentos comparten la forma de responder —generar al vuelo y devolver
  * como adjunto— y esa mecánica escrita tres veces son tres sitios donde se
@@ -32,13 +32,13 @@ const TIPO_EXCEL =
  *
  * **Sin decorador de nivel ni de permiso.** Solo el módulo, igual que el
  * resto de Fotos: quién puede exportar QUÉ ya lo decide el service del que
- * se lee —LECTURA sobre la carpeta para las tareas y para el historial de
+ * se lee —LECTURA sobre la carpeta para las actividades y para el historial de
  * una carpeta, ADMIN_GLOBAL para la bitácora del módulo—. Poner aquí un
  * segundo candado sería duplicar la política justo donde es más fácil que
  * los dos se separen.
  *
  * Nada queda en el servidor: se genera y se envía. Un archivo guardado se
- * desincroniza del dato en cuanto alguien completa una tarea.
+ * desincroniza del dato en cuanto alguien completa una actividad.
  */
 @RequiereModulo(Modulo.FOTOS)
 @Controller('fotos')
@@ -48,9 +48,9 @@ export class ExportacionFotosController {
     private readonly exportacion: ExportacionService,
   ) {}
 
-  /** Las tareas de una carpeta (§13). */
-  @Get('carpeta/:id/tarea/exportar')
-  async exportarTareas(
+  /** Las actividades de UN CICLO (§13). */
+  @Get('ciclo/:id/actividad/exportar')
+  async exportarActividades(
     @Res() res: Response,
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
@@ -60,7 +60,7 @@ export class ExportacionFotosController {
     await this.enviar(
       res,
       formato,
-      await this.exportable.tareasDeCarpeta(usuario, id, { estado }),
+      await this.exportable.actividadesDeCiclo(usuario, id, { estado }),
     );
   }
 

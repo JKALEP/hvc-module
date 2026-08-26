@@ -11,7 +11,8 @@ import { Select } from '@/shared/ui/select';
 import { Spinner } from '@/shared/ui/spinner';
 import { cn } from '@/shared/lib/utils';
 import { useCarpeta } from '@/modules/fotos/hooks/useCarpetas';
-import { useTareas } from '@/modules/fotos/hooks/useTareas';
+import { useActividades } from '@/modules/fotos/hooks/useActividades';
+import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
 import {
   useBandeja,
   useSubirA,
@@ -24,7 +25,7 @@ import type { DestinoFotos } from '@/modules/fotos/types';
  *
  * §17 marca este punto como «muy importante» y dice por qué: el supervisor
  * está en obra con el celular y no se le puede pedir «entrar a carpeta →
- * crear subcarpeta → buscar equipo → buscar tarea → seleccionar foto →
+ * crear subcarpeta → buscar equipo → buscar actividad → seleccionar foto →
  * repetir». Así que aquí NO se navega: se elige el destino en dos selects y
  * se sube.
  *
@@ -40,8 +41,15 @@ export function CapturaRapida() {
   const { data: dentro } = useCarpeta(carpetaId);
 
   const esEquipo = dentro?.carpetaActual?.tipo === 'EQUIPO';
-  const { data: tareas } = useTareas(carpetaId, { habilitado: esEquipo });
-  const [tareaId, setTareaId] = useState<number | null>(null);
+  // ⚠️ Desde la Fase 4 la foto va a una VISITA, no a una carpeta: se toma la
+  // que esté en curso, que es donde se está trabajando. Sin ciclo abierto no
+  // hay dónde clasificar, y la pantalla lo dice.
+  const { data: ciclos } = useCiclos(carpetaId, { habilitado: esEquipo });
+  const cicloAbierto = (ciclos ?? []).find((c) => c.cerradoEn === null) ?? null;
+  const { data: actividades } = useActividades(cicloAbierto?.id ?? null, {
+    habilitado: cicloAbierto !== null,
+  });
+  const [actividadId, setActividadId] = useState<number | null>(null);
 
   const subir = useSubirA();
   const { data: bandeja, isError } = useBandeja();
@@ -53,11 +61,6 @@ export function CapturaRapida() {
 
   // Selección de la bandeja, para clasificar por lotes.
   const [elegidas, setElegidas] = useState<Set<number>>(new Set());
-  // Nombre del álbum que recogerá el lote (Fase 2c). Opcional: sin él, el
-  // álbum nace sin título como siempre y la pantalla lo distingue por su
-  // fecha. Antes NO había forma de ponérselo aquí — había que clasificar y
-  // después ir a editar el álbum, que es el paso de más que §18 evita.
-  const [nombreAlbum, setNombreAlbum] = useState('');
 
   const carpetasRaiz = (raiz?.secciones ?? []).flatMap((s) => s.carpetas);
   // ⚠️ Solo cuando hay proyecto elegido. `useCarpeta(null)` devuelve la
@@ -75,14 +78,14 @@ export function CapturaRapida() {
   };
 
   /**
-   * El destino, derivado de lo elegido. La tarea gana a la carpeta: si se
-   * eligió una, es más específica que la carpeta que la contiene.
+   * El destino, derivado de lo elegido. La actividad gana al ciclo: si se
+   * eligió una, es más específica que la visita que la contiene.
    */
   const destino: DestinoFotos =
-    tareaId !== null
-      ? { tipo: 'tarea', tareaId }
-      : carpetaId !== null
-        ? { tipo: 'carpeta', carpetaId }
+    actividadId !== null
+      ? { tipo: 'actividad', actividadId }
+      : cicloAbierto !== null
+        ? { tipo: 'ciclo', cicloId: cicloAbierto.id }
         : { tipo: 'bandeja' };
 
   const enviar = (aBandeja: boolean) => {
@@ -108,20 +111,8 @@ export function CapturaRapida() {
   const clasificarElegidas = () => {
     if (elegidas.size === 0 || destino.tipo === 'bandeja') return;
     clasificar.mutate(
-      {
-        fotoIds: [...elegidas],
-        destino,
-        // Solo viaja hacia una CARPETA: es el único caso en que se crea un
-        // álbum. Hacia una tarea o un álbum existente el servidor lo
-        // rechaza, y con razón — sería renombrar por la puerta de atrás.
-        album: destino.tipo === 'carpeta' ? { nombre: nombreAlbum } : undefined,
-      },
-      {
-        onSuccess: () => {
-          setElegidas(new Set());
-          setNombreAlbum('');
-        },
-      },
+      { fotoIds: [...elegidas], destino },
+      { onSuccess: () => setElegidas(new Set()) },
     );
   };
 
@@ -144,7 +135,7 @@ export function CapturaRapida() {
               value={carpetaId === null ? '' : String(carpetaId)}
               onChange={(e) => {
                 setCarpetaId(e.target.value === '' ? null : Number(e.target.value));
-                setTareaId(null);
+                setActividadId(null);
               }}
             >
               <option value="">Sin asignar</option>
@@ -169,7 +160,7 @@ export function CapturaRapida() {
               onChange={(e) => {
                 if (e.target.value === '') return;
                 setCarpetaId(Number(e.target.value));
-                setTareaId(null);
+                setActividadId(null);
               }}
             >
               <option value="">
@@ -185,19 +176,19 @@ export function CapturaRapida() {
 
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-foreground">
-              Tarea
+              Actividad
             </label>
             <Select
               disabled={!esEquipo}
-              value={tareaId === null ? '' : String(tareaId)}
+              value={actividadId === null ? '' : String(actividadId)}
               onChange={(e) =>
-                setTareaId(e.target.value === '' ? null : Number(e.target.value))
+                setActividadId(e.target.value === '' ? null : Number(e.target.value))
               }
             >
               <option value="">
                 {esEquipo ? 'Al álbum de la carpeta' : 'Solo en equipos'}
               </option>
-              {(tareas ?? []).map((t) => (
+              {(actividades ?? []).map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.titulo}
                 </option>
@@ -211,8 +202,8 @@ export function CapturaRapida() {
           <span className="font-medium text-foreground">
             {destino.tipo === 'bandeja'
               ? 'Bandeja de pendientes'
-              : destino.tipo === 'tarea'
-                ? `Tarea «${(tareas ?? []).find((t) => t.id === tareaId)?.titulo ?? ''}»`
+              : destino.tipo === 'actividad'
+                ? `Actividad «${(actividades ?? []).find((t) => t.id === actividadId)?.titulo ?? ''}»`
                 : (dentro?.carpetaActual?.nombre ?? '—')}
           </span>
         </p>
@@ -275,16 +266,6 @@ export function CapturaRapida() {
           </h2>
           {elegidas.size > 0 && (
             <div className="flex flex-wrap items-center gap-2">
-              {/* El nombre solo se ofrece si de verdad se va a crear un
-                  álbum: hacia una tarea no hay álbum que nombrar. */}
-              {destino.tipo === 'carpeta' && (
-                <Input
-                  value={nombreAlbum}
-                  onChange={(e) => setNombreAlbum(e.target.value)}
-                  placeholder="Nombre del álbum (opcional)"
-                  className="max-w-56"
-                />
-              )}
               <Button
                 onClick={clasificarElegidas}
                 disabled={destino.tipo === 'bandeja' || clasificar.isPending}

@@ -56,6 +56,9 @@ export function useCrearCarpeta() {
       tipo?: 'CARPETA' | 'EQUIPO';
       /** Los campos configurables del equipo (Fase 1b). */
       valores?: Record<string, unknown>;
+      /** El tipo de sistema y el checklist inicial (Fase 2). */
+      tipoSistemaId?: number | null;
+      actividades?: number[];
     }) => fotos.crearCarpeta(payload),
     onSuccess: (c, variables) => {
       invalidar();
@@ -79,7 +82,12 @@ export function useEditarCarpeta() {
       payload,
     }: {
       id: number;
-      payload: { nombre?: string; parentId?: number | null };
+      payload: {
+        nombre?: string;
+        parentId?: number | null;
+        /** Corregir el tipo de sistema de un equipo (Fase 2). */
+        tipoSistemaId?: number | null;
+      };
     }) => fotos.editarCarpeta(id, payload),
     onSuccess: () => {
       invalidar();

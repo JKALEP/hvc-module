@@ -6,7 +6,7 @@ import { cn } from '@/shared/lib/utils';
  * Sustituye a las variantes sueltas que convivían en el módulo sin
  * criterio: `rounded-2xl border border-border bg-card p-5 shadow-sm`
  * (Fotos.tsx), `rounded-xl border border-border bg-card p-4`
- * (Portal.tsx, PanelTareas.tsx, CapturaRapida.tsx), `surface p-4`
+ * (Portal.tsx, PanelActividades.tsx, CapturaRapida.tsx), `surface p-4`
  * (AdminFotos.tsx) y el componente `Card` de shared/ui (PanelSubida.tsx).
  *
  * Ninguna de esas variantes se elige como "la mejor": se usa la del

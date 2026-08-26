@@ -8,8 +8,11 @@
  *
  * Necesita el backend levantado (`npm run start:dev`).
  *
- *   node scripts/verificar-fotos.cjs            # todas las fases hechas
- *   node scripts/verificar-fotos.cjs --fase 2   # solo una
+ *   node scripts/verificar-fotos.cjs             # todas las fases hechas
+ *   node scripts/verificar-fotos.cjs --fase 2    # solo una
+ *   node scripts/verificar-fotos.cjs --fase 11   # ciclos (rediseno, fase 1)
+ *   node scripts/verificar-fotos.cjs --fase 12   # catalogo (rediseno, fase 2)
+ *   node scripts/verificar-fotos.cjs --fase 13   # evidencia (rediseno, fase 3)
  */
 require('dotenv').config({ path: require('node:path').join(__dirname, '..', '.env') });
 
@@ -123,13 +126,26 @@ async function entrar(email, password) {
 // ═════════════════════════════════════════════════════════════
 // FASE 1 — modelo de datos
 // ═════════════════════════════════════════════════════════════
+/**
+ * El ciclo ABIERTO de un equipo, que es donde se trabaja.
+ *
+ * Desde la Fase 1 las actividades cuelgan de un CICLO y no de la carpeta: al
+ * crear un equipo nace su Ciclo 1. Todas las llamadas de actividades del
+ * script pasan por aquí en vez de repetir la consulta.
+ */
+async function cicloAbiertoDe(carpetaId, token) {
+  const r = await api('GET', `/fotos/carpeta/${carpetaId}/ciclo`, token);
+  const abierto = (r.datos ?? []).find((c) => c.cerradoEn === null);
+  return abierto?.id ?? null;
+}
+
 async function fase1(db, token) {
   titulo('FASE 1 · estructura en la base');
 
   const tablasEsperadas = [
     'carpetas_fotos',
     'albumes_fotos',
-    'tareas_fotos',
+    'actividades_fotos',
     'comentarios_fotos',
     'eventos_fotos',
     'plantillas_estructura_fotos',
@@ -222,12 +238,12 @@ async function fase1(db, token) {
 
   const fotoDosDuenos = await debeFallar(
     db,
-    `INSERT INTO fotos ("albumId","tareaId","subidaPorId","claveImagen","claveMiniatura",
+    `INSERT INTO fotos ("cicloId","actividadId","subidaPorId","claveImagen","claveMiniatura",
                         "anchoPx","altoPx",bytes,"bytesOriginal",formato)
      VALUES (1,1,1,'a','b',1,1,1,1,'webp')`,
   );
   check(
-    'foto colgando de álbum Y tarea a la vez se rechaza',
+    'foto colgando de ciclo Y actividad a la vez se rechaza',
     fotoDosDuenos !== null &&
       (/un_solo_dueno/.test(fotoDosDuenos) || /fkey/.test(fotoDosDuenos)),
     /fkey/.test(fotoDosDuenos ?? '')
@@ -279,12 +295,27 @@ async function fase1(db, token) {
   const tarjeta = (dentro.datos?.secciones ?? []).flatMap(
     (s) => s.carpetas,
   )[0];
+  // ⚠️ La tarjeta contaba `albumes` además de `fotos`. Con los álbumes
+  // retirados (Fase 4) el otro agrupador sería «visitas», que es un dato del
+  // equipo y no del subárbol, así que se quedó solo el contador de fotos.
   check(
-    'la tarjeta cuenta `albumes`, no `lotes`',
-    Boolean(tarjeta) && 'albumes' in tarjeta && !('lotes' in tarjeta),
+    'la tarjeta cuenta `fotos`, y ya no `albumes` ni `lotes`',
+    Boolean(tarjeta) &&
+      'fotos' in tarjeta &&
+      !('albumes' in tarjeta) &&
+      !('lotes' in tarjeta),
     tarjeta ? Object.keys(tarjeta).join(',') : 'sin tarjeta',
   );
-  check('la tarjeta ya no trae `estado`', Boolean(tarjeta) && !('estado' in tarjeta));
+  // ⚠️ Sigue sin traer `estado` —el `EstadoSede` ACTIVA/INACTIVA que se
+  // retiró—, y desde la Fase 1 del rediseño trae `estadoEquipo`, que es otra
+  // cosa: el estado del equipo en su ciclo más reciente. El nombre es
+  // distinto justamente para que esta comprobación siga significando lo que
+  // significaba.
+  check(
+    'la tarjeta ya no trae `estado` (el `EstadoSede` retirado)',
+    Boolean(tarjeta) && !('estado' in tarjeta),
+    tarjeta ? Object.keys(tarjeta).join(',') : 'sin tarjeta',
+  );
 }
 
 // ═════════════════════════════════════════════════════════════
@@ -787,34 +818,39 @@ async function fase3(db, tokenAdmin) {
   const obra = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: `__verif_obra ${Date.now()}`,
   });
+  // ⚠️ De tipo EQUIPO desde la Fase 4: las fotos cuelgan de un CICLO, y solo
+  // un equipo tiene ciclos. Una carpeta corriente ya no puede tener fotos.
   const visible = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: 'Visible',
     parentId: obra.datos.id,
+    tipo: 'EQUIPO',
   });
   const oculta = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: 'Oculta',
     parentId: obra.datos.id,
+    tipo: 'EQUIPO',
   });
   pendientesDeLimpiar.unshift(visible.datos.id, oculta.datos.id, obra.datos.id);
 
-  // Álbumes y fotos por SQL: contar no necesita subir nada a R2.
+  // Fotos por SQL: contar no necesita subir nada a R2. Cuelgan del ciclo que
+  // el equipo trae de fábrica, que es donde vive ahora una foto suelta.
   const sembrarFotos = async (carpetaId, cuantas) => {
-    const album = await db.query(
-      `INSERT INTO albumes_fotos ("carpetaId","creadoPorId","actualizadoEn")
-       VALUES ($1,$2,NOW()) RETURNING id`,
-      [carpetaId, 1],
+    const ciclo = await db.query(
+      'SELECT id FROM ciclos_fotos WHERE "carpetaId" = $1 LIMIT 1',
+      [carpetaId],
     );
+    const cicloId = ciclo.rows[0].id;
     for (let i = 0; i < cuantas; i++)
       await db.query(
-        `INSERT INTO fotos ("albumId","subidaPorId","claveImagen","claveMiniatura",
+        `INSERT INTO fotos ("cicloId","subidaPorId","claveImagen","claveMiniatura",
                             "anchoPx","altoPx",bytes,"bytesOriginal",formato)
          VALUES ($1,$2,$3,$4,10,10,10,10,'webp')`,
-        [album.rows[0].id, 1, `__v/${carpetaId}/${i}`, `__v/${carpetaId}/t${i}`],
+        [cicloId, 1, `__v/${carpetaId}/${i}`, `__v/${carpetaId}/t${i}`],
       );
-    return album.rows[0].id;
+    return cicloId;
   };
-  const albumVisible = await sembrarFotos(visible.datos.id, 2);
-  const albumOculta = await sembrarFotos(oculta.datos.id, 3);
+  const cicloVisible = await sembrarFotos(visible.datos.id, 2);
+  const cicloOculta = await sembrarFotos(oculta.datos.id, 3);
 
   await api('POST', '/fotos/compartir', tokenAdmin, {
     email: supervisor.email,
@@ -838,7 +874,7 @@ async function fase3(db, tokenAdmin) {
   check(
     'el SuperAdmin ve las 5 fotos del subárbol',
     paraAdmin?.fotos === 5,
-    `fotos=${paraAdmin?.fotos} albumes=${paraAdmin?.albumes} subcarpetas=${paraAdmin?.subcarpetas}`,
+    `fotos=${paraAdmin?.fotos} subcarpetas=${paraAdmin?.subcarpetas}`,
   );
 
   // El supervisor llega a Obra por lo compartido, así que la tarjeta le sale
@@ -848,11 +884,6 @@ async function fase3(db, tokenAdmin) {
     'el supervisor solo cuenta las 2 de la rama que ve, no las 5',
     paraSupervisor?.fotos === 2,
     `fotos=${paraSupervisor?.fotos}`,
-  );
-  check(
-    'y solo 1 álbum, no 2',
-    paraSupervisor?.albumes === 1,
-    `albumes=${paraSupervisor?.albumes}`,
   );
   check(
     'y solo 1 subcarpeta, no 2',
@@ -1115,11 +1146,8 @@ async function fase3(db, tokenAdmin) {
   );
 
   // Limpieza de lo sembrado por SQL (las FK son Restrict hacia carpetas).
-  await db.query('DELETE FROM fotos WHERE "albumId" = ANY($1)', [
-    [albumVisible, albumOculta],
-  ]);
-  await db.query('DELETE FROM albumes_fotos WHERE id = ANY($1)', [
-    [albumVisible, albumOculta],
+  await db.query('DELETE FROM fotos WHERE "cicloId" = ANY($1)', [
+    [cicloVisible, cicloOculta],
   ]);
   await api('DELETE', `/usuario/${supervisor.id}`, tokenAdmin);
 }
@@ -1782,15 +1810,12 @@ async function fase4(db, tokenAdmin) {
 
     // ⚠️ NO es una fila de `Foto`: no entra en la galería ni en los
     // contadores de la carpeta. Es la decisión del modelo.
-    const galeria = await api(
-      'GET',
-      `/fotos/carpeta/${equipoId}/album`,
-      tokenAdmin,
-    );
+    const cicloEq = await cicloAbiertoDe(equipoId, tokenAdmin);
+    const galeria = await api('GET', `/fotos/ciclo/${cicloEq}/foto`, tokenAdmin);
     check(
       'la imagen de un campo NO aparece en la galería: no es evidencia',
-      galeria.estado === 200 && (galeria.datos?.albumes ?? []).length === 0,
-      `${(galeria.datos?.albumes ?? []).length} álbum(es)`,
+      galeria.estado === 200 && (galeria.datos?.fotos ?? []).length === 0,
+      `${(galeria.datos?.fotos ?? []).length} foto(s)`,
     );
 
     const sinPermiso = await subirUnaImagen(
@@ -1905,7 +1930,7 @@ async function fase5(db, tokenAdmin) {
   });
   pendientesDeLimpiar.unshift(raiz.datos.id);
 
-  // Una carpeta CORRIENTE y una de EQUIPO: §13 solo admite tareas en la
+  // Una carpeta CORRIENTE y una de EQUIPO: §13 solo admite actividades en la
   // segunda, y sin las dos no se puede comprobar que la distingue.
   const corriente = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: 'Carpeta corriente',
@@ -1927,30 +1952,41 @@ async function fase5(db, tokenAdmin) {
   pendientesDeLimpiar.unshift(equipo.datos.id);
   const equipoId = equipo.datos.id;
 
-  titulo('FASE 5 · las tareas viven dentro de un EQUIPO (§13)');
+  titulo('FASE 5 · las actividades viven dentro de un EQUIPO (§13)');
 
-  const enCorriente = await api(
-    'POST',
-    `/fotos/carpeta/${corriente.datos.id}/tarea`,
+  // Desde la Fase 1 §13 se hace cumplir un escalón más arriba: los CICLOS son
+  // de un equipo, y las actividades cuelgan de un ciclo. Una carpeta corriente
+  // no tiene dónde ponerlas porque no tiene ciclos.
+  const cicloCorriente = await api(
+    'GET',
+    `/fotos/carpeta/${corriente.datos.id}/ciclo`,
     tokenAdmin,
-    { titulo: 'No debería poder' },
   );
   check(
-    'una carpeta corriente NO admite tareas — es la lectura estricta de §13',
-    enCorriente.estado === 400 && /no lo es/.test(enCorriente.datos?.message ?? ''),
-    `HTTP ${enCorriente.estado} · ${enCorriente.datos?.message ?? ''}`,
+    'una carpeta corriente NO tiene ciclos — es la lectura estricta de §13',
+    cicloCorriente.estado === 400 &&
+      /no lo es/.test(cicloCorriente.datos?.message ?? ''),
+    `HTTP ${cicloCorriente.estado} · ${cicloCorriente.datos?.message ?? ''}`,
   );
 
-  const sinTitulo = await api('POST', `/fotos/carpeta/${equipoId}/tarea`, tokenAdmin, {
+  const cicloEquipo = await cicloAbiertoDe(equipoId, tokenAdmin);
+  check(
+    'un equipo recién creado nace con su Ciclo 1 abierto (§4.2)',
+    cicloEquipo !== null,
+    `cicloId=${cicloEquipo}`,
+  );
+  if (!cicloEquipo) return;
+
+  const sinTitulo = await api('POST', `/fotos/ciclo/${cicloEquipo}/actividad`, tokenAdmin, {
     descripcion: 'sin título',
   });
   check(
-    'una tarea sin título se rechaza',
+    'una actividad sin título se rechaza',
     sinTitulo.estado === 400,
     `HTTP ${sinTitulo.estado}`,
   );
 
-  const estadoRaro = await api('POST', `/fotos/carpeta/${equipoId}/tarea`, tokenAdmin, {
+  const estadoRaro = await api('POST', `/fotos/ciclo/${cicloEquipo}/actividad`, tokenAdmin, {
     titulo: 'X',
     estado: 'CASI',
   });
@@ -1960,7 +1996,7 @@ async function fase5(db, tokenAdmin) {
     `HTTP ${estadoRaro.estado}`,
   );
 
-  const tarea = await api('POST', `/fotos/carpeta/${equipoId}/tarea`, tokenAdmin, {
+  const actividad = await api('POST', `/fotos/ciclo/${cicloEquipo}/actividad`, tokenAdmin, {
     titulo: 'Revisar estado estructural',
     descripcion: 'Chasis y anclajes',
     prioridad: 'ALTA',
@@ -1968,24 +2004,24 @@ async function fase5(db, tokenAdmin) {
     responsableId: editorG.id,
   });
   check(
-    'se crea una tarea con responsable, prioridad y fecha',
-    tarea.estado === 201 &&
-      tarea.datos?.estado === 'PENDIENTE' &&
-      tarea.datos?.responsable?.id === editorG.id,
-    `HTTP ${tarea.estado} · estado=${tarea.datos?.estado} prioridad=${tarea.datos?.prioridad}`,
+    'se crea una actividad con responsable, prioridad y fecha',
+    actividad.estado === 201 &&
+      actividad.datos?.estado === 'PENDIENTE' &&
+      actividad.datos?.responsable?.id === editorG.id,
+    `HTTP ${actividad.estado} · estado=${actividad.datos?.estado} prioridad=${actividad.datos?.prioridad}`,
   );
-  const tareaId = tarea.datos?.id;
-  if (!tareaId) return;
+  const actividadId = actividad.datos?.id;
+  if (!actividadId) return;
 
   check(
     'nace sin marca de completada',
-    tarea.datos.completadaEn === null && tarea.datos.completadaPor === null,
-    `completadaEn=${tarea.datos.completadaEn}`,
+    actividad.datos.completadaEn === null && actividad.datos.completadaPor === null,
+    `completadaEn=${actividad.datos.completadaEn}`,
   );
 
   titulo('FASE 5 · el check rápido de §13');
 
-  const completada = await api('POST', `/fotos/tarea/${tareaId}/completar`, tokenAdmin);
+  const completada = await api('POST', `/fotos/actividad/${actividadId}/completar`, tokenAdmin);
   check(
     'completar registra fecha/hora Y quién la completó (§13)',
     completada.estado === 201 &&
@@ -1995,7 +2031,7 @@ async function fase5(db, tokenAdmin) {
     `estado=${completada.datos?.estado} por=${completada.datos?.completadaPor?.nombre}`,
   );
 
-  const reabierta = await api('POST', `/fotos/tarea/${tareaId}/reabrir`, tokenAdmin);
+  const reabierta = await api('POST', `/fotos/actividad/${actividadId}/reabrir`, tokenAdmin);
   check(
     'reabrir vuelve a PENDIENTE y BORRA la marca — no deja un dato que ya no es cierto',
     reabierta.datos?.estado === 'PENDIENTE' &&
@@ -2006,7 +2042,7 @@ async function fase5(db, tokenAdmin) {
 
   // La misma marca por el camino del PATCH: si sólo la escribiera la ruta
   // del check, editar el estado a mano dejaría una completada sin firma.
-  const porPatch = await api('PATCH', `/fotos/tarea/${tareaId}`, tokenAdmin, {
+  const porPatch = await api('PATCH', `/fotos/actividad/${actividadId}`, tokenAdmin, {
     estado: 'COMPLETADA',
   });
   check(
@@ -2014,14 +2050,14 @@ async function fase5(db, tokenAdmin) {
     porPatch.datos?.completadaEn && porPatch.datos?.completadaPor?.id,
     `completadaPor=${porPatch.datos?.completadaPor?.nombre ?? '(nadie)'}`,
   );
-  await api('POST', `/fotos/tarea/${tareaId}/reabrir`, tokenAdmin);
+  await api('POST', `/fotos/actividad/${actividadId}/reabrir`, tokenAdmin);
 
-  titulo('FASE 5 · editar una tarea no pisa lo que no llega');
+  titulo('FASE 5 · editar una actividad no pisa lo que no llega');
 
-  await api('PATCH', `/fotos/tarea/${tareaId}`, tokenAdmin, {
+  await api('PATCH', `/fotos/actividad/${actividadId}`, tokenAdmin, {
     estado: 'EN_PROCESO',
   });
-  const tras = await api('GET', `/fotos/tarea/${tareaId}`, tokenAdmin);
+  const tras = await api('GET', `/fotos/actividad/${actividadId}`, tokenAdmin);
   check(
     'mandar solo {estado} conserva descripción, prioridad y responsable',
     tras.datos?.descripcion === 'Chasis y anclajes' &&
@@ -2030,16 +2066,16 @@ async function fase5(db, tokenAdmin) {
     `descripcion=${tras.datos?.descripcion} prioridad=${tras.datos?.prioridad}`,
   );
 
-  titulo('FASE 5 · permisos de tareas (§5, todo por AccesoService)');
+  titulo('FASE 5 · permisos de actividades (§5, todo por AccesoService)');
 
-  const verLector = await api('GET', `/fotos/carpeta/${equipoId}/tarea`, lectorG.token);
+  const verLector = await api('GET', `/fotos/ciclo/${cicloEquipo}/actividad`, lectorG.token);
   check(
-    'LECTURA_GLOBAL ve las tareas',
+    'LECTURA_GLOBAL ve las actividades',
     verLector.estado === 200 && (verLector.datos ?? []).length > 0,
-    `HTTP ${verLector.estado} · ${verLector.datos?.length ?? '?'} tareas`,
+    `HTTP ${verLector.estado} · ${verLector.datos?.length ?? '?'} actividades`,
   );
 
-  const crearLector = await api('POST', `/fotos/carpeta/${equipoId}/tarea`, lectorG.token, {
+  const crearLector = await api('POST', `/fotos/ciclo/${cicloEquipo}/actividad`, lectorG.token, {
     titulo: 'No debería',
   });
   check(
@@ -2050,7 +2086,7 @@ async function fase5(db, tokenAdmin) {
 
   const completarLector = await api(
     'POST',
-    `/fotos/tarea/${tareaId}/completar`,
+    `/fotos/actividad/${actividadId}/completar`,
     lectorG.token,
   );
   check(
@@ -2059,27 +2095,27 @@ async function fase5(db, tokenAdmin) {
     `HTTP ${completarLector.estado}`,
   );
 
-  const verAjeno = await api('GET', `/fotos/carpeta/${equipoId}/tarea`, ajeno.token);
+  const verAjeno = await api('GET', `/fotos/ciclo/${cicloEquipo}/actividad`, ajeno.token);
   check(
     'quien no ve la carpeta recibe 404, no 403: no se le confirma que exista',
     verAjeno.estado === 404,
     `HTTP ${verAjeno.estado}`,
   );
 
-  const tareaAjeno = await api('GET', `/fotos/tarea/${tareaId}`, ajeno.token);
+  const actividadAjena = await api('GET', `/fotos/actividad/${actividadId}`, ajeno.token);
   check(
-    'y tampoco por el id de la tarea',
-    tareaAjeno.estado === 404,
-    `HTTP ${tareaAjeno.estado}`,
+    'y tampoco por el id de la actividad',
+    actividadAjena.estado === 404,
+    `HTTP ${actividadAjena.estado}`,
   );
 
   titulo('FASE 5 · comentarios en las cuatro entidades (§14)');
 
-  // El álbum se siembra por SQL a propósito: hoy `POST carpeta/:id/album` es
-  // la SUBIDA de fotos (multipart), y el alta de un álbum con nombre la
-  // construye la Fase 6. Lo que se verifica aquí es el COMENTARIO sobre un
-  // álbum, que es lo que §14 exige y ya está implementado — sembrarlo por la
-  // API obligaría a subir un archivo real para probar otra cosa.
+  // ⚠️ El álbum se siembra por SQL porque desde la Fase 4 del rediseño **no
+  // hay forma de crear uno**: se retiraron. La fila sobrevive como historia
+  // de solo lectura, y lo que se comprueba aquí es que un comentario sobre un
+  // álbum ANTIGUO se sigue pudiendo leer y escribir — que es la razón por la
+  // que la tabla no se borró.
   const albumSembrado = await db.query(
     `INSERT INTO albumes_fotos ("carpetaId", nombre, "creadoPorId", "creadoEn", "actualizadoEn")
      VALUES ($1, '__verif álbum', (SELECT id FROM usuarios WHERE rol = 'SUPERADMIN' LIMIT 1), now(), now())
@@ -2093,7 +2129,7 @@ async function fase5(db, tokenAdmin) {
   const objetivos = [
     ['carpeta', corriente.datos.id, 'una carpeta corriente'],
     ['carpeta', equipoId, 'un equipo (que es una carpeta de tipo EQUIPO)'],
-    ['tarea', tareaId, 'una tarea'],
+    ['actividad', actividadId, 'una actividad'],
     ['album', albumId, 'un álbum'],
   ];
 
@@ -2125,7 +2161,7 @@ async function fase5(db, tokenAdmin) {
     `HTTP ${entidadRara.estado}`,
   );
 
-  const vacio = await api('POST', `/fotos/comentario/tarea/${tareaId}`, tokenAdmin, {
+  const vacio = await api('POST', `/fotos/comentario/actividad/${actividadId}`, tokenAdmin, {
     texto: '   ',
   });
   check(
@@ -2136,7 +2172,7 @@ async function fase5(db, tokenAdmin) {
 
   // El CHECK de la BD sigue en pie por debajo del service.
   const dueños = await db.query(
-    `SELECT ("carpetaId" IS NOT NULL)::int + ("tareaId" IS NOT NULL)::int
+    `SELECT ("carpetaId" IS NOT NULL)::int + ("actividadId" IS NOT NULL)::int
           + ("albumId" IS NOT NULL)::int + ("fotoId" IS NOT NULL)::int AS n
        FROM comentarios_fotos`,
   );
@@ -2148,9 +2184,9 @@ async function fase5(db, tokenAdmin) {
 
   titulo('FASE 5 · leer, editar y borrar comentarios');
 
-  const lista = await api('GET', `/fotos/comentario/tarea/${tareaId}`, tokenAdmin);
+  const lista = await api('GET', `/fotos/comentario/actividad/${actividadId}`, tokenAdmin);
   check(
-    'los comentarios de una tarea se listan en orden de conversación',
+    'los comentarios de una actividad se listan en orden de conversación',
     lista.estado === 200 && (lista.datos ?? []).length > 0,
     `HTTP ${lista.estado} · ${lista.datos?.length ?? '?'} comentarios`,
   );
@@ -2160,7 +2196,7 @@ async function fase5(db, tokenAdmin) {
     `editadoEn=${lista.datos?.[0]?.editadoEn}`,
   );
 
-  const mio = creados.find((c) => c.entidad === 'tarea');
+  const mio = creados.find((c) => c.entidad === 'actividad');
   const editado = await api('PATCH', `/fotos/comentario/${mio.id}`, tokenAdmin, {
     texto: 'Corregido',
   });
@@ -2184,7 +2220,7 @@ async function fase5(db, tokenAdmin) {
 
   const lectorComenta = await api(
     'POST',
-    `/fotos/comentario/tarea/${tareaId}`,
+    `/fotos/comentario/actividad/${actividadId}`,
     lectorG.token,
     { texto: 'Desde lectura' },
   );
@@ -2194,7 +2230,7 @@ async function fase5(db, tokenAdmin) {
     `HTTP ${lectorComenta.estado}`,
   );
 
-  const lectorLee = await api('GET', `/fotos/comentario/tarea/${tareaId}`, lectorG.token);
+  const lectorLee = await api('GET', `/fotos/comentario/actividad/${actividadId}`, lectorG.token);
   check(
     'y leerlos sí puede',
     lectorLee.estado === 200,
@@ -2203,7 +2239,7 @@ async function fase5(db, tokenAdmin) {
 
   const propioDelEditor = await api(
     'POST',
-    `/fotos/comentario/tarea/${tareaId}`,
+    `/fotos/comentario/actividad/${actividadId}`,
     editorG.token,
     { texto: 'Del editor' },
   );
@@ -2229,18 +2265,18 @@ async function fase5(db, tokenAdmin) {
 
   await api('POST', `/fotos/carpeta/${raiz.datos.id}/archivar`, tokenAdmin);
 
-  const enArchivada = await api('POST', `/fotos/carpeta/${equipoId}/tarea`, tokenAdmin, {
+  const enArchivada = await api('POST', `/fotos/ciclo/${cicloEquipo}/actividad`, tokenAdmin, {
     titulo: 'En rama cerrada',
   });
   check(
-    'no se crean tareas en una rama archivada, ni siendo SuperAdmin',
+    'no se crean actividades en una rama archivada, ni siendo SuperAdmin',
     enArchivada.estado === 403 && /archivada/.test(enArchivada.datos?.message ?? ''),
     `HTTP ${enArchivada.estado}`,
   );
 
   const comentaArchivada = await api(
     'POST',
-    `/fotos/comentario/tarea/${tareaId}`,
+    `/fotos/comentario/actividad/${actividadId}`,
     tokenAdmin,
     { texto: 'En rama cerrada' },
   );
@@ -2250,7 +2286,7 @@ async function fase5(db, tokenAdmin) {
     `HTTP ${comentaArchivada.estado}`,
   );
 
-  const leeArchivada = await api('GET', `/fotos/carpeta/${equipoId}/tarea`, tokenAdmin);
+  const leeArchivada = await api('GET', `/fotos/ciclo/${cicloEquipo}/actividad`, tokenAdmin);
   check(
     'pero leer sigue funcionando: archivada es de SOLO LECTURA, no invisible',
     leeArchivada.estado === 200,
@@ -2259,18 +2295,18 @@ async function fase5(db, tokenAdmin) {
 
   await api('POST', `/fotos/carpeta/${raiz.datos.id}/reabrir`, tokenAdmin);
 
-  titulo('FASE 5 · borrar una tarea');
+  titulo('FASE 5 · borrar una actividad');
 
-  const conComentarios = await api('DELETE', `/fotos/tarea/${tareaId}`, tokenAdmin);
+  const conComentarios = await api('DELETE', `/fotos/actividad/${actividadId}`, tokenAdmin);
   check(
-    'borrar una tarea se lleva sus comentarios (Cascade), no falla por ellos',
+    'borrar una actividad se lleva sus comentarios (Cascade), no falla por ellos',
     conComentarios.estado === 200,
     `HTTP ${conComentarios.estado}`,
   );
 
   const huerfanos = await db.query(
-    'SELECT count(*)::int n FROM comentarios_fotos WHERE "tareaId" = $1',
-    [tareaId],
+    'SELECT count(*)::int n FROM comentarios_fotos WHERE "actividadId" = $1',
+    [actividadId],
   );
   check(
     'y no deja comentarios huérfanos',
@@ -2354,125 +2390,148 @@ async function fase6(db, tokenAdmin) {
   pendientesDeLimpiar.unshift(raiz.datos.id);
   const carpetaId = raiz.datos.id;
 
-  titulo('FASE 6 · álbum con nombre (§16)');
+  titulo('FASE 6 · las fotos sueltas de una visita (§15, Fase 4)');
 
-  const sinNombre = await api(
-    'POST',
-    `/fotos/album/carpeta/${carpetaId}`,
-    tokenAdmin,
-    {},
-  );
-  check(
-    'crear un álbum sin nombre por esta puerta se rechaza',
-    sinNombre.estado === 400,
-    `HTTP ${sinNombre.estado} · ${sinNombre.datos?.message ?? ''}`,
-  );
-
-  const album = await api(
-    'POST',
-    `/fotos/album/carpeta/${carpetaId}`,
-    tokenAdmin,
-    {
-      nombre: 'Estado inicial',
-      descripcion: 'Antes de intervenir',
-      fecha: '2026-08-18',
-    },
-  );
-  check(
-    'se crea el álbum de §16 («Equipo ABC → Álbum Estado inicial»)',
-    album.estado === 201 && album.datos?.nombre === 'Estado inicial',
-    `HTTP ${album.estado} · nombre=${album.datos?.nombre} fecha=${String(album.datos?.fecha).slice(0, 10)}`,
-  );
-  const albumId = album.datos?.id;
-  if (!albumId) return;
-
-  check(
-    'nace vacío y sin comentarios',
-    album.datos._count.fotos === 0 && album.datos._count.comentarios === 0,
-    JSON.stringify(album.datos._count),
-  );
-
-  const renombrado = await api('PATCH', `/fotos/album/${albumId}`, tokenAdmin, {
-    nombre: 'Estado inicial (rev. B)',
+  // ⚠️ Este bloque probaba el ÁLBUM CON NOMBRE de §16: crearlo vacío,
+  // renombrarlo, subirle fotos y borrarlo. Los álbumes se retiraron en la
+  // Fase 4 del rediseño, y su papel —agrupar lo que se documenta de una
+  // visita— lo hace el CICLO, que ya existe y no hay que crear.
+  //
+  // Lo que se comprueba ahora es lo que sustituye a aquello: que una foto
+  // suelta entra en el ciclo, que la galería la devuelve, y que las rutas de
+  // álbum ya no existen.
+  const equipoF6 = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo con fotos sueltas',
+    parentId: carpetaId,
+    tipo: 'EQUIPO',
   });
-  check(
-    'se renombra sin tocar lo que no llega',
-    renombrado.datos?.nombre === 'Estado inicial (rev. B)' &&
-      renombrado.datos?.descripcion === 'Antes de intervenir',
-    `nombre=${renombrado.datos?.nombre} descripcion=${renombrado.datos?.descripcion}`,
-  );
-
-  if (!r2Configurado) {
-    await api('DELETE', `/usuario/${otro.id}`, tokenAdmin);
-    return;
-  }
-
-  titulo('FASE 6 · subir a los cuatro destinos');
-
+  pendientesDeLimpiar.unshift(equipoF6.datos?.id);
+  const cicloF6 = await cicloAbiertoDe(equipoF6.datos?.id, tokenAdmin);
   const img = await imagenDePrueba();
 
-  const aAlbum = await subirFotos(`/fotos/album/${albumId}/foto`, tokenAdmin, [
+  const sueltas = await subirFotos(`/fotos/ciclo/${cicloF6}/foto`, tokenAdmin, [
     img,
     img,
   ]);
   check(
-    'se suben fotos a un álbum que YA existe (§16)',
-    aAlbum.estado === 201 && aAlbum.datos?.subidas === 2,
-    `HTTP ${aAlbum.estado} · ${aAlbum.datos?.subidas ?? '?'} subidas`,
+    'se suben fotos sueltas a la visita',
+    sueltas.estado === 201 && sueltas.datos?.subidas === 2,
+    `HTTP ${sueltas.estado} · ${sueltas.datos?.subidas ?? '?'} subidas`,
   );
   check(
-    'y NO crea un álbum nuevo: caen en el que se le indicó',
-    aAlbum.datos?.albumId === albumId,
-    `albumId=${aAlbum.datos?.albumId} (esperado ${albumId})`,
+    'y cuelgan del CICLO, no de ningún álbum',
+    sueltas.datos?.cicloId === cicloF6,
+    `cicloId=${sueltas.datos?.cicloId} (esperado ${cicloF6})`,
   );
 
-  // Una carpeta de tipo EQUIPO para poder tener tarea. Desde la Fase 1a no
+  const galeriaF6 = await api('GET', `/fotos/ciclo/${cicloF6}/foto`, tokenAdmin);
+  check(
+    'la galería de la visita es una lista PLANA de fotos, sin nivel de álbum',
+    galeriaF6.estado === 200 &&
+      Array.isArray(galeriaF6.datos?.fotos) &&
+      galeriaF6.datos.fotos.length === 2 &&
+      !('albumes' in (galeriaF6.datos ?? {})),
+    `${galeriaF6.datos?.fotos?.length} foto(s) · claves=${Object.keys(galeriaF6.datos ?? {}).join(',')}`,
+  );
+  check(
+    'cada foto trae su URL firmada y su miniatura',
+    (galeriaF6.datos?.fotos ?? []).every((f) => f.url && f.urlMiniatura),
+  );
+
+  const autoresF6 = await api(
+    'GET',
+    `/fotos/ciclo/${cicloF6}/autores`,
+    tokenAdmin,
+  );
+  check(
+    'el filtro por autor se pide por CICLO y cuenta fotos, no álbumes',
+    autoresF6.estado === 200 &&
+      (autoresF6.datos ?? []).length === 1 &&
+      autoresF6.datos[0].fotos === 2,
+    JSON.stringify(autoresF6.datos ?? []),
+  );
+
+  // Las puertas que se cerraron. Se comprueban una a una porque un endpoint
+  // retirado que sigue respondiendo es exactamente el fallo que este script
+  // existe para cazar.
+  for (const [metodo, ruta, etiqueta] of [
+    ['POST', `/fotos/album/carpeta/${carpetaId}`, 'crear un álbum'],
+    ['PATCH', '/fotos/album/1', 'editar un álbum'],
+    ['DELETE', '/fotos/album/1', 'eliminar un álbum'],
+    ['POST', '/fotos/album/1/foto', 'subir a un álbum'],
+    ['GET', `/fotos/carpeta/${carpetaId}/album`, 'la galería por carpeta'],
+    ['GET', `/fotos/carpeta/${carpetaId}/autores`, 'los autores por carpeta'],
+  ]) {
+    const r = await api(metodo, ruta, tokenAdmin, metodo === 'GET' ? undefined : {});
+    check(
+      `${etiqueta} ya NO existe`,
+      r.estado === 404,
+      `HTTP ${r.estado} · ${metodo} ${ruta}`,
+    );
+  }
+
+  // Y una carpeta corriente ya no admite fotos por ninguna vía: no tiene
+  // ciclos donde ponerlas. Es la consecuencia que decidió HVC al retirar los
+  // álbumes, y conviene que quede escrita.
+  const cicloDeCorriente = await api(
+    'GET',
+    `/fotos/carpeta/${carpetaId}/ciclo`,
+    tokenAdmin,
+  );
+  check(
+    'una carpeta corriente no tiene dónde poner fotos',
+    cicloDeCorriente.estado === 400,
+    `HTTP ${cicloDeCorriente.estado}`,
+  );
+
+  // Una carpeta de tipo EQUIPO para poder tener actividad. Desde la Fase 1a no
   // hace falta ningún equipo del catálogo: basta el `tipo`.
-  let tareaId = null;
+  let actividadId = null;
   const carpetaEquipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
-    nombre: 'Equipo para fotos de tarea',
+    nombre: 'Equipo para fotos de actividad',
     parentId: carpetaId,
     tipo: 'EQUIPO',
   });
   if (carpetaEquipo.datos?.id) {
     pendientesDeLimpiar.unshift(carpetaEquipo.datos.id);
-    const tarea = await api(
+    const ciclo6 = await cicloAbiertoDe(carpetaEquipo.datos.id, tokenAdmin);
+    const actividad = await api(
       'POST',
-      `/fotos/carpeta/${carpetaEquipo.datos.id}/tarea`,
+      `/fotos/ciclo/${ciclo6}/actividad`,
       tokenAdmin,
       { titulo: 'Inspección' },
     );
-    tareaId = tarea.datos?.id ?? null;
+    actividadId = actividad.datos?.id ?? null;
   }
 
-  if (tareaId) {
-    const aTarea = await subirFotos(`/fotos/tarea/${tareaId}/foto`, tokenAdmin, [
+  if (actividadId) {
+    const aActividad = await subirFotos(`/fotos/actividad/${actividadId}/foto`, tokenAdmin, [
       img,
     ]);
     check(
-      'se suben fotos a una TAREA (§15: «tarea relacionada»)',
-      aTarea.estado === 201 && aTarea.datos?.tareaId === tareaId,
-      `HTTP ${aTarea.estado} · tareaId=${aTarea.datos?.tareaId}`,
+      'se suben fotos a una ACTIVIDAD (§15: «actividad relacionada»)',
+      aActividad.estado === 201 && aActividad.datos?.actividadId === actividadId,
+      `HTTP ${aActividad.estado} · actividadId=${aActividad.datos?.actividadId}`,
     );
     check(
-      'y esas no cuelgan de ningún álbum',
-      aTarea.datos?.albumId === null,
-      `albumId=${aTarea.datos?.albumId}`,
+      'y esas cuelgan de la ACTIVIDAD, no sueltas del ciclo',
+      aActividad.datos?.cicloId === null,
+      `cicloId=${aActividad.datos?.cicloId}`,
     );
 
-    // ── Borrar UNA foto de la tarea (puerta abierta en la Fase 2a) ──
+    // ── Borrar UNA foto de la actividad (puerta abierta en la Fase 2a) ──
     //
     // El endpoint es el mismo `DELETE /fotos/foto/:id` de siempre —
-    // `exigirSobreFoto` resuelve los tres casos y el de tarea es uno—, pero
+    // `exigirSobreFoto` resuelve los tres casos y el de actividad es uno—, pero
     // hasta la Fase 2a ninguna pantalla lo llamaba para éstas: la única
-    // salida era borrar la tarea entera, que además el backend rechaza si
+    // salida era borrar la actividad entera, que además el backend rechaza si
     // tiene fotos. Se comprueba aquí que la puerta lleva a alguna parte.
-    const antesDeBorrar = await api('GET', `/fotos/tarea/${tareaId}/foto`, tokenAdmin);
-    const fotoDeTarea = (antesDeBorrar.datos ?? [])[0];
+    const antesDeBorrar = await api('GET', `/fotos/actividad/${actividadId}/foto`, tokenAdmin);
+    const fotoDeActividad = (antesDeBorrar.datos ?? [])[0];
 
-    const conFotos = await api('DELETE', `/fotos/tarea/${tareaId}`, tokenAdmin);
+    const conFotos = await api('DELETE', `/fotos/actividad/${actividadId}`, tokenAdmin);
     check(
-      'una tarea CON fotos no se borra: la evidencia no se va por delante',
+      'una actividad CON fotos no se borra: la evidencia no se va por delante',
       conFotos.estado === 400,
       `HTTP ${conFotos.estado}`,
     );
@@ -2481,34 +2540,34 @@ async function fase6(db, tokenAdmin) {
     // AJENA, y §5 pide TOTAL para ésas. Su nivel se lo da sobre todo el
     // árbol, así que debe poder: es la mitad de la regla que el botón de
     // la rejilla hace cumplir en la pantalla.
-    const borradaDeTarea = await api(
+    const borradaDeActividad = await api(
       'DELETE',
-      `/fotos/foto/${fotoDeTarea?.id}`,
+      `/fotos/foto/${fotoDeActividad?.id}`,
       otro.token,
     );
-    const despues = await api('GET', `/fotos/tarea/${tareaId}/foto`, tokenAdmin);
+    const despues = await api('GET', `/fotos/actividad/${actividadId}/foto`, tokenAdmin);
     check(
-      'se borra UNA foto de la tarea sin tocar la tarea (ajena, con TOTAL)',
-      borradaDeTarea.estado === 200 && (despues.datos ?? []).length === 0,
-      `HTTP ${borradaDeTarea.estado} · quedan ${(despues.datos ?? []).length}`,
+      'se borra UNA foto de la actividad sin tocar la actividad (ajena, con TOTAL)',
+      borradaDeActividad.estado === 200 && (despues.datos ?? []).length === 0,
+      `HTTP ${borradaDeActividad.estado} · quedan ${(despues.datos ?? []).length}`,
     );
 
-    // ⚠️ Y la tarea NO desaparece al quedarse sin fotos: al revés que un
+    // ⚠️ Y la actividad NO desaparece al quedarse sin fotos: al revés que un
     // álbum, que hoy sí se retira solo (eso lo cambia la Fase 2b).
-    const sigueViva = await api('GET', `/fotos/tarea/${tareaId}`, tokenAdmin);
+    const sigueViva = await api('GET', `/fotos/actividad/${actividadId}`, tokenAdmin);
     check(
-      'la tarea sigue existiendo aunque se quede sin fotos',
+      'la actividad sigue existiendo aunque se quede sin fotos',
       sigueViva.estado === 200,
       `HTTP ${sigueViva.estado}`,
     );
 
-    const yaVacia = await api('DELETE', `/fotos/tarea/${tareaId}`, tokenAdmin);
+    const yaVacia = await api('DELETE', `/fotos/actividad/${actividadId}`, tokenAdmin);
     check(
       'y ya vacía sí se puede borrar',
       yaVacia.estado === 200,
       `HTTP ${yaVacia.estado}`,
     );
-    tareaId = null;
+    actividadId = null;
   }
 
   titulo('FASE 6 · bandeja: subir sin asignar (§17)');
@@ -2522,9 +2581,9 @@ async function fase6(db, tokenAdmin) {
     '«Subir fotos sin asignar» responde y no inventa destino',
     sinAsignar.estado === 201 &&
       sinAsignar.datos?.enBandeja === true &&
-      sinAsignar.datos?.albumId === null &&
-      sinAsignar.datos?.tareaId === null,
-    `HTTP ${sinAsignar.estado} · subidas=${sinAsignar.datos?.subidas} album=${sinAsignar.datos?.albumId} tarea=${sinAsignar.datos?.tareaId}`,
+      sinAsignar.datos?.cicloId === null &&
+      sinAsignar.datos?.actividadId === null,
+    `HTTP ${sinAsignar.estado} · subidas=${sinAsignar.datos?.subidas} ciclo=${sinAsignar.datos?.cicloId} actividad=${sinAsignar.datos?.actividadId}`,
   );
 
   const bandeja = await api('GET', '/fotos/bandeja', tokenAdmin);
@@ -2583,13 +2642,13 @@ async function fase6(db, tokenAdmin) {
     `HTTP ${comentarioAjeno.estado}`,
   );
 
-  const fotoDeAlbum = (
-    await api('GET', `/fotos/carpeta/${carpetaId}/album`, tokenAdmin)
-  ).datos?.albumes?.[0]?.fotos?.[0];
-  if (fotoDeAlbum) {
+  const fotoClasificada = (
+    await api('GET', `/fotos/ciclo/${cicloF6}/foto`, tokenAdmin)
+  ).datos?.fotos?.[0];
+  if (fotoClasificada) {
     const comentarioClasificada = await api(
       'POST',
-      `/fotos/comentario/foto/${fotoDeAlbum.id}`,
+      `/fotos/comentario/foto/${fotoClasificada.id}`,
       otro.token,
       { texto: 'Ya clasificada, aquí sí manda la carpeta' },
     );
@@ -2607,16 +2666,17 @@ async function fase6(db, tokenAdmin) {
   });
   check(
     'clasificar sin destino se rechaza con un mensaje que dice qué falta',
-    sinDestino.estado === 400 && /tarea, un álbum o una carpeta/.test(sinDestino.datos?.message ?? ''),
+    sinDestino.estado === 400 &&
+      /actividad o una visita/.test(sinDestino.datos?.message ?? ''),
     `HTTP ${sinDestino.estado}`,
   );
 
   const lote = await api('POST', '/fotos/bandeja/clasificar', tokenAdmin, {
     fotoIds: idsBandeja.slice(0, 2),
-    albumId,
+    cicloId: cicloF6,
   });
   check(
-    'un lote se mueve de la bandeja a un álbum de una vez',
+    'un lote se mueve de la bandeja a una visita de una vez',
     lote.estado === 201 && lote.datos?.clasificadas >= 1,
     `HTTP ${lote.estado} · ${lote.datos?.clasificadas ?? '?'} clasificadas`,
   );
@@ -2630,7 +2690,7 @@ async function fase6(db, tokenAdmin) {
 
   const repetido = await api('POST', '/fotos/bandeja/clasificar', tokenAdmin, {
     fotoIds: idsBandeja.slice(0, 2),
-    albumId,
+    cicloId: cicloF6,
   });
   check(
     'reclasificar lo ya clasificado no las mueve dos veces: avisa',
@@ -2642,7 +2702,7 @@ async function fase6(db, tokenAdmin) {
     'POST',
     '/fotos/bandeja/clasificar',
     otro.token,
-    { fotoIds: idsBandeja, albumId },
+    { fotoIds: idsBandeja, cicloId: cicloF6 },
   );
   check(
     'nadie clasifica la bandeja de otro, ni un ADMIN_GLOBAL',
@@ -2652,27 +2712,21 @@ async function fase6(db, tokenAdmin) {
 
   titulo('FASE 6 · lo de v2 que NO debía romperse');
 
-  const galeria = await api(
-    'GET',
-    `/fotos/carpeta/${carpetaId}/album`,
-    tokenAdmin,
-  );
+  const galeria = await api('GET', `/fotos/ciclo/${cicloF6}/foto`, tokenAdmin);
   check(
-    'la galería paginada por álbum sigue respondiendo',
-    galeria.estado === 200 && Array.isArray(galeria.datos?.albumes),
-    `HTTP ${galeria.estado} · ${galeria.datos?.albumes?.length ?? '?'} álbumes`,
+    'la galería paginada sigue respondiendo, ahora por ciclo',
+    galeria.estado === 200 && Array.isArray(galeria.datos?.fotos),
+    `HTTP ${galeria.estado} · ${galeria.datos?.fotos?.length ?? '?'} fotos`,
   );
   check(
     'y las fotos llegan con URL firmada y ya procesadas a WebP',
-    (galeria.datos?.albumes ?? []).some((a) =>
-      (a.fotos ?? []).some((f) => f.url?.includes('X-Amz-Signature')),
+    (galeria.datos?.fotos ?? []).some((f) =>
+      f.url?.includes('X-Amz-Signature'),
     ),
     'firma presente en la URL',
   );
 
-  const unaFoto = (galeria.datos?.albumes ?? [])
-    .flatMap((a) => a.fotos ?? [])
-    .find(Boolean);
+  const unaFoto = (galeria.datos?.fotos ?? []).find(Boolean);
   if (unaFoto) {
     const descarga = await api(
       'GET',
@@ -2697,14 +2751,22 @@ async function fase6(db, tokenAdmin) {
   await db.query(
     'DELETE FROM comentarios_fotos WHERE "fotoId" IN (SELECT id FROM fotos WHERE "subidaPorId" IS NOT NULL)',
   );
-  await db.query('DELETE FROM fotos WHERE "albumId" IN (SELECT id FROM albumes_fotos WHERE "carpetaId" = $1)', [carpetaId]);
-  await db.query('DELETE FROM fotos WHERE "subidaPorId" = (SELECT id FROM usuarios WHERE rol = \'SUPERADMIN\' LIMIT 1) AND "albumId" IS NULL AND "tareaId" IS NULL');
-  await db.query('DELETE FROM comentarios_fotos WHERE "albumId" IN (SELECT id FROM albumes_fotos WHERE "carpetaId" = $1)', [carpetaId]);
-  await db.query('DELETE FROM albumes_fotos WHERE "carpetaId" = $1', [carpetaId]);
-  if (tareaId) {
-    await db.query('DELETE FROM fotos WHERE "tareaId" = $1', [tareaId]);
-    await db.query('DELETE FROM comentarios_fotos WHERE "tareaId" = $1', [tareaId]);
-    await db.query('DELETE FROM tareas_fotos WHERE id = $1', [tareaId]);
+  // Las fotos de los ciclos de este subárbol, y las que quedaron en bandeja.
+  await db.query(
+    `DELETE FROM fotos WHERE "cicloId" IN (
+       SELECT ci.id FROM ciclos_fotos ci
+       JOIN carpetas_fotos c ON c.id = ci."carpetaId"
+       WHERE c.ruta = $1 OR c.ruta LIKE $1 || '/%')`,
+    [String(carpetaId)],
+  );
+  await db.query(
+    `DELETE FROM fotos WHERE "cicloId" IS NULL AND "actividadId" IS NULL
+       AND "subidaPorId" = (SELECT id FROM usuarios WHERE rol = 'SUPERADMIN' LIMIT 1)`,
+  );
+  if (actividadId) {
+    await db.query('DELETE FROM fotos WHERE "actividadId" = $1', [actividadId]);
+    await db.query('DELETE FROM comentarios_fotos WHERE "actividadId" = $1', [actividadId]);
+    await db.query('DELETE FROM actividades_fotos WHERE id = $1', [actividadId]);
   }
 
   await api('DELETE', `/usuario/${otro.id}`, tokenAdmin);
@@ -3256,7 +3318,7 @@ async function fase8(db, tokenAdmin) {
     `${archivado.length} evento(s)`,
   );
 
-  // Tareas: hace falta una carpeta de tipo EQUIPO. Desde la Fase 1a no hay
+  // Actividades: hace falta una carpeta de tipo EQUIPO. Desde la Fase 1a no hay
   // que sembrar nada en el catálogo de Gestión de Equipos.
   const ce = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: 'Equipo para bitácora',
@@ -3266,28 +3328,29 @@ async function fase8(db, tokenAdmin) {
   const equipoCarpetaId = ce.datos?.id ?? null;
   if (equipoCarpetaId) pendientesDeLimpiar.unshift(equipoCarpetaId);
 
-  let tareaId = null;
+  let actividadId = null;
   if (equipoCarpetaId) {
+    const ciclo8 = await cicloAbiertoDe(equipoCarpetaId, tokenAdmin);
     const t = await api(
       'POST',
-      `/fotos/carpeta/${equipoCarpetaId}/tarea`,
+      `/fotos/ciclo/${ciclo8}/actividad`,
       tokenAdmin,
       { titulo: 'Revisar pernos' },
     );
-    tareaId = t.datos?.id ?? null;
+    actividadId = t.datos?.id ?? null;
 
     const creacionT = await eventosDe('CREACION');
     check(
-      '§23.3 crear tarea queda registrado',
-      creacionT.some((e) => e.entidad === 'TAREA' && e.entidadId === tareaId),
-      `${creacionT.filter((e) => e.entidad === 'TAREA').length} de tarea`,
+      '§23.3 crear actividad queda registrado',
+      creacionT.some((e) => e.entidad === 'ACTIVIDAD' && e.entidadId === actividadId),
+      `${creacionT.filter((e) => e.entidad === 'ACTIVIDAD').length} de actividad`,
     );
 
-    await api('POST', `/fotos/tarea/${tareaId}/completar`, tokenAdmin);
-    const completadas = await eventosDe('TAREA_COMPLETADA');
+    await api('POST', `/fotos/actividad/${actividadId}/completar`, tokenAdmin);
+    const completadas = await eventosDe('ACTIVIDAD_COMPLETADA');
     check(
-      '§23.4 completar tarea queda registrado — la que HVC quiere poder auditar',
-      completadas.some((e) => e.entidadId === tareaId),
+      '§23.4 completar actividad queda registrado — la que HVC quiere poder auditar',
+      completadas.some((e) => e.entidadId === actividadId),
       completadas[0]?.descripcion ?? '(ninguno)',
     );
   }
@@ -3378,15 +3441,26 @@ async function fase8(db, tokenAdmin) {
   );
 
   // El ejemplo literal de §20.
+  // ⚠️ Si una corrida anterior murió antes de su limpieza, la plantilla sigue
+  // ahí y el nombre es único: el POST contestaba 409 y la fase entera se iba
+  // detrás con un `return`, dejando sin probar aplicar, importar y sus
+  // permisos. Se retira antes, por la API y por id, como las cuentas.
+  const previas = await api('GET', '/fotos/plantilla', tokenAdmin);
+  for (const vieja of previas.datos ?? [])
+    if (vieja.nombre === 'Inspección de Equipo')
+      await api('DELETE', `/fotos/plantilla/${vieja.id}`, tokenAdmin);
+
   const plantilla = await api('POST', '/fotos/plantilla', tokenAdmin, {
     nombre: 'Inspección de Equipo',
     descripcion: 'El guion estándar de HVC',
     nodos: [
-      { tipo: 'TAREA', nombre: 'Estado general' },
-      { tipo: 'TAREA', nombre: 'Pernos' },
-      { tipo: 'TAREA', nombre: 'Soldaduras' },
-      { tipo: 'TAREA', nombre: 'Estructura' },
-      { tipo: 'ALBUM', nombre: 'Evidencia fotográfica' },
+      { tipo: 'ACTIVIDAD', nombre: 'Estado general' },
+      { tipo: 'ACTIVIDAD', nombre: 'Pernos' },
+      { tipo: 'ACTIVIDAD', nombre: 'Soldaduras' },
+      { tipo: 'ACTIVIDAD', nombre: 'Estructura' },
+      // ⚠️ Un nodo ALBUM ya no se admite al crear: se retiraron en la Fase 4.
+      // Que el POST lo rechace es lo que se comprueba más abajo.
+      { tipo: 'ACTIVIDAD', nombre: 'Evidencia fotográfica' },
     ],
   });
   check(
@@ -3409,11 +3483,11 @@ async function fase8(db, tokenAdmin) {
   const hojaConHijos = await api('POST', '/fotos/plantilla', tokenAdmin, {
     nombre: '__verif imposible',
     nodos: [
-      { tipo: 'TAREA', nombre: 'No puede', hijos: [{ tipo: 'ALBUM', nombre: 'X' }] },
+      { tipo: 'ACTIVIDAD', nombre: 'No puede', hijos: [{ tipo: 'CARPETA', nombre: 'X' }] },
     ],
   });
   check(
-    'una TAREA no puede contener elementos: se rechaza al guardar, no al aplicar',
+    'una ACTIVIDAD no puede contener elementos: se rechaza al guardar, no al aplicar',
     hojaConHijos.estado === 400 && /no puede contener/.test(hojaConHijos.datos?.message ?? ''),
     `HTTP ${hojaConHijos.estado}`,
   );
@@ -3436,11 +3510,9 @@ async function fase8(db, tokenAdmin) {
       tokenAdmin,
     );
     check(
-      'se estampa sobre un EQUIPO: 4 tareas y 1 álbum',
-      aplicada.estado === 201 &&
-        aplicada.datos?.tareas === 4 &&
-        aplicada.datos?.albumes === 1,
-      `HTTP ${aplicada.estado} · tareas=${aplicada.datos?.tareas} álbumes=${aplicada.datos?.albumes}`,
+      'se estampa sobre un EQUIPO: las 5 actividades',
+      aplicada.estado === 201 && aplicada.datos?.actividades === 5,
+      `HTTP ${aplicada.estado} · actividades=${aplicada.datos?.actividades}`,
     );
 
     const desdePlantilla = await eventosDe('CREACION_DESDE_PLANTILLA');
@@ -3451,16 +3523,17 @@ async function fase8(db, tokenAdmin) {
     );
   }
 
-  // Sobre una carpeta CORRIENTE las tareas no caben (§13).
+  // Sobre una carpeta CORRIENTE las actividades no caben (§13).
   const enCorriente = await api(
     'POST',
     `/fotos/plantilla/${plantillaId}/aplicar/${subId}`,
     tokenAdmin,
   );
   check(
-    'sobre una carpeta corriente las tareas se OMITEN, no se cuelan saltándose §13',
-    enCorriente.datos?.tareas === 0 && enCorriente.datos?.omitidas?.tareas === 4,
-    `tareas=${enCorriente.datos?.tareas} omitidas=${enCorriente.datos?.omitidas?.tareas}`,
+    'sobre una carpeta corriente las actividades se OMITEN, no se cuelan saltándose §13',
+    enCorriente.datos?.actividades === 0 &&
+      enCorriente.datos?.omitidas?.actividades === 5,
+    `actividades=${enCorriente.datos?.actividades} omitidas=${enCorriente.datos?.omitidas?.actividades}`,
   );
   check(
     'y se avisa del motivo en vez de callarlo',
@@ -3469,24 +3542,37 @@ async function fase8(db, tokenAdmin) {
     ),
     enCorriente.datos?.aviso ?? '(sin aviso)',
   );
+  // ⚠️ Aquí se comprobaba «pero el álbum sí se crea: lo que cabe, entra».
+  // Con los álbumes retirados (Fase 4) sobre una carpeta corriente ya no cabe
+  // NADA de esta plantilla, y eso es lo correcto: una carpeta corriente es
+  // estructura, no contenido.
+  const tipoAlbum = await api('POST', '/fotos/plantilla', tokenAdmin, {
+    nombre: `__verif_plantilla_album ${Date.now()}`,
+    nodos: [{ tipo: 'ALBUM', nombre: 'Ya no' }],
+  });
   check(
-    'pero el álbum sí se crea: lo que cabe, entra',
-    enCorriente.datos?.albumes === 1,
-    `álbumes=${enCorriente.datos?.albumes}`,
+    'una plantilla NUEVA con un nodo ÁLBUM se rechaza',
+    tipoAlbum.estado === 400 &&
+      /CARPETA, ACTIVIDAD/.test(tipoAlbum.datos?.message ?? ''),
+    `HTTP ${tipoAlbum.estado} · ${tipoAlbum.datos?.message ?? ''}`,
   );
 
   // Editar la plantilla NO toca lo ya creado — el punto de no versionar.
+  const cicloParaEditar = await cicloAbiertoDe(
+    equipoCarpetaId ?? subId,
+    tokenAdmin,
+  );
   const antesDeEditar = await api(
     'GET',
-    `/fotos/carpeta/${equipoCarpetaId ?? subId}/tarea`,
+    `/fotos/ciclo/${cicloParaEditar}/actividad`,
     tokenAdmin,
   );
   await api('PATCH', `/fotos/plantilla/${plantillaId}`, tokenAdmin, {
-    nodos: [{ tipo: 'TAREA', nombre: 'Solo esta' }],
+    nodos: [{ tipo: 'ACTIVIDAD', nombre: 'Solo esta' }],
   });
   const despuesDeEditar = await api(
     'GET',
-    `/fotos/carpeta/${equipoCarpetaId ?? subId}/tarea`,
+    `/fotos/ciclo/${cicloParaEditar}/actividad`,
     tokenAdmin,
   );
   check(
@@ -3510,13 +3596,17 @@ async function fase8(db, tokenAdmin) {
 
   // El ejemplo literal de §19.
   const filas = [
-    ['Proyecto A', 'Frente 1', 'Equipo 01', 'Tarea', 'Revisar pernos', 'Verificar estado'],
-    ['Proyecto A', 'Frente 1', 'Equipo 01', 'Tarea', 'Revisar soldadura', ''],
+    ['Proyecto A', 'Frente 1', 'Equipo 01', 'Actividad', 'Revisar pernos', 'Verificar estado'],
+    ['Proyecto A', 'Frente 1', 'Equipo 01', 'Actividad', 'Revisar soldadura', ''],
+    // ⚠️ «Álbum» era un tipo válido hasta la Fase 4. Ahora es una fila con
+    // problema, como cualquier otro tipo inventado: la plantilla de Excel que
+    // HVC tenga guardada hay que actualizarla, igual que cuando la columna
+    // pasó de decir `Tarea` a `Actividad`.
     ['Proyecto A', 'Frente 1', 'Equipo 01', 'Álbum', 'Estado inicial', 'Inspección'],
-    ['Proyecto A', 'Frente 2', 'Equipo 02', 'Tarea', 'Revisar estructura', ''],
+    ['Proyecto A', 'Frente 2', 'Equipo 02', 'Actividad', 'Revisar estructura', ''],
     // Filas con problema: se informan pero no bloquean el resto.
-    ['', 'Frente 3', '', 'Tarea', 'Sin carpeta', ''],
-    ['Proyecto A', '', 'Equipo 03', 'Tarea', 'Camino con hueco', ''],
+    ['', 'Frente 3', '', 'Actividad', 'Sin carpeta', ''],
+    ['Proyecto A', '', 'Equipo 03', 'Actividad', 'Camino con hueco', ''],
     ['Proyecto A', 'Frente 1', 'Equipo 01', 'Cosa', 'Tipo inventado', ''],
   ];
   const libro = await excelDePrueba(filas);
@@ -3532,8 +3622,8 @@ async function fase8(db, tokenAdmin) {
     `HTTP ${previa.estado} · ${previa.datos?.resumen?.filas ?? '?'} filas válidas`,
   );
   check(
-    'lee las 4 filas buenas y aparta las 3 con problema',
-    previa.datos?.resumen?.filas === 4 && previa.datos?.resumen?.problemas === 3,
+    'lee las 3 filas buenas y aparta las 4 con problema (Álbum ya no vale)',
+    previa.datos?.resumen?.filas === 3 && previa.datos?.resumen?.problemas === 4,
     `filas=${previa.datos?.resumen?.filas} problemas=${previa.datos?.resumen?.problemas}`,
   );
   check(
@@ -3560,9 +3650,8 @@ async function fase8(db, tokenAdmin) {
     'confirmar crea la estructura (§19 paso 8)',
     confirmada.estado === 201 &&
       confirmada.datos?.creado?.carpetas === 5 &&
-      confirmada.datos?.creado?.tareas === 3 &&
-      confirmada.datos?.creado?.albumes === 1,
-    `carpetas=${confirmada.datos?.creado?.carpetas} tareas=${confirmada.datos?.creado?.tareas} álbumes=${confirmada.datos?.creado?.albumes}`,
+      confirmada.datos?.creado?.actividades === 3,
+    `carpetas=${confirmada.datos?.creado?.carpetas} actividades=${confirmada.datos?.creado?.actividades}`,
   );
 
   const despuesDeImportar = await db.query(
@@ -3583,7 +3672,9 @@ async function fase8(db, tokenAdmin) {
   );
   check(
     'reimportar el mismo archivo detecta los conflictos, no duplica en silencio',
-    segunda.datos?.resumen?.conflictos === 4,
+    // Tres y no cuatro desde la Fase 4: la fila de tipo «Álbum» ya no crea
+    // nada, así que tampoco puede chocar con nada.
+    segunda.datos?.resumen?.conflictos === 3,
     `${segunda.datos?.resumen?.conflictos} conflicto(s)`,
   );
   check(
@@ -3600,9 +3691,9 @@ async function fase8(db, tokenAdmin) {
   );
   check(
     'sin decisiones se OMITE: ante la duda, no duplicar',
-    omitiendo.datos?.creado?.tareas === 0 &&
-      omitiendo.datos?.omitido?.tareas === 3,
-    `creadas=${omitiendo.datos?.creado?.tareas} omitidas=${omitiendo.datos?.omitido?.tareas}`,
+    omitiendo.datos?.creado?.actividades === 0 &&
+      omitiendo.datos?.omitido?.actividades === 3,
+    `creadas=${omitiendo.datos?.creado?.actividades} omitidas=${omitiendo.datos?.omitido?.actividades}`,
   );
 
   const decisiones = {};
@@ -3615,9 +3706,9 @@ async function fase8(db, tokenAdmin) {
   );
   check(
     'con ACTUALIZAR se reescribe lo existente en vez de crear otro',
-    actualizando.datos?.actualizado?.tareas === 3 &&
-      actualizando.datos?.creado?.tareas === 0,
-    `actualizadas=${actualizando.datos?.actualizado?.tareas} creadas=${actualizando.datos?.creado?.tareas}`,
+    actualizando.datos?.actualizado?.actividades === 3 &&
+      actualizando.datos?.creado?.actividades === 0,
+    `actualizadas=${actualizando.datos?.actualizado?.actividades} creadas=${actualizando.datos?.creado?.actividades}`,
   );
 
   const creando = { };
@@ -3630,8 +3721,8 @@ async function fase8(db, tokenAdmin) {
   );
   check(
     'y con CREAR sí se añade otra, que es lo que esa opción significa',
-    duplicando.datos?.creado?.tareas === 3,
-    `creadas=${duplicando.datos?.creado?.tareas}`,
+    duplicando.datos?.creado?.actividades === 3,
+    `creadas=${duplicando.datos?.creado?.actividades}`,
   );
 
   const importaciones = await eventosDe('IMPORTACION_EXCEL');
@@ -3659,16 +3750,16 @@ async function fase8(db, tokenAdmin) {
     'SELECT id, ruta FROM carpetas_fotos WHERE ruta LIKE $1 ORDER BY length(ruta) DESC',
     [`${raiz.datos.id}/%`],
   );
-  for (const c of creadas.rows) {
-    await db.query('DELETE FROM comentarios_fotos WHERE "carpetaId" = $1', [c.id]);
-    await db.query(
-      'DELETE FROM comentarios_fotos WHERE "tareaId" IN (SELECT id FROM tareas_fotos WHERE "carpetaId" = $1)',
-      [c.id],
-    );
-    await db.query('DELETE FROM tareas_fotos WHERE "carpetaId" = $1', [c.id]);
-    await db.query('DELETE FROM albumes_fotos WHERE "carpetaId" = $1', [c.id]);
+  // ⚠️ Desde la Fase 1 las actividades cuelgan de un CICLO, así que ya no se
+  // pueden borrar por `carpetaId` —esa columna no existe—. Tampoco hace
+  // falta: `ciclos_fotos` y `actividades_fotos` van con Cascade y se las
+  // lleva el borrado de la carpeta. Lo que sí hay que retirar a mano son los
+  // álbumes, que son `Restrict` y la bloquean.
+  // Desde la Fase 4 no hay álbumes que retirar antes: `ciclos_fotos`,
+  // `actividades_fotos` y `albumes_fotos` van todos con Cascade, así que la
+  // carpeta se lleva lo suyo.
+  for (const c of creadas.rows)
     await db.query('DELETE FROM carpetas_fotos WHERE id = $1', [c.id]).catch(() => {});
-  }
   await db.query('DELETE FROM plantillas_estructura_fotos WHERE nombre LIKE $1', [
     'Inspección de Equipo',
   ]);
@@ -3692,51 +3783,57 @@ async function fase8(db, tokenAdmin) {
  * su cuenta de comprobaciones dejara de coincidir con lo que se reportó.
  */
 async function fase9(db, token) {
-  titulo('FASE 9 · Eliminar un álbum (§16)');
+  titulo('FASE 9 · una carpeta con fotos dentro no se borra (Fase 4)');
 
+  // ⚠️ Este bloque probaba el borrado de un ÁLBUM: vacío sí, con fotos no.
+  // Los álbumes se retiraron en la Fase 4, y con ellos el `Restrict` que era
+  // —sin que lo pareciera— lo que impedía borrar una carpeta con contenido.
+  // La protección se movió a `CarpetaService.eliminar`, que cuenta las FOTOS
+  // del subárbol. Eso es lo que se comprueba ahora: mide el contenido, no el
+  // envase.
   const raiz = await api('POST', '/fotos/carpeta', token, {
-    nombre: `Fase9 albumes ${Date.now()}`,
+    nombre: `Fase9 fotos ${Date.now()}`,
   });
   check('Carpeta de prueba creada', raiz.estado === 201, `HTTP ${raiz.estado}`);
   if (raiz.estado !== 201) return;
   pendientesDeLimpiar.push(raiz.datos.id);
 
-  // 1 · el vacío se va
-  const vacio = await api('POST', `/fotos/album/carpeta/${raiz.datos.id}`, token, {
-    nombre: 'Vacío',
+  const equipo9 = await api('POST', '/fotos/carpeta', token, {
+    nombre: 'Equipo con fotos',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
   });
-  check('Álbum vacío creado', vacio.estado === 201, `HTTP ${vacio.estado}`);
-  const borrado = await api('DELETE', `/fotos/album/${vacio.datos.id}`, token);
-  check('Un álbum vacío se elimina', borrado.estado === 200, `HTTP ${borrado.estado}`);
+  pendientesDeLimpiar.push(equipo9.datos?.id);
+  const ciclo9 = await cicloAbiertoDe(equipo9.datos?.id, token);
 
-  // 2 · el que tiene fotos NO se va, y lo dice
-  const lleno = await api('POST', `/fotos/album/carpeta/${raiz.datos.id}`, token, {
-    nombre: 'Con fotos',
-  });
   const img = await imagenDePrueba();
-  const sub = await subirFotos(`/fotos/album/${lleno.datos.id}/foto`, token, [img]);
-  check('Foto subida al álbum', sub.datos?.subidas === 1, JSON.stringify(sub.datos));
+  const sub = await subirFotos(`/fotos/ciclo/${ciclo9}/foto`, token, [img]);
+  check('Foto subida a la visita', sub.datos?.subidas === 1, JSON.stringify(sub.datos));
 
-  const rechazo = await api('DELETE', `/fotos/album/${lleno.datos.id}`, token);
+  const rechazo = await api('DELETE', `/fotos/carpeta/${equipo9.datos.id}`, token);
   check(
-    'Un álbum CON fotos se rechaza con 400',
+    'una carpeta CON fotos dentro se rechaza con 400',
     rechazo.estado === 400,
     `HTTP ${rechazo.estado}`,
   );
   check(
-    'El mensaje dice cuántas fotos lo impiden',
+    'y el mensaje dice cuántas fotos lo impiden',
     /1 foto/.test(rechazo.datos?.message ?? ''),
     rechazo.datos?.message,
   );
+
+  // Y la madre tampoco, porque tiene una hija dentro. Son dos candados
+  // distintos y los dos siguen en pie.
+  const conHija = await api('DELETE', `/fotos/carpeta/${raiz.datos.id}`, token);
   check(
-    'y ya NO promete que el álbum se retire solo al vaciarlo',
-    !/se retirará solo/.test(rechazo.datos?.message ?? ''),
-    rechazo.datos?.message,
+    'y la carpeta madre sigue bloqueada por su hija',
+    conHija.estado === 400 && /carpeta\(s\) dentro/.test(conHija.datos?.message ?? ''),
+    `HTTP ${conHija.estado} · ${conHija.datos?.message ?? ''}`,
   );
 
   // 3 · la descripción de una foto se corrige (Fase 2b)
-  const g = await api('GET', `/fotos/carpeta/${raiz.datos.id}/album`, token);
-  const foto = (g.datos?.albumes ?? []).flatMap((a) => a.fotos ?? [])[0];
+  const g = await api('GET', `/fotos/ciclo/${ciclo9}/foto`, token);
+  const foto = (g.datos?.fotos ?? [])[0];
 
   // ⚠️ La galería NO devolvía la descripción por foto hasta la Fase 2b, y
   // sin eso no hay nada que corregir en la pantalla.
@@ -3756,8 +3853,8 @@ async function fase9(db, token) {
     `HTTP ${editada.estado} · ${editada.datos?.descripcion}`,
   );
 
-  const gDesc = await api('GET', `/fotos/carpeta/${raiz.datos.id}/album`, token);
-  const fotoDesc = (gDesc.datos?.albumes ?? []).flatMap((a) => a.fotos ?? [])[0];
+  const gDesc = await api('GET', `/fotos/ciclo/${ciclo9}/foto`, token);
+  const fotoDesc = (gDesc.datos?.fotos ?? [])[0];
   check(
     'y se lee de vuelta en la galería',
     fotoDesc?.descripcion === 'Compresor con fuga en la línea de succión',
@@ -3766,9 +3863,11 @@ async function fase9(db, token) {
 
   // ⚠️ El rastro es lo que hace de esto una corrección y no una edición
   // silenciosa: la bitácora guarda el valor ANTERIOR y el nuevo.
+  // El evento cuelga del EQUIPO, que es la carpeta de la foto — la raíz solo
+  // es su madre, y el hilo de §23 es por carpeta.
   const hist = await api(
     'GET',
-    `/fotos/auditoria/carpeta/${raiz.datos.id}`,
+    `/fotos/auditoria/carpeta/${equipo9.datos.id}`,
     token,
   );
   check(
@@ -3805,57 +3904,49 @@ async function fase9(db, token) {
     `HTTP ${reemplazo.estado}`,
   );
 
-  // 4 · al irse la última foto el álbum SE QUEDA, vacío (Fase 2b)
+  // 4 · al irse la última foto la carpeta vuelve a poder borrarse
   //
-  // ⚠️ Esta comprobación estaba INVERTIDA hasta la Fase 2b: el álbum se
-  // retiraba solo. Se escribió cuando un álbum solo podía nacer de una
-  // subida; desde §16 se crea vacío y CON NOMBRE, así que el auto-borrado
-  // destruía algo que alguien había titulado, y el nombre no se recupera.
+  // ⚠️ Aquí se comprobaba que el ÁLBUM se quedaba vacío en vez de borrarse
+  // solo (Fase 2b), y que su carpeta seguía bloqueada por él. Sin álbumes, lo
+  // que queda es la regla que importaba: sin fotos dentro, la carpeta se va.
+  // Un ciclo vacío NO la bloquea —es una visita, no contenido— y por eso
+  // `ciclos_fotos` va con Cascade.
   await api('DELETE', `/fotos/foto/${foto.id}`, token);
-  const g2 = await api('GET', `/fotos/carpeta/${raiz.datos.id}/album`, token);
-  const sigue = (g2.datos?.albumes ?? []).find((a) => a.id === lleno.datos.id);
-  check(
-    'Al borrar la última foto el álbum SE QUEDA, vacío',
-    !!sigue && (sigue.fotos ?? []).length === 0,
-    `existe=${!!sigue} fotos=${(sigue?.fotos ?? []).length}`,
-  );
-
-  // Y la carpeta NO se puede borrar mientras ese álbum siga ahí: es el
-  // `Restrict` de siempre. Vaciar no es borrar, y esto lo demuestra.
-  const conAlbumVacio = await api(
+  const sinFotos = await api(
     'DELETE',
-    `/fotos/carpeta/${raiz.datos.id}`,
+    `/fotos/carpeta/${equipo9.datos.id}`,
     token,
   );
   check(
-    'y la carpeta sigue bloqueada por ese álbum vacío',
-    conAlbumVacio.estado === 400,
-    `HTTP ${conAlbumVacio.estado}`,
+    'sin fotos dentro, el equipo se elimina — su ciclo vacío no lo bloquea',
+    sinFotos.estado === 200,
+    `HTTP ${sinFotos.estado} · ${sinFotos.datos?.message ?? ''}`,
   );
-
-  // 5 · borrar el álbum ya vacío es una decisión explícita
-  const borradoVacio = await api('DELETE', `/fotos/album/${lleno.datos.id}`, token);
-  check(
-    'el álbum vacío se elimina a mano, que es la vía que queda',
-    borradoVacio.estado === 200,
-    `HTTP ${borradoVacio.estado}`,
-  );
+  if (sinFotos.estado === 200)
+    pendientesDeLimpiar.splice(
+      pendientesDeLimpiar.indexOf(equipo9.datos.id),
+      1,
+    );
 
   const dc = await api('DELETE', `/fotos/carpeta/${raiz.datos.id}`, token);
-  check('La carpeta ya sin álbumes se elimina', dc.estado === 200, `HTTP ${dc.estado}`);
+  check('y la carpeta madre ya vacía también', dc.estado === 200, `HTTP ${dc.estado}`);
   if (dc.estado === 200)
     pendientesDeLimpiar.splice(pendientesDeLimpiar.indexOf(raiz.datos.id), 1);
 
   titulo('FASE 9 · mover una foto (Fase 2c)');
 
-  // Dos carpetas hermanas para poder mover ENTRE ellas, y una tarea.
+  // Dos carpetas hermanas para poder mover ENTRE ellas, y una actividad.
   const raizM = await api('POST', '/fotos/carpeta', token, {
     nombre: `__verif_2c ${Date.now()}`,
   });
   pendientesDeLimpiar.unshift(raizM.datos.id);
+  // Los dos son EQUIPOS: desde la Fase 4 una foto vive en un CICLO, y solo un
+  // equipo tiene ciclos. «Mover entre carpetas» pasó a ser «mover entre
+  // visitas», que es la misma pregunta un nivel más abajo.
   const origenC = await api('POST', '/fotos/carpeta', token, {
     nombre: 'Origen',
     parentId: raizM.datos.id,
+    tipo: 'EQUIPO',
   });
   pendientesDeLimpiar.unshift(origenC.datos.id);
   const destinoC = await api('POST', '/fotos/carpeta', token, {
@@ -3864,22 +3955,20 @@ async function fase9(db, token) {
     tipo: 'EQUIPO',
   });
   pendientesDeLimpiar.unshift(destinoC.datos.id);
-  const tareaM = await api(
+  const cicloM = await cicloAbiertoDe(destinoC.datos.id, token);
+  const actividadM = await api(
     'POST',
-    `/fotos/carpeta/${destinoC.datos.id}/tarea`,
+    `/fotos/ciclo/${cicloM}/actividad`,
     token,
     { titulo: 'Inspección 2c' },
   );
 
-  const subidaM = await subirFotos(
-    `/fotos/carpeta/${origenC.datos.id}/album`,
-    token,
-    [img],
-    { descripcion: 'lote de origen' },
-  );
-  const albumOrigen = subidaM.datos?.albumId;
-  const gM = await api('GET', `/fotos/carpeta/${origenC.datos.id}/album`, token);
-  const fotoM = (gM.datos?.albumes ?? []).flatMap((a) => a.fotos ?? [])[0];
+  const cicloOrigen = await cicloAbiertoDe(origenC.datos.id, token);
+  await subirFotos(`/fotos/ciclo/${cicloOrigen}/foto`, token, [img], {
+    descripcion: 'foto de origen',
+  });
+  const gM = await api('GET', `/fotos/ciclo/${cicloOrigen}/foto`, token);
+  const fotoM = (gM.datos?.fotos ?? [])[0];
 
   const sinDestino = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {});
   check(
@@ -3888,52 +3977,39 @@ async function fase9(db, token) {
     `HTTP ${sinDestino.estado}`,
   );
 
-  // 1 · a otra CARPETA: el servidor crea el álbum que la recoge.
-  const aCarpeta = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
-    carpetaId: destinoC.datos.id,
+  // 1 · a la visita de otro equipo. Ya no hay álbum que crear: el destino
+  // existe desde que el equipo se dio de alta.
+  const aCiclo = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
+    cicloId: cicloM,
   });
-  const gDestino = await api(
-    'GET',
-    `/fotos/carpeta/${destinoC.datos.id}/album`,
-    token,
-  );
+  const gDestino = await api('GET', `/fotos/ciclo/${cicloM}/foto`, token);
   check(
-    'se mueve a otra carpeta, y allí se le crea un álbum',
-    aCarpeta.estado === 201 &&
-      (gDestino.datos?.albumes ?? []).flatMap((a) => a.fotos ?? []).length === 1,
-    `HTTP ${aCarpeta.estado}`,
+    'se mueve a la visita de otro equipo',
+    aCiclo.estado === 201 && (gDestino.datos?.fotos ?? []).length === 1,
+    `HTTP ${aCiclo.estado} · ${gDestino.datos?.fotos?.length} foto(s)`,
   );
 
-  // ⚠️ Y el álbum de ORIGEN se queda, vacío: desde la Fase 2b vaciar no es
-  // borrar, y mover la última foto es vaciar.
-  const gOrigen = await api(
-    'GET',
-    `/fotos/carpeta/${origenC.datos.id}/album`,
-    token,
-  );
-  const albumSigue = (gOrigen.datos?.albumes ?? []).find(
-    (a) => a.id === albumOrigen,
-  );
+  const gOrigen = await api('GET', `/fotos/ciclo/${cicloOrigen}/foto`, token);
   check(
-    'el álbum de origen se queda vacío, no se borra',
-    !!albumSigue && (albumSigue.fotos ?? []).length === 0,
-    `existe=${!!albumSigue}`,
+    'y la visita de origen se queda sin ella, pero sigue existiendo',
+    (gOrigen.datos?.fotos ?? []).length === 0,
+    `${gOrigen.datos?.fotos?.length} foto(s)`,
   );
 
-  // 2 · a una TAREA.
-  const aTareaM = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
-    tareaId: tareaM.datos.id,
+  // 2 · a una ACTIVIDAD.
+  const aActividadM = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
+    actividadId: actividadM.datos.id,
   });
-  const fotosT = await api('GET', `/fotos/tarea/${tareaM.datos.id}/foto`, token);
+  const fotosT = await api('GET', `/fotos/actividad/${actividadM.datos.id}/foto`, token);
   check(
-    'se mueve a una tarea',
-    aTareaM.estado === 201 && (fotosT.datos ?? []).length === 1,
-    `HTTP ${aTareaM.estado} · ${(fotosT.datos ?? []).length}`,
+    'se mueve a una actividad',
+    aActividadM.estado === 201 && (fotosT.datos ?? []).length === 1,
+    `HTTP ${aActividadM.estado} · ${(fotosT.datos ?? []).length}`,
   );
 
   // 3 · mover a donde ya está no escribe ni ensucia la bitácora.
   const mismoSitio = await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, {
-    tareaId: tareaM.datos.id,
+    actividadId: actividadM.datos.id,
   });
   check(
     'moverla a donde ya está se contesta sin cambios',
@@ -3963,7 +4039,7 @@ async function fase9(db, token) {
       'POST',
       `/fotos/foto/${fotoM.id}/mover`,
       ajenoM.token,
-      { carpetaId: origenC.datos.id },
+      { cicloId: cicloOrigen },
     );
     check(
       'quien no ve la foto no la mueve — el 404 uniforme',
@@ -3982,7 +4058,7 @@ async function fase9(db, token) {
       'POST',
       `/fotos/foto/${fotoM.id}/mover`,
       ajenoM.token,
-      { carpetaId: origenC.datos.id },
+      { cicloId: cicloOrigen },
     );
     check(
       'con permiso solo en el ORIGEN, mover al destino se rechaza',
@@ -4020,74 +4096,47 @@ async function fase9(db, token) {
     `HTTP ${aBandejaM.estado}`,
   );
 
-  titulo('FASE 9 · crear el álbum CON NOMBRE desde la bandeja (Fase 2c)');
+  titulo('FASE 9 · clasificar desde la bandeja hacia una visita (Fase 4)');
 
-  // ⚠️ Hasta la Fase 2c el álbum que recogía el lote nacía SIN nombre, y no
-  // había forma de ponérselo al clasificar: había que clasificar y luego ir
-  // a editar el álbum, que es el paso de más que §18 quiere evitar.
+  // ⚠️ Aquí se probaba «crear el álbum CON NOMBRE al clasificar» (Fase 2c):
+  // el álbum que recogía el lote nacía sin título y había que ir a editarlo
+  // después. Con los álbumes retirados el problema desapareció con ellos —el
+  // destino ya existe y ya tiene nombre: es la visita—, así que lo que queda
+  // por comprobar es que clasificar hacia un ciclo funciona y que el cuerpo
+  // ya no habla de álbumes.
   const clasM = await api('POST', '/fotos/bandeja/clasificar', token, {
     fotoIds: [fotoM.id],
-    carpetaId: origenC.datos.id,
-    nombre: 'Revisión del 23',
-    descripcion: 'Lo que se encontró al bajar de la obra',
-  });
-  const gNombre = await api(
-    'GET',
-    `/fotos/carpeta/${origenC.datos.id}/album`,
-    token,
-  );
-  const albumNombrado = (gNombre.datos?.albumes ?? []).find(
-    (a) => a.id === clasM.datos?.albumId,
-  );
-  check(
-    'clasificar en una carpeta crea el álbum CON el nombre indicado',
-    clasM.estado === 201 &&
-      albumNombrado?.nombre === 'Revisión del 23' &&
-      albumNombrado?.descripcion === 'Lo que se encontró al bajar de la obra',
-    `HTTP ${clasM.estado} · ${albumNombrado?.nombre}`,
-  );
-
-  // ⚠️ Hacia un álbum que YA existe el nombre se rechaza: sería renombrarlo
-  // por la puerta de atrás, y para eso está `PATCH /fotos/album/:id`.
-  await api('POST', `/fotos/foto/${fotoM.id}/mover`, token, { bandeja: true });
-  const nombreAAlbum = await api('POST', '/fotos/bandeja/clasificar', token, {
-    fotoIds: [fotoM.id],
-    albumId: albumNombrado.id,
-    nombre: 'Otro nombre',
+    cicloId: cicloOrigen,
   });
   check(
-    'pero hacia un álbum existente el nombre se rechaza: no es renombrar',
-    nombreAAlbum.estado === 400,
-    `HTTP ${nombreAAlbum.estado}`,
+    'una foto de la bandeja se clasifica en una visita',
+    clasM.estado === 201 && clasM.datos?.clasificadas === 1,
+    `HTTP ${clasM.estado} · ${JSON.stringify(clasM.datos)}`,
   );
-
-  // Sin nombre sigue funcionando: la captura rápida de §17 clasifica sin
-  // escribir nada, y entonces el álbum nace sin título como siempre.
-  const sinNombre = await api('POST', '/fotos/bandeja/clasificar', token, {
-    fotoIds: [fotoM.id],
-    albumId: albumNombrado.id,
-  });
   check(
-    'y sin nombre clasifica igual, como hasta ahora',
-    sinNombre.estado === 201 && sinNombre.datos?.clasificadas === 1,
-    `HTTP ${sinNombre.estado}`,
+    'y el resultado dice a qué ciclo fue, no a qué álbum',
+    clasM.datos?.cicloId === cicloOrigen && !('albumId' in (clasM.datos ?? {})),
+    JSON.stringify(clasM.datos),
   );
 
-  // Limpieza de esta sección: la foto y los álbumes, para que las carpetas
-  // se puedan borrar (el `Restrict` de siempre).
+  const gClas = await api('GET', `/fotos/ciclo/${cicloOrigen}/foto`, token);
+  check(
+    'la foto aparece en la galería de esa visita',
+    (gClas.datos?.fotos ?? []).some((f) => f.id === fotoM.id),
+    `${gClas.datos?.fotos?.length} foto(s)`,
+  );
+
+  // Limpieza de esta sección. Ya no hay álbumes que retirar antes: la foto
+  // basta, porque es lo que bloquea el borrado de la carpeta.
   await api('DELETE', `/fotos/foto/${fotoM.id}`, token);
-  for (const c of [origenC.datos.id, destinoC.datos.id]) {
-    const g = await api('GET', `/fotos/carpeta/${c}/album`, token);
-    for (const a of g.datos?.albumes ?? [])
-      await api('DELETE', `/fotos/album/${a.id}`, token);
-  }
-  await api('DELETE', `/fotos/tarea/${tareaM.datos.id}`, token);
+  await api('DELETE', `/fotos/actividad/${actividadM.datos.id}`, token);
 
-  // 5 · «no existe» y «no la ves» contestan lo mismo
-  const fantasma = await api('DELETE', '/fotos/album/99999999', token);
+  // «no existe» y «no la ves» contestan lo mismo, ahora sobre un CICLO.
+  const fantasma = await api('GET', '/fotos/ciclo/99999999/foto', token);
   check(
-    'Un álbum inexistente contesta 404 con el texto uniforme',
-    fantasma.estado === 404 && /no existe o no tienes acceso/.test(fantasma.datos?.message ?? ''),
+    'un ciclo inexistente contesta 404 con el texto uniforme',
+    fantasma.estado === 404 &&
+      /no existe o no tienes acceso/.test(fantasma.datos?.message ?? ''),
     `HTTP ${fantasma.estado} · ${fantasma.datos?.message}`,
   );
 }
@@ -4109,8 +4158,11 @@ async function fase10(db, tokenAdmin) {
   if (!sup || !lector) return;
 
   // Una carpeta que el supervisor NO puede ver.
+  // De tipo EQUIPO porque una de las tres exportaciones son sus actividades, y
+  // desde la Fase 1 ésas cuelgan de un ciclo, que solo tiene un equipo.
   const oculta = await api('POST', '/fotos/carpeta', tokenAdmin, {
     nombre: `Fase10 oculta ${Date.now()}`,
+    tipo: 'EQUIPO',
   });
   if (oculta.estado !== 201) {
     check('Carpeta de prueba creada', false, `HTTP ${oculta.estado}`);
@@ -4118,6 +4170,7 @@ async function fase10(db, tokenAdmin) {
   }
   pendientesDeLimpiar.push(oculta.datos.id);
   const cid = oculta.datos.id;
+  const cicloCid = await cicloAbiertoDe(cid, tokenAdmin);
 
   // La premisa: no la ve.
   const ve = await api('GET', `/fotos/carpeta/${cid}`, sup.token);
@@ -4174,7 +4227,7 @@ async function fase10(db, tokenAdmin) {
   const esPdf = (b) => b.slice(0, 4).toString() === '%PDF';
 
   for (const [ruta, etiqueta] of [
-    [`/fotos/carpeta/${cid}/tarea/exportar`, 'Tareas'],
+    [`/fotos/ciclo/${cicloCid}/actividad/exportar`, 'Actividades'],
     ['/fotos/auditoria/exportar', 'Auditoría del módulo'],
     [`/fotos/auditoria/carpeta/${cid}/exportar`, 'Historial de carpeta'],
   ]) {
@@ -4196,9 +4249,9 @@ async function fase10(db, tokenAdmin) {
   check('Un formato inválido se rechaza con 400', malo.estado === 400, `HTTP ${malo.estado}`);
 
   // El permiso de exportar es el del service que lee, no uno propio.
-  const expSup = await descargar(`/fotos/carpeta/${cid}/tarea/exportar`, sup.token);
+  const expSup = await descargar(`/fotos/ciclo/${cicloCid}/actividad/exportar`, sup.token);
   check(
-    'Exportar las tareas de una carpeta que no ve → 404',
+    'Exportar las actividades de un ciclo que no ve → 404',
     expSup.estado === 404,
     `HTTP ${expSup.estado}`,
   );
@@ -4244,6 +4297,1240 @@ async function fase10(db, tokenAdmin) {
       x.nombre,
     );
   }
+}
+
+// ═════════════════════════════════════════════════════════════
+// REDISEÑO · FASE 1 — ciclos de un equipo
+// ═════════════════════════════════════════════════════════════
+/**
+ * Los ciclos (visitas) de un equipo.
+ *
+ * Cuatro cosas que esta fase tiene que sostener, y ninguna la ve el
+ * compilador:
+ *
+ *  1. **Un solo ciclo abierto por equipo.** Se comprueba por partida doble:
+ *     la API lo rechaza con un mensaje legible, y el ÍNDICE PARCIAL de la
+ *     base lo rechaza también cuando se le escribe por debajo saltándose el
+ *     service. Sin la segunda mitad, la prueba solo diría que el service
+ *     recuerda mirar — que es justo lo que un candado de base existe para
+ *     que nadie tenga que recordar.
+ *  2. **Abrir hereda el checklist**, y solo el checklist: las actividades
+ *     nacen PENDIENTES, sin responsable y sin marca de completado.
+ *  3. **Un ciclo cerrado no lo edita NADIE, tampoco un `ADMIN_GLOBAL`.**
+ *  4. **Reabrir es explícito y deja su propia entrada en la bitácora.**
+ */
+async function ciclos(db, tokenAdmin) {
+  titulo('REDISEÑO FASE 1 · un equipo nace con su ciclo 1 (§4.2)');
+
+  const adminG = await cuentaDePrueba(tokenAdmin, 'cicloadm', [
+    { modulo: 'FOTOS', nivelFotos: 'ADMIN_GLOBAL' },
+  ]);
+  if (!adminG) return;
+
+  const raiz = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: `__verif_ciclos ${Date.now()}`,
+  });
+  pendientesDeLimpiar.unshift(raiz.datos.id);
+
+  const equipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Fancoil de prueba',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+  });
+  if (equipo.estado !== 201) {
+    check('carpeta de equipo creada', false, `HTTP ${equipo.estado}`);
+    await api('DELETE', `/usuario/${adminG.id}`, tokenAdmin);
+    return;
+  }
+  pendientesDeLimpiar.unshift(equipo.datos.id);
+  const equipoId = equipo.datos.id;
+
+  const lista0 = await api('GET', `/fotos/carpeta/${equipoId}/ciclo`, tokenAdmin);
+  const c1 = (lista0.datos ?? [])[0];
+  check(
+    'al crear el equipo nace su Ciclo 1, abierto y sin estado',
+    lista0.estado === 200 &&
+      lista0.datos.length === 1 &&
+      c1.numero === 1 &&
+      c1.cerradoEn === null &&
+      c1.estado === null,
+    `${lista0.datos?.length} ciclo(s) · numero=${c1?.numero} cerradoEn=${c1?.cerradoEn} estado=${c1?.estado}`,
+  );
+  check(
+    'y guarda quién lo abrió',
+    !!c1?.abiertoPor?.id && c1.cerradoPor === null,
+    `abiertoPor=${c1?.abiertoPor?.nombre} cerradoPor=${c1?.cerradoPor}`,
+  );
+  if (!c1) return;
+  const ciclo1 = c1.id;
+
+  // Una carpeta corriente no tiene ciclos: es la misma lectura estricta de
+  // §13, un escalón más arriba.
+  const corriente = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Carpeta corriente',
+    parentId: raiz.datos.id,
+  });
+  pendientesDeLimpiar.unshift(corriente.datos.id);
+  const cicloCorriente = await api(
+    'POST',
+    `/fotos/carpeta/${corriente.datos.id}/ciclo`,
+    tokenAdmin,
+  );
+  check(
+    'una carpeta corriente no admite ciclos',
+    cicloCorriente.estado === 400 &&
+      /no lo es/.test(cicloCorriente.datos?.message ?? ''),
+    `HTTP ${cicloCorriente.estado}`,
+  );
+
+  // ── El checklist del ciclo 1 ──
+  const titulos = ['Revisar filtros', 'Medir presiones', 'Limpiar serpentín'];
+  const creadas = [];
+  for (const t of titulos) {
+    const a = await api('POST', `/fotos/ciclo/${ciclo1}/actividad`, tokenAdmin, {
+      titulo: t,
+      prioridad: 'ALTA',
+      responsableId: adminG.id,
+    });
+    if (a.datos?.id) creadas.push(a.datos.id);
+  }
+  check(
+    'las actividades cuelgan del ciclo, no de la carpeta',
+    creadas.length === 3,
+    `${creadas.length} de 3`,
+  );
+  if (creadas.length !== 3) return;
+
+  const completada = await api(
+    'POST',
+    `/fotos/actividad/${creadas[0]}/completar`,
+    tokenAdmin,
+  );
+  check(
+    'una de ellas se completa dentro del ciclo abierto',
+    completada.estado === 200 || completada.estado === 201,
+    `HTTP ${completada.estado}`,
+  );
+
+  titulo('REDISEÑO FASE 1 · un solo ciclo abierto por equipo');
+
+  // 1ª mitad: la puerta normal.
+  const segundo = await api('POST', `/fotos/carpeta/${equipoId}/ciclo`, tokenAdmin);
+  check(
+    'la API rechaza abrir un segundo ciclo con uno en curso, y dice cuál',
+    segundo.estado === 400 &&
+      /ciclo 1 sigue abierto/i.test(segundo.datos?.message ?? ''),
+    `HTTP ${segundo.estado} · ${segundo.datos?.message ?? ''}`,
+  );
+
+  // 2ª mitad: el candado de la BASE, escribiendo por debajo del service.
+  //
+  // ⚠️ Esto es lo que de verdad prueba el índice. Prisma no sabe declarar un
+  // índice único PARCIAL, así que lo crea la migración a mano — y un objeto
+  // que solo existe en un `.sql` es exactamente el que una migración futura
+  // puede dejarse por el camino sin que nada compile mal.
+  const fila = await db.query(
+    'SELECT "carpetaId", "abiertoPorId" FROM ciclos_fotos WHERE id = $1',
+    [ciclo1],
+  );
+  const { carpetaId, abiertoPorId } = fila.rows[0];
+  const mensaje = await debeFallar(
+    db,
+    `INSERT INTO ciclos_fotos ("carpetaId", numero, "abiertoPorId", "actualizadoEn")
+     VALUES (${carpetaId}, 99, ${abiertoPorId}, now())`,
+  );
+  check(
+    'y el índice único PARCIAL lo rechaza también saltándose el service',
+    mensaje !== null && /ciclos_fotos_un_solo_abierto_idx/.test(mensaje),
+    mensaje ? mensaje.split('\n')[0] : 'el INSERT entró (no debía)',
+  );
+
+  const def = await db.query(
+    `SELECT indexdef FROM pg_indexes WHERE indexname = 'ciclos_fotos_un_solo_abierto_idx'`,
+  );
+  check(
+    'el índice es UNIQUE y está acotado a los ciclos abiertos',
+    def.rows.length === 1 &&
+      /UNIQUE/i.test(def.rows[0].indexdef) &&
+      /WHERE \("?cerradoEn"? IS NULL\)/i.test(def.rows[0].indexdef),
+    def.rows[0]?.indexdef ?? 'no existe',
+  );
+
+  titulo('REDISEÑO FASE 1 · un ciclo cerrado es historial, para TODOS');
+
+  const cerrado = await api('POST', `/fotos/ciclo/${ciclo1}/cerrar`, tokenAdmin);
+  check(
+    'cerrar registra cuándo y quién',
+    (cerrado.estado === 200 || cerrado.estado === 201) &&
+      cerrado.datos?.cerradoEn !== null &&
+      !!cerrado.datos?.cerradoPor?.id,
+    `HTTP ${cerrado.estado} · cerradoPor=${cerrado.datos?.cerradoPor?.nombre}`,
+  );
+
+  const otraVez = await api('POST', `/fotos/ciclo/${ciclo1}/cerrar`, tokenAdmin);
+  check(
+    'cerrar dos veces se rechaza',
+    otraVez.estado === 400,
+    `HTTP ${otraVez.estado}`,
+  );
+
+  // ⚠️ La comprobación central de la fase: el ADMIN_GLOBAL alcanza TODO el
+  // árbol y aun así no puede tocar un ciclo cerrado. El candado no es de
+  // rol, es de estado — y si el administrador pudiera saltárselo, el
+  // historial dejaría de valer para lo único que sirve.
+  const nuevaEnCerrado = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    adminG.token,
+    { titulo: 'A destiempo' },
+  );
+  check(
+    'un ADMIN_GLOBAL NO puede añadir actividades a un ciclo cerrado',
+    nuevaEnCerrado.estado === 400 &&
+      /cerrado/.test(nuevaEnCerrado.datos?.message ?? ''),
+    `HTTP ${nuevaEnCerrado.estado} · ${nuevaEnCerrado.datos?.message ?? ''}`,
+  );
+
+  const editaCerrado = await api(
+    'PATCH',
+    `/fotos/actividad/${creadas[1]}`,
+    adminG.token,
+    { titulo: 'Retocada después' },
+  );
+  check(
+    'un ADMIN_GLOBAL NO puede editar una actividad de un ciclo cerrado',
+    editaCerrado.estado === 400 &&
+      /cerrado/.test(editaCerrado.datos?.message ?? ''),
+    `HTTP ${editaCerrado.estado}`,
+  );
+
+  const completaCerrado = await api(
+    'POST',
+    `/fotos/actividad/${creadas[1]}/completar`,
+    adminG.token,
+  );
+  check(
+    'ni completarla',
+    completaCerrado.estado === 400,
+    `HTTP ${completaCerrado.estado}`,
+  );
+
+  const borraCerrado = await api(
+    'DELETE',
+    `/fotos/actividad/${creadas[1]}`,
+    adminG.token,
+  );
+  check('ni borrarla', borraCerrado.estado === 400, `HTTP ${borraCerrado.estado}`);
+
+  const img = await imagenDePrueba();
+  const subeCerrado = await subirFotos(
+    `/fotos/actividad/${creadas[0]}/foto`,
+    adminG.token,
+    [img],
+  );
+  check(
+    'ni subir fotos a una actividad suya',
+    subeCerrado.estado === 400 && /cerrado/.test(subeCerrado.datos?.message ?? ''),
+    `HTTP ${subeCerrado.estado} · ${subeCerrado.datos?.message ?? ''}`,
+  );
+
+  const estadoCerrado = await api(
+    'PATCH',
+    `/fotos/ciclo/${ciclo1}/estado`,
+    adminG.token,
+    { estadoId: null },
+  );
+  check(
+    'ni cambiar el estado del equipo en ese ciclo',
+    estadoCerrado.estado === 400,
+    `HTTP ${estadoCerrado.estado}`,
+  );
+
+  // Leerlo sí, por supuesto: es historial, no un secreto.
+  const leeCerrado = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    adminG.token,
+  );
+  check(
+    'pero LEER el ciclo cerrado sigue funcionando',
+    leeCerrado.estado === 200 && leeCerrado.datos.length === 3,
+    `HTTP ${leeCerrado.estado} · ${leeCerrado.datos?.length} actividad(es)`,
+  );
+
+  titulo('REDISEÑO FASE 1 · abrir el siguiente hereda el checklist (§4.3)');
+
+  const ciclo2r = await api('POST', `/fotos/carpeta/${equipoId}/ciclo`, tokenAdmin);
+  check(
+    'con el anterior cerrado, el ciclo 2 sí entra',
+    (ciclo2r.estado === 200 || ciclo2r.estado === 201) &&
+      ciclo2r.datos?.numero === 2,
+    `HTTP ${ciclo2r.estado} · numero=${ciclo2r.datos?.numero}`,
+  );
+  const ciclo2 = ciclo2r.datos?.id;
+  if (!ciclo2) return;
+
+  const heredadas = await api('GET', `/fotos/ciclo/${ciclo2}/actividad`, tokenAdmin);
+  const h = heredadas.datos ?? [];
+  check(
+    'hereda las 3 actividades del ciclo anterior, con sus títulos',
+    h.length === 3 && titulos.every((t) => h.some((a) => a.titulo === t)),
+    `${h.length} actividad(es): ${h.map((a) => a.titulo).join(' · ')}`,
+  );
+  check(
+    'son filas NUEVAS, no las mismas movidas de ciclo',
+    h.every((a) => !creadas.includes(a.id)),
+    `ids ciclo1=${creadas.join(',')} ciclo2=${h.map((a) => a.id).join(',')}`,
+  );
+  check(
+    'nacen PENDIENTES y sin marca de completado, aunque una lo estuviera',
+    h.every((a) => a.estado === 'PENDIENTE' && a.completadaEn === null),
+    h.map((a) => a.estado).join(','),
+  );
+  check(
+    'y sin el responsable de la visita anterior',
+    h.every((a) => a.responsable === null),
+    h.map((a) => a.responsable?.nombre ?? 'null').join(','),
+  );
+  check(
+    'lo que SÍ se hereda es la prioridad — es del checklist, no del trabajo',
+    h.every((a) => a.prioridad === 'ALTA'),
+    h.map((a) => a.prioridad).join(','),
+  );
+
+  // Y el ciclo 1 sigue con lo suyo: heredar no es mover.
+  const c1despues = await api('GET', `/fotos/ciclo/${ciclo1}/actividad`, tokenAdmin);
+  check(
+    'el ciclo 1 conserva sus actividades y su completada',
+    c1despues.datos?.length === 3 &&
+      c1despues.datos.some((a) => a.estado === 'COMPLETADA'),
+    `${c1despues.datos?.length} actividad(es)`,
+  );
+
+  titulo('REDISEÑO FASE 1 · el estado del equipo (§7)');
+
+  const estados = await api('GET', '/fotos/estado-equipo', tokenAdmin);
+  check(
+    'el catálogo de estados viene sembrado como DATOS, no en el código',
+    estados.estado === 200 && estados.datos.length >= 3,
+    `${estados.datos?.length} estado(s): ${(estados.datos ?? [])
+      .map((e) => `${e.nombre}/${e.color}`)
+      .join(' · ')}`,
+  );
+  const naranja = (estados.datos ?? []).find((e) => e.color === 'NARANJA');
+
+  const puesto = await api('PATCH', `/fotos/ciclo/${ciclo2}/estado`, tokenAdmin, {
+    estadoId: naranja?.id,
+  });
+  check(
+    'se le pone estado al ciclo en curso',
+    puesto.estado === 200 && puesto.datos?.estado?.id === naranja?.id,
+    `HTTP ${puesto.estado} · estado=${puesto.datos?.estado?.nombre}`,
+  );
+
+  const inventado = await api('PATCH', `/fotos/ciclo/${ciclo2}/estado`, tokenAdmin, {
+    estadoId: 999999,
+  });
+  check(
+    'un estado que no existe se rechaza',
+    inventado.estado === 404,
+    `HTTP ${inventado.estado}`,
+  );
+
+  // §7: la tarjeta del explorador enseña el estado del ciclo MÁS RECIENTE.
+  const explorador = await api('GET', `/fotos/carpeta/${raiz.datos.id}`, tokenAdmin);
+  const tarjeta = (explorador.datos?.secciones ?? [])
+    .flatMap((s) => s.carpetas ?? [])
+    .find((c) => c.id === equipoId);
+  check(
+    'la tarjeta del explorador lleva el estado del ciclo más reciente',
+    tarjeta?.estadoEquipo?.id === naranja?.id,
+    `estadoEquipo=${tarjeta?.estadoEquipo?.nombre ?? 'null'}`,
+  );
+
+  const borrarEnUso = await api(
+    'DELETE',
+    `/fotos/estado-equipo/${naranja?.id}`,
+    tokenAdmin,
+  );
+  check(
+    'un estado con ciclos detrás no se borra: se ofrece retirarlo',
+    borrarEnUso.estado === 400 && /Retíralo/.test(borrarEnUso.datos?.message ?? ''),
+    `HTTP ${borrarEnUso.estado} · ${borrarEnUso.datos?.message ?? ''}`,
+  );
+
+  const configuraAdmin = await api('POST', '/fotos/estado-equipo', adminG.token, {
+    nombre: `__verif_estado ${Date.now()}`,
+    color: 'VERDE',
+  });
+  check(
+    'configurar el catálogo es de ADMIN_GLOBAL — y éste lo es, así que entra',
+    configuraAdmin.estado === 201,
+    `HTTP ${configuraAdmin.estado}`,
+  );
+  if (configuraAdmin.datos?.id)
+    await api(
+      'DELETE',
+      `/fotos/estado-equipo/${configuraAdmin.datos.id}`,
+      tokenAdmin,
+    );
+
+  const colorRaro = await api('POST', '/fotos/estado-equipo', tokenAdmin, {
+    nombre: `__verif_color ${Date.now()}`,
+    color: 'FUCSIA',
+  });
+  check(
+    'la PALETA sí es cerrada: un color inventado se rechaza',
+    colorRaro.estado === 400 && /VERDE/.test(colorRaro.datos?.message ?? ''),
+    `HTTP ${colorRaro.estado}`,
+  );
+
+  titulo('REDISEÑO FASE 1 · reabrir es explícito y deja rastro');
+
+  const reabrirConOtroAbierto = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo1}/reabrir`,
+    tokenAdmin,
+  );
+  check(
+    'no se reabre uno viejo con otro en curso — el invariante se sostiene',
+    reabrirConOtroAbierto.estado === 400 &&
+      /en curso/.test(reabrirConOtroAbierto.datos?.message ?? ''),
+    `HTTP ${reabrirConOtroAbierto.estado} · ${reabrirConOtroAbierto.datos?.message ?? ''}`,
+  );
+
+  await api('POST', `/fotos/ciclo/${ciclo2}/cerrar`, tokenAdmin);
+  const reabierto = await api('POST', `/fotos/ciclo/${ciclo1}/reabrir`, tokenAdmin);
+  check(
+    'con el otro cerrado, reabrir borra la marca de cierre',
+    (reabierto.estado === 200 || reabierto.estado === 201) &&
+      reabierto.datos?.cerradoEn === null &&
+      reabierto.datos?.cerradoPor === null,
+    `HTTP ${reabierto.estado} · cerradoEn=${reabierto.datos?.cerradoEn}`,
+  );
+
+  const editaTrasReabrir = await api(
+    'PATCH',
+    `/fotos/actividad/${creadas[1]}`,
+    tokenAdmin,
+    { titulo: 'Corregida tras reabrir' },
+  );
+  check(
+    'y el ciclo vuelve a admitir cambios — que es para lo que se reabre',
+    editaTrasReabrir.estado === 200,
+    `HTTP ${editaTrasReabrir.estado}`,
+  );
+
+  const hilo = await api('GET', `/fotos/auditoria/carpeta/${equipoId}`, tokenAdmin);
+  const eventos = hilo.datos ?? [];
+  const tiene = (accion) => eventos.some((e) => e.accion === accion);
+  check(
+    'la bitácora registra abrir, cerrar Y reabrir por separado (§23)',
+    tiene('CICLO_ABIERTO') && tiene('CICLO_CERRADO') && tiene('CICLO_REABIERTO'),
+    eventos
+      .filter((e) => e.entidad === 'CICLO')
+      .map((e) => e.accion)
+      .join(' · '),
+  );
+  const reap = eventos.find((e) => e.accion === 'CICLO_REABIERTO');
+  check(
+    'la entrada de reapertura dice quién y sobre qué ciclo',
+    !!reap?.usuarioNombre && reap.entidadId === ciclo1,
+    `${reap?.usuarioNombre} · entidadId=${reap?.entidadId} (ciclo1=${ciclo1})`,
+  );
+  const cambioEstado = eventos.find(
+    (e) => e.entidad === 'CICLO' && e.campoAfectado === 'estado',
+  );
+  check(
+    'y el cambio de estado guarda el valor anterior y el nuevo',
+    !!cambioEstado && cambioEstado.valorNuevo === naranja?.nombre,
+    `${cambioEstado?.valorAnterior} → ${cambioEstado?.valorNuevo}`,
+  );
+
+  await api('DELETE', `/usuario/${adminG.id}`, tokenAdmin);
+}
+
+// ═════════════════════════════════════════════════════════════
+// REDISEÑO · FASE 2 — tipo de sistema y catálogo de actividades
+// ═════════════════════════════════════════════════════════════
+/**
+ * El vocabulario del módulo y la preselección del checklist.
+ *
+ * Lo que esta fase tiene que sostener:
+ *
+ *  1. **Familia y tipo son DATOS**, en dos niveles, administrables por un
+ *     `ADMIN_GLOBAL` y legibles por cualquiera. Un nombre repetido dentro de
+ *     la misma familia choca; en otra familia, no.
+ *  2. **El tipo de sistema es un campo de primera clase del EQUIPO**, no un
+ *     campo configurable: se guarda, se lee y se corrige.
+ *  3. **La preselección**: dar de alta un equipo estampa el checklist de su
+ *     tipo, y `undefined` ≠ `[]`.
+ *  4. **Renombrar el catálogo NO reescribe una visita ya hecha**, porque la
+ *     actividad copió el nombre.
+ */
+async function catalogoActividades(db, tokenAdmin) {
+  titulo('REDISEÑO FASE 2 · familias y tipos de sistema');
+
+  const sup = await cuentaDePrueba(tokenAdmin, 'catsup', [{ modulo: 'FOTOS' }]);
+  if (!sup) return;
+
+  const familias = await api('GET', '/fotos/sistema', tokenAdmin);
+  check(
+    'las dos familias que nombró HVC vienen sembradas como datos',
+    familias.estado === 200 &&
+      ['Aire Acondicionado', 'Ventilación'].every((n) =>
+        (familias.datos ?? []).some((f) => f.nombre === n),
+      ),
+    (familias.datos ?? []).map((f) => f.nombre).join(' · '),
+  );
+
+  const aire = (familias.datos ?? []).find(
+    (f) => f.nombre === 'Aire Acondicionado',
+  );
+  const venti = (familias.datos ?? []).find((f) => f.nombre === 'Ventilación');
+  if (!aire || !venti) return;
+
+  check(
+    'un supervisor las LEE — hacen falta para dar de alta un equipo',
+    (await api('GET', '/fotos/sistema', sup.token)).estado === 200,
+  );
+  const creaSup = await api('POST', '/fotos/sistema/familia', sup.token, {
+    nombre: `__verif_fam ${Date.now()}`,
+  });
+  check(
+    'pero NO las configura: eso es de ADMIN_GLOBAL',
+    creaSup.estado === 403,
+    `HTTP ${creaSup.estado}`,
+  );
+
+  const sello = Date.now();
+  const t1 = await api('POST', '/fotos/sistema/tipo', tokenAdmin, {
+    familiaId: aire.id,
+    nombre: `__verif_split ${sello}`,
+    orden: 1,
+  });
+  check(
+    'se crea un tipo dentro de una familia',
+    t1.estado === 201 && t1.datos?.familiaId === aire.id,
+    `HTTP ${t1.estado}`,
+  );
+  const tipoAire = t1.datos?.id;
+  if (!tipoAire) return;
+
+  const repetido = await api('POST', '/fotos/sistema/tipo', tokenAdmin, {
+    familiaId: aire.id,
+    nombre: `__verif_split ${sello}`,
+  });
+  check(
+    'el mismo nombre en la MISMA familia se rechaza',
+    repetido.estado === 409,
+    `HTTP ${repetido.estado}`,
+  );
+
+  // ⚠️ La unicidad es del PAR, no del nombre: «Estándar» puede existir en
+  // Aire Acondicionado y en Ventilación sin ser el mismo tipo.
+  const enOtra = await api('POST', '/fotos/sistema/tipo', tokenAdmin, {
+    familiaId: venti.id,
+    nombre: `__verif_split ${sello}`,
+  });
+  check(
+    '…pero el mismo nombre en OTRA familia sí entra',
+    enOtra.estado === 201,
+    `HTTP ${enOtra.estado}`,
+  );
+  const tipoVenti = enOtra.datos?.id;
+
+  const familiaConTipos = await api(
+    'DELETE',
+    `/fotos/sistema/familia/${aire.id}`,
+    tokenAdmin,
+  );
+  check(
+    'una familia con tipos dentro no se borra: se ofrece retirarla',
+    familiaConTipos.estado === 400 &&
+      /Retírala/.test(familiaConTipos.datos?.message ?? ''),
+    `HTTP ${familiaConTipos.estado}`,
+  );
+
+  titulo('REDISEÑO FASE 2 · el catálogo de actividades');
+
+  const d1 = await api('POST', '/fotos/catalogo-actividad', tokenAdmin, {
+    nombre: `__verif_filtros ${sello}`,
+    descripcion: 'Limpieza y revisión del filtro',
+    orden: 1,
+    tiposSistema: [tipoAire],
+  });
+  const d2 = await api('POST', '/fotos/catalogo-actividad', tokenAdmin, {
+    nombre: `__verif_presiones ${sello}`,
+    orden: 2,
+    tiposSistema: [tipoAire],
+  });
+  // Ésta NO es del tipo del equipo: sirve para probar que la preselección
+  // acota de verdad y no trae el catálogo entero.
+  const d3 = await api('POST', '/fotos/catalogo-actividad', tokenAdmin, {
+    nombre: `__verif_aspas ${sello}`,
+    orden: 3,
+    tiposSistema: [tipoVenti],
+  });
+  check(
+    'se crean tres definiciones, dos de un tipo y una de otro',
+    [d1, d2, d3].every((d) => d.estado === 201),
+    [d1, d2, d3].map((d) => d.estado).join(','),
+  );
+  const defs = [d1, d2, d3].map((d) => d.datos?.id).filter(Boolean);
+  if (defs.length !== 3) return;
+
+  check(
+    'una definición devuelve sus tipos de sistema aplanados',
+    (d1.datos?.tipos ?? []).length === 1 &&
+      d1.datos.tipos[0].id === tipoAire &&
+      d1.datos.tipos[0].familia?.nombre === 'Aire Acondicionado',
+    JSON.stringify(d1.datos?.tipos ?? []),
+  );
+
+  const acotado = await api(
+    'GET',
+    `/fotos/catalogo-actividad?tipoSistema=${tipoAire}`,
+    tokenAdmin,
+  );
+  const nombresAcotados = (acotado.datos ?? []).map((d) => d.nombre);
+  check(
+    'el catálogo se acota por tipo de sistema — es la preselección',
+    acotado.estado === 200 &&
+      nombresAcotados.includes(`__verif_filtros ${sello}`) &&
+      nombresAcotados.includes(`__verif_presiones ${sello}`) &&
+      !nombresAcotados.includes(`__verif_aspas ${sello}`),
+    nombresAcotados.join(' · '),
+  );
+
+  const catSup = await api('GET', '/fotos/catalogo-actividad', sup.token);
+  check(
+    'un supervisor LEE el catálogo pero no lo configura',
+    catSup.estado === 200 &&
+      (await api('POST', '/fotos/catalogo-actividad', sup.token, { nombre: 'X' }))
+        .estado === 403,
+  );
+
+  titulo('REDISEÑO FASE 2 · la preselección al dar de alta un equipo');
+
+  const raiz = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: `__verif_cat ${sello}`,
+  });
+  pendientesDeLimpiar.unshift(raiz.datos.id);
+
+  // (a) Sin decir nada: se estampa la preselección del tipo.
+  const eq1 = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo con preselección',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    tipoSistemaId: tipoAire,
+  });
+  if (eq1.estado !== 201) {
+    check('equipo con tipo de sistema creado', false, `HTTP ${eq1.estado}`);
+    return;
+  }
+  pendientesDeLimpiar.unshift(eq1.datos.id);
+
+  const ciclo1 = await cicloAbiertoDe(eq1.datos.id, tokenAdmin);
+  const acts1 = await api('GET', `/fotos/ciclo/${ciclo1}/actividad`, tokenAdmin);
+  const titulos1 = (acts1.datos ?? []).map((a) => a.titulo);
+  check(
+    'el Ciclo 1 nace con el checklist del tipo de sistema, y solo con ése',
+    titulos1.length === 2 &&
+      titulos1.includes(`__verif_filtros ${sello}`) &&
+      !titulos1.includes(`__verif_aspas ${sello}`),
+    titulos1.join(' · '),
+  );
+  check(
+    'y la descripción del catálogo viaja con la actividad',
+    (acts1.datos ?? []).find((a) => a.titulo === `__verif_filtros ${sello}`)
+      ?.descripcion === 'Limpieza y revisión del filtro',
+  );
+
+  const abierta = await api('GET', `/fotos/carpeta/${eq1.datos.id}`, tokenAdmin);
+  check(
+    'el tipo de sistema es un campo del equipo y vuelve con su familia',
+    abierta.datos?.carpetaActual?.tipoSistema?.id === tipoAire &&
+      abierta.datos.carpetaActual.tipoSistema.familia?.nombre ===
+        'Aire Acondicionado',
+    JSON.stringify(abierta.datos?.carpetaActual?.tipoSistema ?? null),
+  );
+
+  // (b) Lista vacía EXPLÍCITA: ninguna. No es lo mismo que omitirla.
+  const eq2 = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo sin checklist',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    tipoSistemaId: tipoAire,
+    actividades: [],
+  });
+  pendientesDeLimpiar.unshift(eq2.datos?.id);
+  const ciclo2 = await cicloAbiertoDe(eq2.datos?.id, tokenAdmin);
+  const acts2 = await api('GET', `/fotos/ciclo/${ciclo2}/actividad`, tokenAdmin);
+  check(
+    'con `actividades: []` no se estampa ninguna — desmarcarlas todas vale',
+    (acts2.datos ?? []).length === 0,
+    `${acts2.datos?.length} actividad(es)`,
+  );
+
+  // (c) Una elección concreta.
+  const eq3 = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo con una sola',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    tipoSistemaId: tipoAire,
+    actividades: [defs[1]],
+  });
+  pendientesDeLimpiar.unshift(eq3.datos?.id);
+  const ciclo3 = await cicloAbiertoDe(eq3.datos?.id, tokenAdmin);
+  const acts3 = await api('GET', `/fotos/ciclo/${ciclo3}/actividad`, tokenAdmin);
+  check(
+    'y con una lista concreta se estampa exactamente ésa',
+    (acts3.datos ?? []).length === 1 &&
+      acts3.datos[0].titulo === `__verif_presiones ${sello}`,
+    (acts3.datos ?? []).map((a) => a.titulo).join(' · '),
+  );
+
+  const enCorriente = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Corriente con tipo',
+    parentId: raiz.datos.id,
+    tipoSistemaId: tipoAire,
+  });
+  check(
+    'una carpeta corriente no admite tipo de sistema',
+    enCorriente.estado === 400 && /Equipo/.test(enCorriente.datos?.message ?? ''),
+    `HTTP ${enCorriente.estado}`,
+  );
+
+  titulo('REDISEÑO FASE 2 · traer el catálogo a un ciclo ya abierto');
+
+  const traer = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo2}/actividad/desde-catalogo`,
+    tokenAdmin,
+    { definiciones: [defs[0], defs[1]] },
+  );
+  check(
+    'se añaden al ciclo abierto las que se eligen',
+    (traer.estado === 200 || traer.estado === 201) && traer.datos?.anadidas === 2,
+    `HTTP ${traer.estado} · ${JSON.stringify(traer.datos)}`,
+  );
+
+  const otraVez = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo2}/actividad/desde-catalogo`,
+    tokenAdmin,
+    { definiciones: [defs[0], defs[1]] },
+  );
+  check(
+    'y repetir no duplica: se saltan por título',
+    otraVez.datos?.anadidas === 0 && otraVez.datos?.omitidas === 2,
+    JSON.stringify(otraVez.datos),
+  );
+
+  // El candado del historial también manda aquí: el catálogo no es una
+  // puerta trasera para escribir en una visita cerrada.
+  await api('POST', `/fotos/ciclo/${ciclo3}/cerrar`, tokenAdmin);
+  const enCerrado = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo3}/actividad/desde-catalogo`,
+    tokenAdmin,
+    { definiciones: [defs[0]] },
+  );
+  check(
+    'un ciclo cerrado NO admite traer actividades del catálogo',
+    enCerrado.estado === 400 && /cerrado/.test(enCerrado.datos?.message ?? ''),
+    `HTTP ${enCerrado.estado}`,
+  );
+
+  titulo('REDISEÑO FASE 2 · el catálogo propone, no reescribe el pasado');
+
+  // ⚠️ La comprobación que justifica que la actividad COPIE el nombre en vez
+  // de apuntar al catálogo con una FK.
+  const renombrada = await api(
+    'PATCH',
+    `/fotos/catalogo-actividad/${defs[0]}`,
+    tokenAdmin,
+    { nombre: `__verif_filtros_v2 ${sello}` },
+  );
+  check(
+    'se renombra una definición del catálogo',
+    renombrada.estado === 200,
+    `HTTP ${renombrada.estado}`,
+  );
+  const trasRenombrar = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+  );
+  check(
+    'la visita ya hecha CONSERVA el nombre con el que se recorrió',
+    (trasRenombrar.datos ?? []).some(
+      (a) => a.titulo === `__verif_filtros ${sello}`,
+    ),
+    (trasRenombrar.datos ?? []).map((a) => a.titulo).join(' · '),
+  );
+
+  // Cambiar el tipo de sistema del equipo tampoco toca sus visitas.
+  const cambiaTipo = await api(
+    'PATCH',
+    `/fotos/carpeta/${eq1.datos.id}`,
+    tokenAdmin,
+    { tipoSistemaId: tipoVenti },
+  );
+  check(
+    'el tipo de sistema de un equipo se corrige',
+    cambiaTipo.estado === 200,
+    `HTTP ${cambiaTipo.estado}`,
+  );
+  const trasCambio = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+  );
+  check(
+    '…y su checklist en curso NO se reescribe: sigue siendo el que había',
+    (trasCambio.datos ?? []).length === 2,
+    `${trasCambio.datos?.length} actividad(es)`,
+  );
+
+  const tipoEnUso = await api(
+    'DELETE',
+    `/fotos/sistema/tipo/${tipoVenti}`,
+    tokenAdmin,
+  );
+  check(
+    'un tipo con equipos detrás no se borra: se ofrece retirarlo',
+    tipoEnUso.estado === 400 && /Retíralo/.test(tipoEnUso.datos?.message ?? ''),
+    `HTTP ${tipoEnUso.estado} · ${tipoEnUso.datos?.message ?? ''}`,
+  );
+
+  // ⚠️ Retirado: no se puede volver a elegir, pero el equipo que lo tenía lo
+  // conserva. `activo` retira del formulario, no reescribe lo capturado.
+  await api('PATCH', `/fotos/sistema/tipo/${tipoAire}`, tokenAdmin, {
+    activo: false,
+  });
+  const conRetirado = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo con tipo retirado',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+    tipoSistemaId: tipoAire,
+  });
+  check(
+    'un tipo RETIRADO ya no se puede asignar…',
+    conRetirado.estado === 400 &&
+      /retirado/.test(conRetirado.datos?.message ?? ''),
+    `HTTP ${conRetirado.estado}`,
+  );
+  if (conRetirado.datos?.id) pendientesDeLimpiar.unshift(conRetirado.datos.id);
+  const eq3Sigue = await api('GET', `/fotos/carpeta/${eq3.datos.id}`, tokenAdmin);
+  check(
+    '…pero el equipo que ya lo tenía lo conserva',
+    eq3Sigue.datos?.carpetaActual?.tipoSistema?.id === tipoAire,
+    JSON.stringify(eq3Sigue.datos?.carpetaActual?.tipoSistema ?? null),
+  );
+
+  // ⚠️ Al revés que un tipo o un estado, una DEFINICIÓN sí se borra aunque se
+  // haya usado: nada apunta a ella, las actividades copiaron el nombre.
+  const borrada = await api(
+    'DELETE',
+    `/fotos/catalogo-actividad/${defs[0]}`,
+    tokenAdmin,
+  );
+  check(
+    'una definición del catálogo SÍ se borra aunque se haya usado…',
+    borrada.estado === 200,
+    `HTTP ${borrada.estado}`,
+  );
+  const sobreviven = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+  );
+  check(
+    '…y las actividades que salieron de ella siguen ahí',
+    (sobreviven.datos ?? []).length === 2,
+    `${sobreviven.datos?.length} actividad(es)`,
+  );
+
+  // ── Limpieza ──
+  //
+  // ⚠️ Va aquí y no en `limpiar()`, que solo sabe de carpetas: los tipos de
+  // sistema son `Restrict` desde los equipos, así que hay que borrar primero
+  // los equipos —de más profundo a menos, como siempre— y solo después el
+  // vocabulario. Sin esto, cada corrida dejaría tipos `__verif_*` colgando.
+  await api('DELETE', `/fotos/catalogo-actividad/${defs[1]}`, tokenAdmin);
+  await api('DELETE', `/fotos/catalogo-actividad/${defs[2]}`, tokenAdmin);
+  for (const eq of [eq1, eq2, eq3])
+    if (eq.datos?.id) await api('DELETE', `/fotos/carpeta/${eq.datos.id}`, tokenAdmin);
+  if (enCorriente.datos?.id)
+    await api('DELETE', `/fotos/carpeta/${enCorriente.datos.id}`, tokenAdmin);
+
+  const tipoLibre = await api('DELETE', `/fotos/sistema/tipo/${tipoAire}`, tokenAdmin);
+  check(
+    'sin equipos detrás, el tipo de sistema SÍ se borra',
+    tipoLibre.estado === 200,
+    `HTTP ${tipoLibre.estado} · ${tipoLibre.datos?.message ?? ''}`,
+  );
+  await api('DELETE', `/fotos/sistema/tipo/${tipoVenti}`, tokenAdmin);
+  await api('DELETE', `/usuario/${sup.id}`, tokenAdmin);
+}
+
+// ═════════════════════════════════════════════════════════════
+// REDISEÑO · FASE 3 — evidencia fotográfica por actividad
+// ═════════════════════════════════════════════════════════════
+/**
+ * Antes/después, una foto, o ninguna.
+ *
+ * Lo que esta fase tiene que sostener:
+ *
+ *  1. **La evidencia es una EXPECTATIVA, no un candado**: se puede completar
+ *     una actividad sin su foto, y la señal se ve igual. Bloquear el check
+ *     sería trabar el trabajo en obra, que es el fallo que el módulo evita
+ *     en todas partes.
+ *  2. **`faltaEvidencia` se DERIVA**, no se guarda: subir y borrar una foto
+ *     lo mueven solo.
+ *  3. **El momento solo existe donde tiene sentido**: lo exige una actividad
+ *     ANTES_DESPUES, lo rechazan las demás, y el CHECK de la base impide que
+ *     una foto de álbum lleve uno.
+ *  4. **Se hereda entre ciclos y se copia del catálogo**, porque es parte del
+ *     checklist y no del trabajo hecho.
+ */
+async function evidenciaActividades(db, tokenAdmin) {
+  titulo('REDISEÑO FASE 3 · el CHECK y la migración');
+
+  const chk = await db.query(
+    `SELECT conname FROM pg_constraint WHERE conname = 'fotos_momento_solo_actividad_chk'`,
+  );
+  check(
+    'el CHECK de «momento solo en foto de actividad» existe',
+    chk.rows.length === 1,
+    chk.rows[0]?.conname ?? 'no existe',
+  );
+
+  titulo('REDISEÑO FASE 3 · la evidencia se pide, se hereda y se copia');
+
+  const sello = Date.now();
+  const raiz = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: `__verif_evi ${sello}`,
+  });
+  pendientesDeLimpiar.unshift(raiz.datos.id);
+
+  const equipo = await api('POST', '/fotos/carpeta', tokenAdmin, {
+    nombre: 'Equipo con evidencia',
+    parentId: raiz.datos.id,
+    tipo: 'EQUIPO',
+  });
+  if (equipo.estado !== 201) {
+    check('equipo creado', false, `HTTP ${equipo.estado}`);
+    return;
+  }
+  pendientesDeLimpiar.unshift(equipo.datos.id);
+  const equipoId = equipo.datos.id;
+  const ciclo1 = await cicloAbiertoDe(equipoId, tokenAdmin);
+
+  const aUna = await api('POST', `/fotos/ciclo/${ciclo1}/actividad`, tokenAdmin, {
+    titulo: 'Medición de presiones',
+  });
+  check(
+    'sin decir nada, una actividad pide UNA foto — el defecto razonable',
+    aUna.datos?.evidencia === 'UNA' && aUna.datos?.faltaEvidencia === true,
+    `evidencia=${aUna.datos?.evidencia} falta=${aUna.datos?.faltaEvidencia}`,
+  );
+
+  const aNinguna = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+    { titulo: 'Firma del acta', evidencia: 'NINGUNA' },
+  );
+  check(
+    'NINGUNA no reclama nada',
+    aNinguna.datos?.evidencia === 'NINGUNA' &&
+      aNinguna.datos?.faltaEvidencia === false,
+    `falta=${aNinguna.datos?.faltaEvidencia}`,
+  );
+
+  const aDos = await api('POST', `/fotos/ciclo/${ciclo1}/actividad`, tokenAdmin, {
+    titulo: 'Limpieza de serpentín',
+    evidencia: 'ANTES_DESPUES',
+  });
+  check(
+    'ANTES_DESPUES nace reclamando las dos',
+    aDos.datos?.evidencia === 'ANTES_DESPUES' &&
+      aDos.datos?.tieneAntes === false &&
+      aDos.datos?.tieneDespues === false &&
+      aDos.datos?.faltaEvidencia === true,
+    JSON.stringify({
+      antes: aDos.datos?.tieneAntes,
+      despues: aDos.datos?.tieneDespues,
+    }),
+  );
+
+  const inventada = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+    { titulo: 'X', evidencia: 'VIDEO' },
+  );
+  check(
+    'un tipo de evidencia inventado se rechaza con los valores permitidos',
+    inventada.estado === 400 &&
+      /ANTES_DESPUES/.test(inventada.datos?.message ?? ''),
+    `HTTP ${inventada.estado}`,
+  );
+
+  const idUna = aUna.datos?.id;
+  const idDos = aDos.datos?.id;
+  if (!idUna || !idDos) return;
+
+  titulo('REDISEÑO FASE 3 · el momento de cada foto');
+
+  const img = await imagenDePrueba();
+
+  const sinMomento = await subirFotos(
+    `/fotos/actividad/${idDos}/foto`,
+    tokenAdmin,
+    [img],
+  );
+  check(
+    'una actividad ANTES_DESPUES EXIGE decir cuál de los dos es',
+    sinMomento.estado === 400 &&
+      /cuál de los dos/.test(sinMomento.datos?.message ?? ''),
+    `HTTP ${sinMomento.estado} · ${sinMomento.datos?.message ?? ''}`,
+  );
+
+  const conMomentoDeMas = await subirFotos(
+    `/fotos/actividad/${idUna}/foto`,
+    tokenAdmin,
+    [img],
+    { momento: 'ANTES' },
+  );
+  check(
+    'y una de tipo UNA lo rechaza: no hay dos huecos que distinguir',
+    conMomentoDeMas.estado === 400,
+    `HTTP ${conMomentoDeMas.estado} · ${conMomentoDeMas.datos?.message ?? ''}`,
+  );
+
+  const momentoRaro = await subirFotos(
+    `/fotos/actividad/${idDos}/foto`,
+    tokenAdmin,
+    [img],
+    { momento: 'DURANTE' },
+  );
+  check(
+    'un momento inventado se rechaza',
+    momentoRaro.estado === 400 && /ANTES/.test(momentoRaro.datos?.message ?? ''),
+    `HTTP ${momentoRaro.estado}`,
+  );
+
+  const antes = await subirFotos(
+    `/fotos/actividad/${idDos}/foto`,
+    tokenAdmin,
+    [img],
+    { momento: 'antes' },
+  );
+  check(
+    'el antes entra (y el valor no distingue mayúsculas)',
+    antes.estado === 201 && antes.datos?.subidas === 1,
+    `HTTP ${antes.estado} · ${JSON.stringify(antes.datos?.fallidas ?? [])}`,
+  );
+
+  const trasAntes = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+  );
+  const dosTrasAntes = (trasAntes.datos ?? []).find((a) => a.id === idDos);
+  check(
+    'con solo el antes, la actividad sigue diciendo que le falta algo',
+    dosTrasAntes?.tieneAntes === true &&
+      dosTrasAntes?.tieneDespues === false &&
+      dosTrasAntes?.faltaEvidencia === true,
+    JSON.stringify({
+      antes: dosTrasAntes?.tieneAntes,
+      despues: dosTrasAntes?.tieneDespues,
+      falta: dosTrasAntes?.faltaEvidencia,
+    }),
+  );
+
+  const despues = await subirFotos(
+    `/fotos/actividad/${idDos}/foto`,
+    tokenAdmin,
+    [img],
+    { momento: 'DESPUES' },
+  );
+  check('el después entra', despues.estado === 201);
+
+  const completo = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+  );
+  const dosCompleto = (completo.datos ?? []).find((a) => a.id === idDos);
+  check(
+    'con los dos huecos puestos, ya no falta evidencia',
+    dosCompleto?.faltaEvidencia === false,
+    `falta=${dosCompleto?.faltaEvidencia}`,
+  );
+
+  const fotosDeDos = await api('GET', `/fotos/actividad/${idDos}/foto`, tokenAdmin);
+  check(
+    'y cada foto dice en qué hueco está',
+    (fotosDeDos.datos ?? []).length === 2 &&
+      (fotosDeDos.datos ?? []).some((f) => f.momento === 'ANTES') &&
+      (fotosDeDos.datos ?? []).some((f) => f.momento === 'DESPUES'),
+    (fotosDeDos.datos ?? []).map((f) => f.momento).join(','),
+  );
+
+  // ⚠️ Se DERIVA: borrar el después vuelve a reclamarlo, sin que nadie
+  // reescriba ninguna columna.
+  const elDespues = (fotosDeDos.datos ?? []).find(
+    (f) => f.momento === 'DESPUES',
+  );
+  await api('DELETE', `/fotos/foto/${elDespues.id}`, tokenAdmin);
+  const trasBorrar = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo1}/actividad`,
+    tokenAdmin,
+  );
+  const dosTrasBorrar = (trasBorrar.datos ?? []).find((a) => a.id === idDos);
+  check(
+    'borrar el después lo vuelve a reclamar — la señal se deriva, no se guarda',
+    dosTrasBorrar?.tieneDespues === false &&
+      dosTrasBorrar?.faltaEvidencia === true,
+    JSON.stringify({
+      despues: dosTrasBorrar?.tieneDespues,
+      falta: dosTrasBorrar?.faltaEvidencia,
+    }),
+  );
+
+  titulo('REDISEÑO FASE 3 · el CHECK muerde por debajo del service');
+
+  // Una foto SUELTA del ciclo con momento: no tiene actividad, así que el
+  // service ni siquiera lo admite — y esto comprueba que la base tampoco lo
+  // dejaría pasar por debajo.
+  await subirFotos(`/fotos/ciclo/${ciclo1}/foto`, tokenAdmin, [img], {
+    descripcion: `__verif_suelta_evi ${sello}`,
+  });
+  // La subida devuelve contadores, no ids: la foto se localiza por su ciclo.
+  // Es una lectura, no una escritura suelta contra la base.
+  const filaFoto = await db.query(
+    'SELECT id FROM fotos WHERE "cicloId" = $1 LIMIT 1',
+    [ciclo1],
+  );
+  const fotoSuelta = filaFoto.rows[0]?.id ?? null;
+  check(
+    'hay una foto suelta del ciclo con la que probar el CHECK',
+    fotoSuelta !== null,
+    `fotoId=${fotoSuelta}`,
+  );
+  if (fotoSuelta) {
+    const mensaje = await debeFallar(
+      db,
+      `UPDATE fotos SET momento = 'ANTES' WHERE id = ${fotoSuelta}`,
+    );
+    check(
+      'un `momento` en una foto sin actividad lo rechaza el CHECK',
+      mensaje !== null && /fotos_momento_solo_actividad_chk/.test(mensaje),
+      mensaje ? mensaje.split('\n')[0] : 'el UPDATE entró (no debía)',
+    );
+  }
+
+  titulo('REDISEÑO FASE 3 · se pide, pero NO se impone');
+
+  // ⚠️ La decisión de la fase: completar una actividad a la que le falta la
+  // evidencia SE PERMITE. La señal se enseña; el trabajo no se detiene.
+  const completar = await api(
+    'POST',
+    `/fotos/actividad/${idUna}/completar`,
+    tokenAdmin,
+  );
+  check(
+    'se completa una actividad SIN su foto — es expectativa, no candado',
+    (completar.estado === 200 || completar.estado === 201) &&
+      completar.datos?.estado === 'COMPLETADA',
+    `HTTP ${completar.estado}`,
+  );
+  check(
+    '…y sigue avisando de que la evidencia falta',
+    completar.datos?.faltaEvidencia === true,
+    `falta=${completar.datos?.faltaEvidencia}`,
+  );
+
+  titulo('REDISEÑO FASE 3 · se hereda al abrir la visita siguiente');
+
+  await api('POST', `/fotos/ciclo/${ciclo1}/cerrar`, tokenAdmin);
+  const ciclo2 = await api('POST', `/fotos/carpeta/${equipoId}/ciclo`, tokenAdmin);
+  const heredadas = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo2.datos?.id}/actividad`,
+    tokenAdmin,
+  );
+  const h = heredadas.datos ?? [];
+  check(
+    'la evidencia viaja con el checklist: es qué fotografiar, no trabajo hecho',
+    h.find((a) => a.titulo === 'Limpieza de serpentín')?.evidencia ===
+      'ANTES_DESPUES' &&
+      h.find((a) => a.titulo === 'Firma del acta')?.evidencia === 'NINGUNA',
+    h.map((a) => `${a.titulo}=${a.evidencia}`).join(' · '),
+  );
+  check(
+    'y las heredadas nacen SIN fotos, reclamando lo suyo otra vez',
+    h.find((a) => a.titulo === 'Limpieza de serpentín')?.faltaEvidencia === true,
+  );
+
+  titulo('REDISEÑO FASE 3 · el catálogo también la propone');
+
+  const def = await api('POST', '/fotos/catalogo-actividad', tokenAdmin, {
+    nombre: `__verif_evi_cat ${sello}`,
+    evidencia: 'ANTES_DESPUES',
+  });
+  check(
+    'una definición de catálogo lleva su tipo de evidencia',
+    def.estado === 201 && def.datos?.evidencia === 'ANTES_DESPUES',
+    `HTTP ${def.estado} · ${def.datos?.evidencia}`,
+  );
+
+  const traida = await api(
+    'POST',
+    `/fotos/ciclo/${ciclo2.datos?.id}/actividad/desde-catalogo`,
+    tokenAdmin,
+    { definiciones: [def.datos?.id] },
+  );
+  check('se trae al ciclo', traida.datos?.anadidas === 1);
+
+  const conCatalogo = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo2.datos?.id}/actividad`,
+    tokenAdmin,
+  );
+  check(
+    'y la actividad nace con la evidencia que proponía el catálogo',
+    (conCatalogo.datos ?? []).find(
+      (a) => a.titulo === `__verif_evi_cat ${sello}`,
+    )?.evidencia === 'ANTES_DESPUES',
+  );
+
+  // ⚠️ Y cambiarla en el catálogo no reescribe la que ya se estampó, igual
+  // que pasa con el nombre.
+  await api('PATCH', `/fotos/catalogo-actividad/${def.datos?.id}`, tokenAdmin, {
+    evidencia: 'NINGUNA',
+  });
+  const trasCambio = await api(
+    'GET',
+    `/fotos/ciclo/${ciclo2.datos?.id}/actividad`,
+    tokenAdmin,
+  );
+  check(
+    'cambiarla en el catálogo NO reescribe la actividad ya creada',
+    (trasCambio.datos ?? []).find(
+      (a) => a.titulo === `__verif_evi_cat ${sello}`,
+    )?.evidencia === 'ANTES_DESPUES',
+  );
+
+  // Limpieza propia.
+  await api('DELETE', `/fotos/catalogo-actividad/${def.datos?.id}`, tokenAdmin);
 }
 
 async function regresion(token) {
@@ -4299,6 +5586,9 @@ async function limpiar(token) {
     if (soloFase === null || soloFase === 8) await fase8(db, token);
     if (soloFase === null || soloFase === 9) await fase9(db, token);
     if (soloFase === null || soloFase === 10) await fase10(db, token);
+    if (soloFase === null || soloFase === 11) await ciclos(db, token);
+    if (soloFase === null || soloFase === 12) await catalogoActividades(db, token);
+    if (soloFase === null || soloFase === 13) await evidenciaActividades(db, token);
     if (soloFase === null) await regresion(token);
   } finally {
     await limpiar(token);

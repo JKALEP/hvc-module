@@ -109,9 +109,11 @@ model Usuario {
   // nombre en texto donde hace falta.
   carpetasFotosPropias        CarpetaFotos[]        @relation("CarpetasFotosPropias")
   albumesCreados              AlbumFotos[]          @relation("AlbumesCreados")
-  tareasCreadas               TareaFotos[]          @relation("TareasCreadas")
-  tareasResponsable           TareaFotos[]          @relation("TareasResponsable")
-  tareasCompletadas           TareaFotos[]          @relation("TareasCompletadas")
+  actividadesCreadas               ActividadFotos[]          @relation("ActividadesCreadas")
+  actividadesResponsable           ActividadFotos[]          @relation("ActividadesResponsable")
+  actividadesCompletadas           ActividadFotos[]          @relation("ActividadesCompletadas")
+  ciclosAbiertos              CicloFotos[]          @relation("CiclosAbiertos")
+  ciclosCerrados              CicloFotos[]          @relation("CiclosCerrados")
   comentariosFotos            ComentarioFotos[]     @relation("ComentariosFotos")
   compartidoConmigo           AccesoCompartido[]    @relation("CompartidoConmigo")
   compartidosPorMi            AccesoCompartido[]    @relation("CompartidosPorMi")
@@ -283,6 +285,19 @@ model CarpetaFotos {
 
   tipo TipoCarpetaFotos @default(CARPETA)
 
+  /// Qué clase de sistema es, cuando la carpeta es un EQUIPO.
+  ///
+  /// ⚠️ Columna PROPIA y no un campo configurable (`DefinicionCampoFotos`),
+  /// aunque a primera vista encajaría ahí. La diferencia es que de esto
+  /// cuelga lógica: el catálogo de actividades se preselecciona por tipo de
+  /// sistema, así que hace falta una FK que se pueda consultar y unir, no una
+  /// fila EAV cuyo valor es texto libre. Los campos configurables siguen
+  /// siendo el sitio para lo que solo se muestra (marca, modelo, capacidad).
+  ///
+  /// Nullable, como TODO lo del equipo en este módulo: un campo obligatorio
+  /// puede trabar la creación en obra, con el móvil en la mano.
+  tipoSistemaId Int?
+
   /// Quien la creó (§6). Obligatorio y con borrado Restrict: es uno de
   /// los seis escalones de §25, y una carpeta sin dueño dejaría ese
   /// escalón sin respuesta.
@@ -302,19 +317,22 @@ model CarpetaFotos {
   hijas        CarpetaFotos[]      @relation("CarpetaFotosJerarquia")
   propietario  Usuario             @relation("CarpetasFotosPropias", fields: [propietarioId], references: [id], onDelete: Restrict)
   albumes      AlbumFotos[]
-  tareas       TareaFotos[]
+  /// El historial de visitas. Las actividades cuelgan de estos, no de aquí.
+  ciclos       CicloFotos[]
   accesos      AccesoCompartido[]
   invitaciones InvitacionCarpeta[]
   comentarios  ComentarioFotos[]
   eventos      EventoFotos[]
   /// Los valores de los campos configurables, cuando es de tipo EQUIPO.
   valoresCampo ValorCampoFotos[]
+  tipoSistema  TipoSistemaFotos?   @relation(fields: [tipoSistemaId], references: [id], onDelete: Restrict)
 
   // Sin dos hermanas con el mismo nombre bajo la misma madre.
   @@unique([parentId, nombre])
   @@index([parentId])
   @@index([ruta])
   @@index([propietarioId])
+  @@index([tipoSistemaId])
   @@map("carpetas_fotos")
 }
 
@@ -515,6 +533,224 @@ model ConfiguracionColorCarpeta {
   @@map("configuracion_color_carpeta")
 }
 
+// ─────────────────────────────────────────────────────────────
+// CICLOS — el eje del rediseño
+//
+// Un equipo deja de tener UN set fijo de actividades y pasa a tener un
+// HISTORIAL: cada ciclo es una visita completa, con su fecha, su estado y
+// su checklist, y queda congelado al cerrarse.
+//
+// El ciclo cuelga de la carpeta de tipo EQUIPO, y las actividades cuelgan
+// del ciclo. Por eso `ActividadFotos` PERDIÓ su `carpetaId`: la carpeta se
+// deduce del ciclo, y guardarla además sería una segunda fuente de verdad
+// —exactamente el motivo por el que `Foto` nunca tuvo `carpetaId`—.
+// ─────────────────────────────────────────────────────────────
+
+/// Los colores que puede llevar un estado de equipo.
+///
+/// Enum cerrado por la misma razón que `ColorCarpetaFotos`: Tailwind solo
+/// genera las clases que ve escritas, así que un `bg-${loQueDigaLaBase}` no
+/// existiría en el CSS compilado. El NOMBRE del estado es libre y lo pone
+/// quien administra; el color sale de esta lista.
+///
+/// Los tres reutilizan familias que el sistema de diseño YA tiene
+/// —`--success`, `--warning`, `--destructive`—, así que no se inventó
+/// ningún token. Añadir un color son tres sitios: este enum, sus tokens en
+/// `index.css` y el mapa de clases del frontend.
+enum ColorEstadoFotos {
+  VERDE
+  NARANJA
+  ROJO
+}
+
+/// Familia de sistemas: «Aire Acondicionado», «Ventilación», y lo que HVC
+/// añada después.
+///
+/// ⚠️ DOS niveles y no uno solo, a propósito. Con una lista plana de tipos
+/// («Split», «VRF», «Inyector», «Extractor»…) el desplegable crece sin
+/// estructura y nadie encuentra nada en obra; y agrupar por prefijo en el
+/// nombre es la clase de convención que se rompe al tercer alta. La familia
+/// es un dato administrable como todo lo demás de este módulo: no es un enum
+/// con dos valores que haya que ampliar tocando código.
+model FamiliaSistemaFotos {
+  id     Int     @id @default(autoincrement())
+  nombre String  @unique
+  orden  Int     @default(0)
+  activo Boolean @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  tipos TipoSistemaFotos[]
+
+  @@index([orden])
+  @@map("familias_sistema_fotos")
+}
+
+/// Un tipo de sistema concreto dentro de su familia: «Split pared»,
+/// «Chiller», «Inyector de aire».
+///
+/// Es lo que decide qué actividades se proponen al dar de alta un equipo
+/// (`DefinicionActividadFotos`), y por eso es una FK y no un campo
+/// configurable de texto: de un texto libre no se puede colgar un catálogo.
+model TipoSistemaFotos {
+  id        Int     @id @default(autoincrement())
+  familiaId Int
+  nombre    String
+  orden     Int     @default(0)
+  activo    Boolean @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  familia     FamiliaSistemaFotos        @relation(fields: [familiaId], references: [id], onDelete: Restrict)
+  carpetas    CarpetaFotos[]
+  actividades ActividadPorTipoSistema[]
+
+  /// Único DENTRO de la familia, no globalmente: «Estándar» puede existir en
+  /// Aire Acondicionado y en Ventilación y no son el mismo tipo.
+  @@unique([familiaId, nombre])
+  @@index([familiaId])
+  @@index([orden])
+  @@map("tipos_sistema_fotos")
+}
+
+/// El catálogo de actividades estándar (§4 del rediseño).
+///
+/// Es la respuesta al problema que §20 ya resolvía para las plantillas: sin
+/// catálogo, uno escribe «Pernos», otro «Revisar pernos» y otro «Pernería», y
+/// entonces no se puede comparar una visita con la siguiente ni contar nada.
+///
+/// ⚠️ Define el checklist, NO lo impone. Al dar de alta un equipo se
+/// PRESELECCIONAN las de su tipo de sistema y quien lo crea las ajusta; y
+/// dentro de un ciclo se pueden seguir añadiendo a mano. Una actividad de un
+/// ciclo es una fila propia (`ActividadFotos`) con su título COPIADO, no una
+/// FK a esta tabla: renombrar aquí no puede reescribir lo que dice una visita
+/// ya hecha. Es el mismo criterio que `CostoItem` con los ítems de Costos.
+model DefinicionActividadFotos {
+  id          Int     @id @default(autoincrement())
+  nombre      String  @unique
+  descripcion String?
+  orden       Int     @default(0)
+  activo      Boolean @default(true)
+
+  /// Qué evidencia se propone pedir (Fase 3). Se copia a la actividad al
+  /// estamparla; cambiarlo aquí no toca las que ya se crearon.
+  evidencia TipoEvidenciaFotos @default(UNA)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  tipos ActividadPorTipoSistema[]
+
+  @@index([orden])
+  @@map("definiciones_actividad_fotos")
+}
+
+/// Qué actividades se proponen para qué tipos de sistema.
+///
+/// M:N y no una FK simple: «Limpieza de filtros» aplica a casi todo, y
+/// duplicar la definición por cada tipo devolvería el problema de los nombres
+/// parecidos que el catálogo existe para quitar.
+model ActividadPorTipoSistema {
+  definicionId  Int
+  tipoSistemaId Int
+
+  definicion  DefinicionActividadFotos @relation(fields: [definicionId], references: [id], onDelete: Cascade)
+  tipoSistema TipoSistemaFotos         @relation(fields: [tipoSistemaId], references: [id], onDelete: Cascade)
+
+  @@id([definicionId, tipoSistemaId])
+  @@index([tipoSistemaId])
+  @@map("actividades_por_tipo_sistema_fotos")
+}
+
+/// Catálogo administrable de estados de equipo.
+///
+/// Operativo / Operativo con observaciones / Inoperativo se siembran como
+/// DATOS, no como constantes: HVC puede renombrarlos, reordenarlos, añadir
+/// uno o retirarlo sin tocar código. Mismo criterio que el catálogo de
+/// actividades y que los colores de carpeta.
+model EstadoEquipoFotos {
+  id     Int              @id @default(autoincrement())
+  nombre String           @unique
+  color  ColorEstadoFotos
+  orden  Int              @default(0)
+
+  /// Visibilidad, no borrado: un estado retirado deja de ofrecerse pero los
+  /// ciclos que ya lo tienen lo conservan.
+  activo Boolean @default(true)
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  ciclos CicloFotos[]
+
+  @@index([orden])
+  @@map("estados_equipo_fotos")
+}
+
+/// Una visita al equipo: su checklist, su estado y su evidencia.
+model CicloFotos {
+  id        Int @id @default(autoincrement())
+  carpetaId Int
+
+  /// Correlativo POR EQUIPO, no global: «Ciclo 3» de este equipo. Se calcula
+  /// al abrir y no se reutiliza aunque se borre uno.
+  numero Int
+
+  /// ⚠️ NULLABLE a propósito: un ciclo nace SIN estado y NO hereda el del
+  /// anterior. Que la tarjeta se vea sin estado hasta que alguien revise el
+  /// equipo es correcto; arrastrar «Inoperativo» de la visita pasada sería
+  /// afirmar algo que nadie ha comprobado todavía.
+  estadoId Int?
+
+  abiertoEn    DateTime @default(now())
+  abiertoPorId Int
+
+  /// Cerrado = congelado. Nadie edita un ciclo cerrado, tampoco un
+  /// ADMIN_GLOBAL: para corregir hay que REABRIRLO, y eso deja su propia
+  /// entrada en la bitácora.
+  cerradoEn    DateTime?
+  cerradoPorId Int?
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  /// Cascade: el ciclo es contenido DEL equipo. Si el equipo se borra
+  /// —solo se puede vacío— sus ciclos se van con él. Sin esto, el Ciclo 1
+  /// que se crea automáticamente haría que ningún equipo pudiera borrarse.
+  carpeta     CarpetaFotos       @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  /// Restrict: un estado en uso no se borra; para retirarlo está `activo`.
+  estado      EstadoEquipoFotos? @relation(fields: [estadoId], references: [id], onDelete: Restrict)
+  abiertoPor  Usuario            @relation("CiclosAbiertos", fields: [abiertoPorId], references: [id], onDelete: Restrict)
+  cerradoPor  Usuario?           @relation("CiclosCerrados", fields: [cerradoPorId], references: [id], onDelete: SetNull)
+  actividades ActividadFotos[]
+  /// Las fotos SUELTAS de la visita (Fase 4): lo que documenta el equipo sin
+  /// corresponder a una actividad concreta. Sustituyen al álbum.
+  fotos       Foto[]
+
+  @@unique([carpetaId, numero])
+  /// ⚠️ Falta aquí el invariante MÁS importante: **un solo ciclo abierto por
+  /// equipo**. Es un índice único PARCIAL (`WHERE "cerradoEn" IS NULL`) y
+  /// Prisma no sabe declararlo, así que lo añade la migración a mano —igual
+  /// que los dos CHECK del módulo—. Nada en este archivo delata que existe
+  /// salvo este comentario.
+  @@index([carpetaId, abiertoEn])
+  @@map("ciclos_fotos")
+}
+
+/// ⚠️ **RETIRADO en la Fase 4 del rediseño. Es historia de solo lectura.**
+///
+/// Nada crea, edita ni borra álbumes ya: no hay rutas, no hay pantalla, y
+/// ninguna foto cuelga de aquí —desde la Fase 4 cuelgan de un CICLO o de una
+/// ACTIVIDAD—. La tabla sobrevive por UNA razón: `ComentarioFotos.albumId` se
+/// conserva de solo lectura para no perder los comentarios que se escribieron
+/// sobre un álbum, y esa FK necesita que las filas sigan existiendo. Mismo
+/// trato que los valores viejos de los enums de la bitácora.
+///
+/// Si algún día se decide que esos comentarios tampoco hacen falta, esto se
+/// va en una migración propia — no antes.
+///
 /// Un álbum de fotos dentro de una carpeta (§16).
 ///
 /// Es la fila que en v2 se llamaba `LoteFotos` —una subida anónima— con
@@ -539,9 +775,13 @@ model AlbumFotos {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  carpeta     CarpetaFotos      @relation(fields: [carpetaId], references: [id], onDelete: Restrict)
+  /// ⚠️ Cascade desde la Fase 4, antes Restrict. El `Restrict` era lo que
+  /// impedía borrar una carpeta con fotos dentro, y con los álbumes retirados
+  /// se habría quedado bloqueando el borrado por unas filas vacías que ya
+  /// nadie ve. La protección de verdad la hace ahora `CarpetaService.eliminar`
+  /// contando las FOTOS del subárbol, que es lo que de verdad importaba.
+  carpeta     CarpetaFotos      @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
   creadoPor   Usuario           @relation("AlbumesCreados", fields: [creadoPorId], references: [id], onDelete: Restrict)
-  fotos       Foto[]
   comentarios ComentarioFotos[]
 
   // La galería pagina por álbum y en orden inverso.
@@ -549,14 +789,14 @@ model AlbumFotos {
   @@map("albumes_fotos")
 }
 
-enum EstadoTareaFotos {
+enum EstadoActividadFotos {
   PENDIENTE
   EN_PROCESO
   COMPLETADA
 }
 
 /// Opcional (§13): HVC no la exige para el flujo básico.
-enum PrioridadTareaFotos {
+enum PrioridadActividadFotos {
   BAJA
   MEDIA
   ALTA
@@ -570,14 +810,46 @@ enum PrioridadTareaFotos {
 /// camino que no pasa por `ruta` —el único que este módulo sabe recorrer—
 /// y a que Fotos consultara el dominio de Gestión de Equipos para saber
 /// quién puede ver una tarea suya.
-model TareaFotos {
-  id        Int    @id @default(autoincrement())
-  carpetaId Int
-  titulo    String
+/// Qué evidencia fotográfica se espera de una actividad (Fase 3).
+///
+/// ⚠️ Es una EXPECTATIVA, no un candado: se puede completar una actividad sin
+/// su foto. Bloquear el check por falta de evidencia es exactamente el fallo
+/// que este módulo evita en todas partes —«un campo obligatorio puede trabar
+/// la creación en obra»—: la señal se enseña, el trabajo no se detiene.
+enum TipoEvidenciaFotos {
+  NINGUNA
+  UNA
+  ANTES_DESPUES
+}
+
+/// En qué mitad del antes/después cae una foto.
+///
+/// `null` en todo lo demás: una foto de álbum no tiene momento, y la única
+/// foto de una actividad de tipo UNA tampoco — no hay dos huecos que
+/// distinguir. Lo hace cumplir un CHECK, porque un momento sin actividad no
+/// significa nada.
+enum MomentoEvidenciaFotos {
+  ANTES
+  DESPUES
+}
+
+model ActividadFotos {
+  id     Int    @id @default(autoincrement())
+  /// ⚠️ Cuelga del CICLO, no de la carpeta. La carpeta se deduce del ciclo;
+  /// guardarla además sería una segunda fuente de verdad y la primera vez
+  /// que alguien moviera un ciclo empezaría a mentir. Es el mismo criterio
+  /// por el que `Foto` nunca tuvo `carpetaId`.
+  cicloId Int
+  titulo String
 
   descripcion String?
-  estado      EstadoTareaFotos     @default(PENDIENTE)
-  prioridad   PrioridadTareaFotos?
+  estado      EstadoActividadFotos     @default(PENDIENTE)
+  prioridad   PrioridadActividadFotos?
+
+  /// Qué se espera fotografiar aquí (Fase 3). Se COPIA del catálogo, como el
+  /// título, y por lo mismo: cambiarlo en el catálogo no puede reescribir lo
+  /// que se le pidió a una visita ya hecha.
+  evidencia TipoEvidenciaFotos @default(UNA)
 
   /// El día al que corresponde el trabajo, no el de creación.
   fecha DateTime? @db.Date
@@ -594,16 +866,16 @@ model TareaFotos {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  carpeta       CarpetaFotos      @relation(fields: [carpetaId], references: [id], onDelete: Restrict)
-  responsable   Usuario?          @relation("TareasResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
-  creadoPor     Usuario           @relation("TareasCreadas", fields: [creadoPorId], references: [id], onDelete: Restrict)
-  completadaPor Usuario?          @relation("TareasCompletadas", fields: [completadaPorId], references: [id], onDelete: SetNull)
+  ciclo         CicloFotos        @relation(fields: [cicloId], references: [id], onDelete: Cascade)
+  responsable   Usuario?          @relation("ActividadesResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
+  creadoPor     Usuario           @relation("ActividadesCreadas", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  completadaPor Usuario?          @relation("ActividadesCompletadas", fields: [completadaPorId], references: [id], onDelete: SetNull)
   fotos         Foto[]
   comentarios   ComentarioFotos[]
 
-  @@index([carpetaId, estado])
+  @@index([cicloId, estado])
   @@index([responsableId, estado])
-  @@map("tareas_fotos")
+  @@map("actividades_fotos")
 }
 
 /// Con quién está compartida una carpeta, y con qué grado (§5, §10).
@@ -706,14 +978,26 @@ model InvitacionCarpeta {
 /// Guardarla además sería una tercera fuente de verdad, y la primera vez
 /// que alguien moviera un álbum de carpeta empezaría a mentir.
 model Foto {
-  id      Int  @id @default(autoincrement())
-  albumId Int?
-  tareaId Int?
+  id Int @id @default(autoincrement())
+
+  /// Una foto suelta de la VISITA: lo que se documenta del equipo sin que
+  /// corresponda a una actividad concreta (Fase 4 del rediseño).
+  ///
+  /// ⚠️ Sustituye a `albumId`, que se fue con los álbumes. Los TRES sitios
+  /// donde puede estar una foto son ahora: colgando de un ciclo, colgando de
+  /// una actividad, o en la bandeja de §18 —las dos en null—. Nunca las dos
+  /// a la vez, y eso lo hace cumplir `fotos_un_solo_dueno_chk`, que la
+  /// migración reescribió para nombrar `cicloId` en vez de `albumId`.
+  cicloId     Int?
+  actividadId Int?
 
   subidaPorId Int
 
   nombreOriginal String?
   descripcion    String?
+
+  /// El hueco del antes/después (Fase 3). Solo en fotos de una actividad.
+  momento MomentoEvidenciaFotos?
 
   /// Claves en el object storage (R2), no rutas de disco: el filesystem
   /// de Render es efímero y se pierde en cada deploy.
@@ -734,13 +1018,15 @@ model Foto {
 
   creadoEn DateTime @default(now())
 
-  album       AlbumFotos?       @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  tarea       TareaFotos?       @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  ciclo       CicloFotos?       @relation(fields: [cicloId], references: [id], onDelete: Cascade)
+  actividad   ActividadFotos?   @relation(fields: [actividadId], references: [id], onDelete: Cascade)
   subidaPor   Usuario           @relation("FotosSubidas", fields: [subidaPorId], references: [id], onDelete: Restrict)
   comentarios ComentarioFotos[]
 
-  @@index([albumId, creadoEn])
-  @@index([tareaId, creadoEn])
+  @@index([cicloId, creadoEn])
+  @@index([actividadId, creadoEn])
+  /// «El antes de esta actividad» es la consulta de cada tarjeta (Fase 3).
+  @@index([actividadId, momento])
   // La bandeja de §18: lo que subí y todavía no he clasificado.
   @@index([subidaPorId, creadoEn])
   @@map("fotos")
@@ -763,7 +1049,7 @@ model ComentarioFotos {
   id Int @id @default(autoincrement())
 
   carpetaId Int?
-  tareaId   Int?
+  actividadId Int?
   albumId   Int?
   fotoId    Int?
 
@@ -780,13 +1066,13 @@ model ComentarioFotos {
   editadoEn DateTime?
 
   carpeta CarpetaFotos? @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
-  tarea   TareaFotos?   @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  actividad ActividadFotos? @relation(fields: [actividadId], references: [id], onDelete: Cascade)
   album   AlbumFotos?   @relation(fields: [albumId], references: [id], onDelete: Cascade)
   foto    Foto?         @relation(fields: [fotoId], references: [id], onDelete: Cascade)
   autor   Usuario?      @relation("ComentariosFotos", fields: [autorId], references: [id], onDelete: SetNull)
 
   @@index([carpetaId, creadoEn])
-  @@index([tareaId, creadoEn])
+  @@index([actividadId, creadoEn])
   @@index([albumId, creadoEn])
   @@index([fotoId, creadoEn])
   @@map("comentarios_fotos")
@@ -796,7 +1082,7 @@ model ComentarioFotos {
 /// que reconoce la importación por Excel de §19.
 enum TipoNodoPlantilla {
   CARPETA
-  TAREA
+  ACTIVIDAD
   ALBUM
 }
 
@@ -871,21 +1157,34 @@ model PlantillaEstructuraNodo {
 enum EntidadFotos {
   CARPETA
   ALBUM
-  TAREA
   COMENTARIO
   FOTO
   ACCESO
   INVITACION
   PLANTILLA
   IMPORTACION
+  /// ⚠️ Renombrada a ACTIVIDAD en la Fase 0 del rediseño. El valor se
+  /// conserva porque hay filas históricas que lo usan; nada nuevo lo
+  /// escribe. Mismo trato que `EQUIPO`.
+  TAREA
+  /// Una actividad de un ciclo. Sustituye a `TAREA` desde la Fase 0.
+  ACTIVIDAD
   /// ⚠️ Del atajo de §12 —un equipo creado DESDE Fotos en el catálogo de
   /// Gestión de Equipos—, retirado en la Fase 1a. El valor se conserva
   /// porque hay filas históricas que lo usan; nada nuevo lo escribe.
   EQUIPO
+  CICLO
+  ESTADO_EQUIPO
   /// Una DEFINICIÓN de campo configurable (Fase 1b): el catálogo que el
   /// ADMIN_GLOBAL configura, no el valor que rellena un supervisor. Los
   /// valores se auditan como EDICION de su CARPETA, que es donde se leen.
   CAMPO_EQUIPO
+  /// El vocabulario de la Fase 2: familias y tipos de sistema, y el catálogo
+  /// de actividades estándar. Son configuración del módulo, así que sus
+  /// eventos van sin `carpetaId`, como las plantillas.
+  FAMILIA_SISTEMA
+  TIPO_SISTEMA
+  DEFINICION_ACTIVIDAD
 }
 
 enum AccionFotos {
@@ -895,8 +1194,17 @@ enum AccionFotos {
   MOVIMIENTO
   ARCHIVADO
   REAPERTURA
+  /// ⚠️ Sustituidas por ACTIVIDAD_* en la Fase 0. Se conservan porque hay
+  /// filas históricas; nada nuevo las escribe.
   TAREA_COMPLETADA
   TAREA_REABIERTA
+  ACTIVIDAD_COMPLETADA
+  ACTIVIDAD_REABIERTA
+  CICLO_ABIERTO
+  CICLO_CERRADO
+  /// Reabrir un ciclo cerrado es excepcional y por eso tiene acción propia:
+  /// que se pueda auditar «quién descongeló este historial y cuándo».
+  CICLO_REABIERTO
   SUBIDA_FOTO
   DESCARGA_FOTO
   CLASIFICACION

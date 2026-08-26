@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import {
   FoldersIcon,
   MessageCircleIcon,
-  PlusIcon,
   SearchIcon,
 } from 'lucide-react';
 
@@ -14,20 +13,20 @@ import { RutaSedes } from '@/modules/fotos/components/RutaSedes';
 import { DialogoNombre } from '@/shared/components/DialogoNombre';
 import { DialogoCompartir } from '@/modules/fotos/components/DialogoCompartir';
 import { PanelSubida } from '@/modules/fotos/components/PanelSubida';
-import { PanelTareas } from '@/modules/fotos/components/PanelTareas';
+import { PanelActividades } from '@/modules/fotos/components/PanelActividades';
+import { SelectorDeCiclo } from '@/modules/fotos/components/SelectorDeCiclo';
+import { TipoDeSistema } from '@/modules/fotos/components/TipoDeSistema';
+import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
 import { CamposDeEquipo } from '@/modules/fotos/components/CamposDeEquipo';
 import { FormularioEquipo } from '@/modules/fotos/components/FormularioEquipo';
 import { HiloComentarios } from '@/modules/fotos/components/HiloComentarios';
 import { DialogoImportar } from '@/modules/fotos/components/DialogoImportar';
-import { DialogoAlbum } from '@/modules/fotos/components/DialogoAlbum';
 import { AccionesDeCarpeta } from '@/modules/fotos/components/AccionesDeCarpeta';
 import { CrearEstructura } from '@/modules/fotos/components/CrearEstructura';
 import { FiltrosDeGaleria } from '@/modules/fotos/components/FiltrosDeGaleria';
 import {
-  GrillaDeAlbumes,
-  GaleriaFotosPlanas,
-  DetalleAlbumDialog,
-} from '@/modules/fotos/components/GaleriaAlbumes';
+  GaleriaDeFotos,
+} from '@/modules/fotos/components/GaleriaFotos';
 import { PestanasFicha } from '@/modules/fotos/components/PestanasFicha';
 import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
 import { AvisoArchivada } from '@/modules/fotos/components/AvisoArchivada';
@@ -44,14 +43,13 @@ import {
   useEditarCarpeta,
   useEliminarCarpeta,
 } from '@/modules/fotos/hooks/useCarpetas';
-import { useAutores, useGaleria } from '@/modules/fotos/hooks/useAlbumes';
+import { useAutores, useGaleria } from '@/modules/fotos/hooks/useFotos';
 import { useAuth } from '@/modules/auth/hooks/useAuth';
 import { esAdminFotos } from '@/shared/lib/modulos';
 import { alcanza } from '@/modules/fotos/lib/permisos';
 import { useDebounce } from '@/shared/hooks/useDebounce';
 import { SEARCH_DEBOUNCE_MS } from '@/shared/lib/constants';
 import type {
-  AlbumDeGaleria,
   CarpetaListada,
   FiltrosGaleria,
   Orden,
@@ -82,7 +80,7 @@ type Dialogo =
  * DISTRIBUCIÓN de la ficha del equipo: en vez de todo apilado en una sola
  * columna, es un grid de 2 columnas — info del equipo a la izquierda,
  * comentarios SIEMPRE visibles a la derecha (ya no detrás de una pestaña)
- * — y debajo, a todo el ancho, las pestañas Álbumes / Fotos / Tareas.
+ * — y debajo, a todo el ancho, las pestañas Álbumes / Fotos / Actividades.
  */
 export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {}) {
   const { id } = useParams();
@@ -91,12 +89,6 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
   const admin = esAdminFotos(usuario);
   const [dialogo, setDialogo] = useState<Dialogo | null>(null);
   const [importando, setImportando] = useState(false);
-  const [albumEnEdicion, setAlbumEnEdicion] = useState<
-    AlbumDeGaleria | null | undefined
-  >(undefined);
-  const [albumAbierto, setAlbumAbierto] = useState<AlbumDeGaleria | null>(
-    null,
-  );
   const [filtros, setFiltros] = useState<FiltrosGaleria>(SIN_FILTROS);
   const [texto, setTexto] = useState('');
   const [orden, setOrden] = useState<Orden>('nombre');
@@ -105,8 +97,20 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
   const { data, isError } = useCarpeta(sedeId, { q, orden });
   const esEquipo = data?.carpetaActual?.tipo === 'EQUIPO';
-  const galeria = useGaleria(sedeId ?? 0, filtros);
-  const { data: autores } = useAutores(sedeId ?? 0, sedeId !== null && esEquipo);
+
+  // ⚠️ La visita elegida se guarda como `number | null` y NO se inicializa
+  // con el ciclo en curso: al montar todavía no hay ciclos cargados. `null`
+  // significa «la más reciente», que es la que el backend manda primero, y
+  // así el valor por defecto sale del dato en vez de un efecto que lo
+  // corrija después —lo mismo que hacen los grupos abiertos del sidebar—.
+  const { data: ciclos } = useCiclos(sedeId, { habilitado: esEquipo });
+  const [cicloElegido, setCicloElegido] = useState<number | null>(null);
+  const ciclo =
+    (ciclos ?? []).find((c) => c.id === cicloElegido) ?? ciclos?.[0] ?? null;
+  // La galeria es del CICLO desde la Fase 4, no de la carpeta. Con `?? 0`
+  // el hook se desactiva solo mientras no hay visita elegida.
+  const galeria = useGaleria(ciclo?.id ?? 0, filtros);
+  const { data: autores } = useAutores(ciclo?.id ?? 0, ciclo !== null);
 
   const crear = useCrearCarpeta();
   const editar = useEditarCarpeta();
@@ -115,7 +119,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
   const cargando = !data && !isError;
   const cerrar = () => setDialogo(null);
-  const albumes = galeria.data?.pages.flatMap((p) => p.albumes) ?? [];
+  const fotosDelCiclo = galeria.data?.pages.flatMap((p) => p.fotos) ?? [];
   const totalFotos = galeria.data?.pages[0]?.totalFotos ?? 0;
   const secciones = seccion
     ? (data?.secciones ?? []).filter((s) => s.clave === seccion)
@@ -298,15 +302,36 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
       {/* ── Bloque «Ficha del equipo» ──
           Fila 1: info del equipo (izquierda) + comentarios SIEMPRE visibles
-          (derecha). Fila 2: pestañas Álbumes / Fotos / Tareas, ancho
+          (derecha). Fila 2: pestañas Álbumes / Fotos / Actividades, ancho
           completo. Todo pensado para caber sin scroll en una pantalla
           normal — nada nuevo, solo reordenado. */}
       {sedeId !== null && data && esEquipo && !buscando && (
         <div className="space-y-4">
-          <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-            <CamposDeEquipo carpetaId={sedeId} puedeEditar={data.puedeEscribir} />
+          {/* Qué visita se está mirando, arriba del todo: lo de abajo
+              —actividades y, en fases siguientes, evidencia y observaciones—
+              pertenece a UNA de ellas. */}
+          <SelectorDeCiclo
+            carpetaId={sedeId}
+            ciclos={ciclos}
+            cicloId={ciclo?.id ?? null}
+            onElegir={setCicloElegido}
+            permiso={data.permiso}
+            ramaCerrada={data.ramaCerrada}
+          />
 
-            <Card className="flex max-h-[26rem] flex-col lg:max-h-none">
+          <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
+            <div className="space-y-4">
+              {/* Describe la MÁQUINA, no la visita: por eso va con la ficha
+                  del equipo y no con el selector de ciclo. */}
+              <TipoDeSistema
+                carpetaId={sedeId}
+                tipoSistema={data.carpetaActual?.tipoSistema ?? null}
+                puedeEditar={data.puedeEscribir}
+              />
+              <CamposDeEquipo carpetaId={sedeId} puedeEditar={data.puedeEscribir} />
+            </div>
+
+            <Card className="flex max-h-[26rem] flex-col overflow-hidden">
               <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
                 <h2 className="flex shrink-0 items-center gap-2 font-medium text-foreground">
                   <MessageCircleIcon className="size-4" />
@@ -326,40 +351,22 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
           <PanelFotos>
             <PestanasFicha
-              contenidoAlbumes={
-                <div className="space-y-4">
-                  {data.puedeEscribir && (
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <CrearEstructura
-                        carpetaId={sedeId}
-                        onImportar={() => setImportando(true)}
-                      />
-                      <Button onClick={() => setAlbumEnEdicion(null)}>
-                        <PlusIcon />
-                        Nuevo álbum
-                      </Button>
-                    </div>
-                  )}
-
-                  <GrillaDeAlbumes
-                    albumes={albumes}
-                    cargando={galeria.isLoading}
-                    hayMas={Boolean(galeria.hasNextPage)}
-                    cargandoMas={galeria.isFetchingNextPage}
-                    onCargarMas={() => void galeria.fetchNextPage()}
-                    onAbrir={(a) => setAlbumAbierto(a)}
-                    vacio={{
-                      titulo: 'Sin álbumes todavía',
-                      descripcion: data.puedeEscribir
-                        ? 'Crea el primero con «Nuevo álbum» arriba.'
-                        : 'Todavía no hay álbumes aquí.',
-                    }}
-                  />
-                </div>
-              }
               contenidoFotos={
                 <div className="space-y-4">
-                  {data.puedeEscribir && <PanelSubida sedeId={sedeId} />}
+                  {/* Con el ciclo cerrado no hay donde subir: el backend lo
+                      rechaza, asi que el formulario no se pinta. */}
+                  {data.puedeEscribir && ciclo && ciclo.cerradoEn === null && (
+                    <PanelSubida cicloId={ciclo.id} />
+                  )}
+                  {/* Crear estructura sigue siendo de la CARPETA, no de la
+                      visita: importar un Excel o estampar una plantilla crea
+                      carpetas y actividades, no fotos. */}
+                  {data.puedeEscribir && (
+                    <CrearEstructura
+                      carpetaId={sedeId}
+                      onImportar={() => setImportando(true)}
+                    />
+                  )}
 
                   <FiltrosDeGaleria
                     filtros={filtros}
@@ -368,8 +375,8 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                     totalFotos={totalFotos}
                   />
 
-                  <GaleriaFotosPlanas
-                    albumes={albumes}
+                  <GaleriaDeFotos
+                    fotos={fotosDelCiclo}
                     cargando={galeria.isLoading}
                     hayMas={Boolean(galeria.hasNextPage)}
                     cargandoMas={galeria.isFetchingNextPage}
@@ -390,12 +397,15 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                   />
                 </div>
               }
-              contenidoTareas={
-                <PanelTareas
-                  carpetaId={sedeId}
-                  permiso={data.permiso}
-                  ramaCerrada={data.ramaCerrada}
-                />
+              contenidoActividades={
+                ciclo ? (
+                  <PanelActividades
+                    cicloId={ciclo.id}
+                    cicloCerrado={ciclo.cerradoEn !== null}
+                    permiso={data.permiso}
+                    ramaCerrada={data.ramaCerrada}
+                  />
+                ) : null
               }
             />
           </PanelFotos>
@@ -425,9 +435,16 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
         <FormularioEquipo
           nombreDestino={data?.carpetaActual?.nombre ?? 'esta carpeta'}
           ocupado={crear.isPending}
-          onCrear={({ nombre, valores }) =>
+          onCrear={({ nombre, valores, tipoSistemaId, actividades }) =>
             crear.mutate(
-              { nombre, parentId: sedeId, tipo: 'EQUIPO', valores },
+              {
+                nombre,
+                parentId: sedeId,
+                tipo: 'EQUIPO',
+                valores,
+                tipoSistemaId,
+                actividades,
+              },
               { onSuccess: cerrar },
             )
           }
@@ -454,35 +471,6 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
       {dialogo?.tipo === 'compartir' && (
         <DialogoCompartir carpetaInicial={dialogo.carpeta} onCerrar={cerrar} />
-      )}
-
-      {sedeId !== null && albumEnEdicion !== undefined && (
-        <DialogoAlbum
-          key={albumEnEdicion?.id ?? 'nuevo'}
-          carpetaId={sedeId}
-          album={albumEnEdicion}
-          abierto
-          onCerrar={() => setAlbumEnEdicion(undefined)}
-        />
-      )}
-
-      {albumAbierto && data && (
-        <DetalleAlbumDialog
-          album={albumAbierto}
-          puedeSubir={data.puedeEscribir}
-          puedeBorrar={puedeBorrarFoto}
-          permiso={data.permiso}
-          ramaCerrada={data.ramaCerrada}
-          onEditar={
-            data.puedeEscribir
-              ? () => {
-                  setAlbumEnEdicion(albumAbierto);
-                  setAlbumAbierto(null);
-                }
-              : undefined
-          }
-          onCerrar={() => setAlbumAbierto(null)}
-        />
       )}
 
       {sedeId !== null && (

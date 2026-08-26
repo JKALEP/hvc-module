@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { AlbumController } from './album.controller';
+import { FotoController } from './foto.controller';
 import { CarpetaController } from './carpeta.controller';
-import { TareaController } from './tarea.controller';
+import { ActividadController } from './actividad.controller';
 import { AdministracionFotosController } from './administracion.controller';
 import { CompartirController } from './compartir.controller';
 import { InvitacionController } from './invitacion.controller';
@@ -9,9 +9,14 @@ import { PortalController } from './portal.controller';
 import { ExportacionFotosController } from './exportacion.controller';
 import { CarpetaService } from './carpeta.service';
 import { CampoFotosService } from './campo.service';
+import { CicloService } from './ciclo.service';
+import { CicloController } from './ciclo.controller';
+import { EstadoEquipoService } from './estado-equipo.service';
+import { SistemaFotosService } from './sistema.service';
+import { CatalogoActividadService } from './catalogo-actividad.service';
 import { ConfiguracionFotosService } from './configuracion.service';
 import { ValorCampoFotosService } from './valor-campo-fotos.service';
-import { AlbumService } from './album.service';
+import { FotoService } from './foto.service';
 import { AccesoService } from './acceso.service';
 import { NavegacionService } from './navegacion.service';
 import { CompartirService } from './compartir.service';
@@ -19,7 +24,7 @@ import { InvitacionService } from './invitacion.service';
 import { AlmacenamientoService } from './almacenamiento.service';
 import { ImagenService } from './imagen.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
-import { TareaService } from './tarea.service';
+import { ActividadService } from './actividad.service';
 import { ComentarioService } from './comentario.service';
 import { PlantillaService } from './plantilla.service';
 import { ImportacionFotosService } from './importacion.service';
@@ -34,7 +39,7 @@ import { ExportableFotosService } from './exportable-fotos.service';
  * lo que pide §25 al hablar de una lógica centralizada.
  *
  * Los demás no opinan sobre permisos: `NavegacionService` solo recorre,
- * `CarpetaService` solo administra el árbol, `AlbumService` es todo lo que
+ * `CarpetaService` solo administra el árbol, `FotoService` es todo lo que
  * toca fotos, y `CompartirService` reparte accesos.
  */
 @Module({
@@ -47,9 +52,10 @@ import { ExportableFotosService } from './exportable-fotos.service';
   // negocio**. La información del equipo pasa a ser propia y configurable
   // (Fase 1b).
   controllers: [
-    AlbumController,
+    FotoController,
+    CicloController,
     CarpetaController,
-    TareaController,
+    ActividadController,
     AdministracionFotosController,
     CompartirController,
     InvitacionController,
@@ -62,10 +68,16 @@ import { ExportableFotosService } from './exportable-fotos.service';
     // `CampoFotosService` los DEFINE (ADMIN_GLOBAL) y
     // `ValorCampoFotosService` los RELLENA (EDICION sobre la carpeta).
     // Dos services y no uno porque son dos permisos distintos.
+    // Los ciclos (Fase 1): el historial de visitas de un equipo, con su
+    // catálogo administrable de estados.
+    CicloService,
+    EstadoEquipoService,
+    SistemaFotosService,
+    CatalogoActividadService,
     CampoFotosService,
     ValorCampoFotosService,
     ConfiguracionFotosService,
-    AlbumService,
+    FotoService,
     AccesoService,
     NavegacionService,
     CompartirService,
@@ -73,7 +85,7 @@ import { ExportableFotosService } from './exportable-fotos.service';
     AlmacenamientoService,
     ImagenService,
     AuditoriaFotosService,
-    TareaService,
+    ActividadService,
     ComentarioService,
     PlantillaService,
     ImportacionFotosService,

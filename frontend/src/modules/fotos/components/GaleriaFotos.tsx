@@ -5,7 +5,6 @@ import {
   ChevronRightIcon,
   DownloadIcon,
   FolderInputIcon,
-  ImageIcon,
   ImagesIcon,
   MessageCircleIcon,
   PencilIcon,
@@ -24,7 +23,7 @@ import {
   useEliminarFoto,
   useEditarDescripcionFoto,
   useMoverFoto,
-} from '@/modules/fotos/hooks/useAlbumes';
+} from '@/modules/fotos/hooks/useFotos';
 import { DialogoMoverFoto } from './DialogoMoverFoto';
 import { useAuth } from '@/modules/auth/hooks/useAuth';
 import { Textarea } from '@/shared/ui/textarea';
@@ -32,14 +31,9 @@ import { descargarFoto } from '@/modules/fotos/services/fotosService';
 import { getErrorMessage } from '@/shared/services/api';
 import { formatFecha, formatFechaCorta } from '@/shared/lib/format';
 import { HiloComentarios } from './HiloComentarios';
-import { SubirAAlbum } from './SubirAAlbum';
 import { alcanza } from '@/modules/fotos/lib/permisos';
 import { cn } from '@/shared/lib/utils';
-import type {
-  FotoDeAlbum,
-  AlbumDeGaleria,
-  PermisoCarpeta,
-} from '@/modules/fotos/types';
+import type { FotoDeGaleria, PermisoCarpeta } from '@/modules/fotos/types';
 
 /** Tamaño legible de un archivo. */
 function formatPeso(bytes: number): string {
@@ -61,7 +55,7 @@ function MiniaturaFoto({
   onAbrir,
   onBorrarRapido,
 }: {
-  foto: FotoDeAlbum;
+  foto: FotoDeGaleria;
   alt: string;
   activa?: boolean;
   puedeBorrar: boolean;
@@ -123,7 +117,6 @@ function VisorFotoDialog({
   titulo,
   fotos,
   indiceInicial,
-  albumId,
   puedeSubir,
   puedeBorrar,
   permiso,
@@ -135,19 +128,18 @@ function VisorFotoDialog({
 }: {
   /** Nombre del álbum, si viene de uno. Sin álbum no hay cabecera de título. */
   titulo?: string;
-  fotos: FotoDeAlbum[];
+  fotos: FotoDeGaleria[];
   indiceInicial: number;
   /** Si viene de un álbum concreto, habilita «Añadir fotos» abajo. */
-  albumId?: number;
   puedeSubir: boolean;
-  puedeBorrar: (f: FotoDeAlbum) => boolean;
+  puedeBorrar: (f: FotoDeGaleria) => boolean;
   permiso: PermisoCarpeta | null;
   ramaCerrada: boolean;
   portal: boolean;
   onEditarAlbum?: () => void;
   onCerrar: () => void;
   /** Avisa al padre cada vez que la lista cambia (borrado o movido). */
-  onCambio?: (fotos: FotoDeAlbum[]) => void;
+  onCambio?: (fotos: FotoDeGaleria[]) => void;
 }) {
   const [lista, setLista] = useState(fotos);
   const [indice, setIndice] = useState(indiceInicial);
@@ -163,7 +155,7 @@ function VisorFotoDialog({
 
   const activa = lista[indice] ?? null;
 
-  const actualizar = (next: FotoDeAlbum[]) => {
+  const actualizar = (next: FotoDeGaleria[]) => {
     setLista(next);
     onCambio?.(next);
   };
@@ -176,7 +168,7 @@ function VisorFotoDialog({
   const siguiente = () => irA(indice + 1 >= lista.length ? 0 : indice + 1);
   const anterior = () => irA(indice - 1 < 0 ? lista.length - 1 : indice - 1);
 
-  const borrarFoto = (f: FotoDeAlbum) => {
+  const borrarFoto = (f: FotoDeGaleria) => {
     if (!window.confirm('¿Eliminar esta foto? No se puede deshacer.')) return;
     setBorrandoId(f.id);
     eliminar.mutate(f.id, {
@@ -408,11 +400,6 @@ function VisorFotoDialog({
               </Button>
             </div>
 
-            {albumId && puedeSubir && (
-              <div className="border-t border-border pt-3">
-                <SubirAAlbum albumId={albumId} />
-              </div>
-            )}
           </div>
 
           {/* Comentarios de LA FOTO que se está viendo, siempre visibles
@@ -468,190 +455,18 @@ function VisorFotoDialog({
 // Tarjetas de álbum — pestaña «Álbumes»
 // ─────────────────────────────────────────────────────────────
 
-function TarjetaAlbum({
-  album,
-  onAbrir,
-}: {
-  album: AlbumDeGaleria;
-  onAbrir: (a: AlbumDeGaleria) => void;
-}) {
-  const portada = album.fotos[0]?.urlMiniatura ?? null;
-  const titulo =
-    album.nombre ?? album.descripcion ?? formatFecha(album.creadoEn);
-
-  return (
-    <button
-      type="button"
-      onClick={() => onAbrir(album)}
-      className="group flex flex-col overflow-hidden rounded-2xl border border-border bg-card text-left shadow-sm outline-none transition-all hover:-translate-y-0.5 hover:border-foreground/15 hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50"
-    >
-      <div className="relative aspect-video w-full bg-muted">
-        {portada ? (
-          <img
-            src={portada}
-            alt=""
-            loading="lazy"
-            className="size-full object-cover transition-transform group-hover:scale-[1.03]"
-          />
-        ) : (
-          <div className="flex size-full items-center justify-center text-muted-foreground/40">
-            <ImagesIcon className="size-8" />
-          </div>
-        )}
-
-        <div className="absolute inset-x-2 bottom-2 flex items-center justify-between">
-          <span className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white tabular-nums">
-            <ImageIcon className="size-3" />
-            {album.fotos.length}
-          </span>
-          <span className="flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white tabular-nums">
-            <MessageCircleIcon className="size-3" />
-            {album.comentarios}
-          </span>
-        </div>
-      </div>
-
-      <div className="space-y-0.5 p-3">
-        <p className="truncate text-sm font-medium text-foreground" title={titulo}>
-          {titulo}
-        </p>
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          {album.subidoPor && <span>{album.subidoPor.nombre}</span>}
-          <span>{formatFecha(album.creadoEn)}</span>
-        </p>
-      </div>
-    </button>
-  );
-}
-
-export function GrillaDeAlbumes({
-  albumes,
-  cargando,
-  hayMas,
-  cargandoMas,
-  onCargarMas,
-  onAbrir,
-  vacio,
-}: {
-  albumes: AlbumDeGaleria[];
-  cargando: boolean;
-  hayMas: boolean;
-  cargandoMas: boolean;
-  onCargarMas: () => void;
-  onAbrir: (a: AlbumDeGaleria) => void;
-  vacio: { titulo: string; descripcion?: string };
-}) {
-  if (cargando)
-    return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-        {[0, 1, 2, 3].map((i) => (
-          <Skeleton key={i} className="aspect-[4/5] w-full rounded-2xl" />
-        ))}
-      </div>
-    );
-
-  if (albumes.length === 0)
-    return (
-      <EmptyState
-        icon={ImagesIcon}
-        title={vacio.titulo}
-        description={vacio.descripcion}
-      />
-    );
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
-        {albumes.map((a) => (
-          <TarjetaAlbum key={a.id} album={a} onAbrir={onAbrir} />
-        ))}
-      </div>
-
-      {hayMas && (
-        <div className="flex justify-center pt-2">
-          <Button variant="outline" onClick={onCargarMas} disabled={cargandoMas}>
-            {cargandoMas && <Spinner />}
-            Cargar más álbumes
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─────────────────────────────────────────────────────────────
-// Ventana de un álbum — se abre al hacer clic en una tarjeta
+// La galería de una VISITA
+//
+// ⚠️ Aquí había también `TarjetaAlbum`, `GrillaDeAlbumes` y
+// `DetalleAlbumDialog`: la pestaña «Álbumes» y su detalle. Se fueron con los
+// álbumes en la Fase 4 del rediseño. La galería plana era la otra pestaña y
+// es la que queda, porque es la que sigue teniendo sentido: las fotos de la
+// visita que se está mirando.
 // ─────────────────────────────────────────────────────────────
 
-export function DetalleAlbumDialog({
-  album,
-  puedeSubir,
-  puedeBorrar,
-  permiso,
-  ramaCerrada,
-  portal = false,
-  onEditar,
-  onCerrar,
-}: {
-  album: AlbumDeGaleria;
-  puedeSubir: boolean;
-  puedeBorrar: (f: FotoDeAlbum) => boolean;
-  permiso: PermisoCarpeta | null;
-  ramaCerrada: boolean;
-  portal?: boolean;
-  onEditar?: () => void;
-  onCerrar: () => void;
-}) {
-  const titulo = album.nombre ?? album.descripcion ?? formatFecha(album.creadoEn);
-
-  // Álbum sin fotos todavía: no hay nada que mostrar en el visor dividido,
-  // pero se deja crear el primero desde aquí mismo.
-  if (album.fotos.length === 0) {
-    return (
-      <Dialog open onOpenChange={(v) => !v && onCerrar()}>
-        <DialogContent>
-          <div className="flex items-start justify-between gap-3 border-b border-border pb-3">
-            <h3 className="truncate font-medium text-foreground">{titulo}</h3>
-            {onEditar && (
-              <Button size="icon-sm" variant="ghost" onClick={onEditar}>
-                <PencilIcon />
-              </Button>
-            )}
-          </div>
-          <EmptyState
-            icon={ImagesIcon}
-            title="Este álbum todavía no tiene fotos"
-            description={puedeSubir ? 'Añade las primeras abajo.' : undefined}
-          />
-          {puedeSubir && <SubirAAlbum albumId={album.id} />}
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  return (
-    <VisorFotoDialog
-      titulo={titulo}
-      fotos={album.fotos}
-      indiceInicial={0}
-      albumId={album.id}
-      puedeSubir={puedeSubir}
-      puedeBorrar={puedeBorrar}
-      permiso={permiso}
-      ramaCerrada={ramaCerrada}
-      portal={portal}
-      onEditarAlbum={onEditar}
-      onCerrar={onCerrar}
-    />
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Todas las fotos juntas, sin agrupar por álbum — pestaña «Fotos»
-// ─────────────────────────────────────────────────────────────
-
-export function GaleriaFotosPlanas({
-  albumes,
+export function GaleriaDeFotos({
+  fotos,
   cargando,
   hayMas,
   cargandoMas,
@@ -662,12 +477,12 @@ export function GaleriaFotosPlanas({
   portal = false,
   vacio,
 }: {
-  albumes: AlbumDeGaleria[];
+  fotos: FotoDeGaleria[];
   cargando: boolean;
   hayMas: boolean;
   cargandoMas: boolean;
   onCargarMas: () => void;
-  puedeBorrar: (f: FotoDeAlbum) => boolean;
+  puedeBorrar: (f: FotoDeGaleria) => boolean;
   permiso?: PermisoCarpeta | null;
   ramaCerrada?: boolean;
   portal?: boolean;
@@ -679,11 +494,9 @@ export function GaleriaFotosPlanas({
   const [borrandoId, setBorrandoId] = useState<number | null>(null);
   const eliminar = useEliminarFoto();
 
-  const todasLasFotos = albumes
-    .flatMap((a) => a.fotos)
-    .filter((f) => !ocultas.has(f.id));
+  const todasLasFotos = fotos.filter((f) => !ocultas.has(f.id));
 
-  const borrarRapido = (f: FotoDeAlbum) => {
+  const borrarRapido = (f: FotoDeGaleria) => {
     if (!window.confirm('¿Eliminar esta foto? No se puede deshacer.')) return;
     setBorrandoId(f.id);
     eliminar.mutate(f.id, {

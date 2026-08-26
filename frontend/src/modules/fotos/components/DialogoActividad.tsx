@@ -12,30 +12,44 @@ import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Select } from '@/shared/ui/select';
 import {
-  useCrearTarea,
-  useEditarTarea,
+  useCrearActividad,
+  useEditarActividad,
   useAsignables,
-} from '@/modules/fotos/hooks/useTareas';
+} from '@/modules/fotos/hooks/useActividades';
 import type {
-  EstadoTarea,
-  PrioridadTarea,
-  Tarea,
+  EstadoActividad,
+  PrioridadActividad,
+  TipoEvidencia,
+  Actividad,
 } from '@/modules/fotos/types';
 
-const ESTADOS: { valor: EstadoTarea; etiqueta: string }[] = [
+const ESTADOS: { valor: EstadoActividad; etiqueta: string }[] = [
   { valor: 'PENDIENTE', etiqueta: 'Pendiente' },
   { valor: 'EN_PROCESO', etiqueta: 'En proceso' },
   { valor: 'COMPLETADA', etiqueta: 'Completada' },
 ];
 
-const PRIORIDADES: { valor: PrioridadTarea; etiqueta: string }[] = [
+const PRIORIDADES: { valor: PrioridadActividad; etiqueta: string }[] = [
   { valor: 'BAJA', etiqueta: 'Baja' },
   { valor: 'MEDIA', etiqueta: 'Media' },
   { valor: 'ALTA', etiqueta: 'Alta' },
 ];
 
 /**
- * El formulario completo de una tarea (§13).
+ * Qué evidencia se le pide a la actividad (Fase 3).
+ *
+ * Las etiquetas dicen lo que se ESPERA, no el nombre del enum: «Una foto»
+ * comunica; «UNA», no. Es la misma lista, con los mismos textos, que la
+ * pantalla de administración del catálogo.
+ */
+const EVIDENCIAS: { valor: TipoEvidencia; etiqueta: string }[] = [
+  { valor: 'NINGUNA', etiqueta: 'No se pide foto' },
+  { valor: 'UNA', etiqueta: 'Una foto' },
+  { valor: 'ANTES_DESPUES', etiqueta: 'Antes y después' },
+];
+
+/**
+ * El formulario completo de una actividad (§13).
  *
  * §13 pide título, descripción, estado, prioridad, fecha y responsable. La
  * alta rápida del panel solo pide el título —en obra se apunta lo que hay
@@ -46,37 +60,43 @@ const PRIORIDADES: { valor: PrioridadTarea; etiqueta: string }[] = [
  * ⚠️ Cambiar el estado a COMPLETADA aquí registra fecha y autor igual que
  * la casilla del panel: el backend rellena las tres columnas por los dos
  * caminos. Si solo lo hiciera el check, editar el estado desde aquí dejaría
- * una tarea «completada» sin saber por quién.
+ * una actividad «completada» sin saber por quién.
  *
- * Como `DialogoAlbum`, el estado arranca de la tarea y no se sincroniza con
- * un efecto: quien lo monta le pone un `key` distinto por tarea.
+ * Como `DialogoAlbum`, el estado arranca de la actividad y no se sincroniza con
+ * un efecto: quien lo monta le pone un `key` distinto por actividad.
  */
-export function DialogoTarea({
-  carpetaId,
-  tarea,
+export function DialogoActividad({
+  cicloId,
+  actividad,
   abierto,
   onCerrar,
 }: {
-  carpetaId: number;
+  /** La visita a la que se añade. Una actividad es de un ciclo, no de la carpeta. */
+  cicloId: number;
   /** null = crear una nueva. */
-  tarea: Tarea | null;
+  actividad: Actividad | null;
   abierto: boolean;
   onCerrar: () => void;
 }) {
-  const crear = useCrearTarea();
-  const editar = useEditarTarea();
+  const crear = useCrearActividad();
+  const editar = useEditarActividad();
   const { data: asignables } = useAsignables(abierto);
 
-  const editando = tarea !== null;
-  const [titulo, setTitulo] = useState(tarea?.titulo ?? '');
-  const [descripcion, setDescripcion] = useState(tarea?.descripcion ?? '');
-  const [estado, setEstado] = useState<EstadoTarea>(tarea?.estado ?? 'PENDIENTE');
-  const [prioridad, setPrioridad] = useState<PrioridadTarea | ''>(
-    tarea?.prioridad ?? '',
+  const editando = actividad !== null;
+  const [titulo, setTitulo] = useState(actividad?.titulo ?? '');
+  const [descripcion, setDescripcion] = useState(actividad?.descripcion ?? '');
+  const [estado, setEstado] = useState<EstadoActividad>(actividad?.estado ?? 'PENDIENTE');
+  const [prioridad, setPrioridad] = useState<PrioridadActividad | ''>(
+    actividad?.prioridad ?? '',
   );
-  const [fecha, setFecha] = useState(tarea?.fecha ?? '');
+  // El defecto al crear es UNA, el mismo que el servidor: una actividad de
+  // inspección escrita a mano casi siempre quiere su foto.
+  const [evidencia, setEvidencia] = useState<TipoEvidencia>(
+    actividad?.evidencia ?? 'UNA',
+  );
+  const [fecha, setFecha] = useState(actividad?.fecha ?? '');
   const [responsableId, setResponsableId] = useState<string>(
-    tarea?.responsable ? String(tarea.responsable.id) : '',
+    actividad?.responsable ? String(actividad.responsable.id) : '',
   );
 
   const guardar = () => {
@@ -88,20 +108,21 @@ export function DialogoTarea({
       descripcion: descripcion.trim() || null,
       estado,
       prioridad: prioridad === '' ? null : prioridad,
+      evidencia,
       fecha: fecha || null,
       responsableId: responsableId === '' ? null : Number(responsableId),
     };
 
     if (editando)
-      editar.mutate({ id: tarea.id, payload }, { onSuccess: onCerrar });
-    else crear.mutate({ carpetaId, payload }, { onSuccess: onCerrar });
+      editar.mutate({ id: actividad.id, payload }, { onSuccess: onCerrar });
+    else crear.mutate({ cicloId, payload }, { onSuccess: onCerrar });
   };
 
   return (
     <Dialog open={abierto} onOpenChange={(v) => !v && onCerrar()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{editando ? 'Editar tarea' : 'Nueva tarea'}</DialogTitle>
+          <DialogTitle>{editando ? 'Editar actividad' : 'Nueva actividad'}</DialogTitle>
           <DialogDescription>
             {editando
               ? 'Los cambios se registran en la bitácora con el valor anterior.'
@@ -140,7 +161,7 @@ export function DialogoTarea({
               </label>
               <Select
                 value={estado}
-                onChange={(e) => setEstado(e.target.value as EstadoTarea)}
+                onChange={(e) => setEstado(e.target.value as EstadoActividad)}
               >
                 {ESTADOS.map((e) => (
                   <option key={e.valor} value={e.valor}>
@@ -158,7 +179,7 @@ export function DialogoTarea({
               <Select
                 value={prioridad}
                 onChange={(e) =>
-                  setPrioridad(e.target.value as PrioridadTarea | '')
+                  setPrioridad(e.target.value as PrioridadActividad | '')
                 }
               >
                 <option value="">Sin prioridad</option>
@@ -168,6 +189,27 @@ export function DialogoTarea({
                   </option>
                 ))}
               </Select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-foreground">
+                Evidencia fotográfica
+              </label>
+              <Select
+                value={evidencia}
+                onChange={(e) => setEvidencia(e.target.value as TipoEvidencia)}
+              >
+                {EVIDENCIAS.map((e) => (
+                  <option key={e.valor} value={e.valor}>
+                    {e.etiqueta}
+                  </option>
+                ))}
+              </Select>
+              {/* Lo importante que hay que decir aquí: no bloquea nada. */}
+              <p className="text-xs text-muted-foreground">
+                Se avisa si falta, pero no impide dar la actividad por
+                completada.
+              </p>
             </div>
 
             <div className="space-y-1.5">
@@ -215,7 +257,7 @@ export function DialogoTarea({
             onClick={guardar}
             disabled={!titulo.trim() || crear.isPending || editar.isPending}
           >
-            {editando ? 'Guardar' : 'Crear tarea'}
+            {editando ? 'Guardar' : 'Crear actividad'}
           </Button>
         </DialogFooter>
       </DialogContent>

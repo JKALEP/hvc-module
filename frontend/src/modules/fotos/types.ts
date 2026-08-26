@@ -2,7 +2,7 @@ import type { RolGlobal } from '@/modules/auth/types';
 
 // ─────────────────────────────────────────────────────────────
 // MÓDULO FOTOS (v3)
-// Carpetas, álbumes, tareas y fotos. El único estado de una carpeta es
+// Carpetas, álbumes, actividades y fotos. El único estado de una carpeta es
 // `cerrada` (archivada): el par ACTIVA/INACTIVA de v2 se retiró, porque
 // nadie lo hacía cumplir y se pisaba visualmente con el archivado.
 // ─────────────────────────────────────────────────────────────
@@ -25,7 +25,12 @@ export interface CarpetaListada {
   cerrada: boolean;
   subcarpetas: number;
   /** Contadores de TODO el subárbol, no solo de lo que cuelga directo. */
-  albumes: number;
+  /**
+   * Cuántas fotos hay en todo el subárbol que este usuario ve.
+   *
+   * ⚠️ Aquí iba también `albumes`. Se fue con ellos en la Fase 4: el otro
+   * agrupador sería «visitas», que es un dato del equipo y no del subárbol.
+   */
   fotos: number;
   /** Se propaga hacia arriba cuando algo cambia dentro. */
   actualizadoEn: string;
@@ -38,6 +43,17 @@ export interface CarpetaListada {
    * 1b, y a la carpeta que se abre — no a cada tarjeta del listado.
    */
   tipo: 'CARPETA' | 'EQUIPO';
+  /**
+   * El estado del equipo en su ciclo MÁS RECIENTE (§7), para verlo sin entrar.
+   *
+   * `null` en una carpeta corriente —no tiene ciclos— y en un equipo cuya
+   * visita en curso todavía no se ha revisado.
+   *
+   * ⚠️ Se llama `estadoEquipo` y no `estado` porque la tarjeta YA tuvo un
+   * `estado` que significaba otra cosa: el `EstadoSede` ACTIVA/INACTIVA que
+   * v3 retiró.
+   */
+  estadoEquipo: EstadoEquipo | null;
 }
 
 /**
@@ -73,8 +89,14 @@ export interface ContenidoCarpeta {
     nombre: string;
     cerrada: boolean;
     actualizadoEn: string;
-    /** Desde la Fase 5: si es EQUIPO, la pantalla ofrece las tareas de §13. */
+    /** Desde la Fase 5: si es EQUIPO, la pantalla ofrece las actividades de §13. */
     tipo: 'CARPETA' | 'EQUIPO';
+    /**
+     * Qué clase de sistema es (Fase 2). `null` en una carpeta corriente y en
+     * un equipo al que nadie se lo ha puesto — es opcional como todo lo del
+     * equipo, para no trabar el alta en obra.
+     */
+    tipoSistema: TipoSistema | null;
   } | null;
   /** Si puede subir fotos y crear carpetas aquí. */
   puedeEscribir: boolean;
@@ -87,7 +109,7 @@ export interface ContenidoCarpeta {
   secciones: SeccionCarpetas[];
 }
 
-export interface FotoDeAlbum {
+export interface FotoDeGaleria {
   id: number;
   anchoPx: number;
   altoPx: number;
@@ -104,42 +126,31 @@ export interface FotoDeAlbum {
   subidaPor: { id: number; nombre: string } | null;
   url: string;
   urlMiniatura: string;
+  /** Cuántos comentarios tiene. Solo en la galería del ciclo. */
+  comentarios?: number;
 }
 
-/** Una subida. La descripción es del lote, no de cada foto. */
 /**
- * Un álbum COMO LO DEVUELVE LA GALERÍA, que no es lo mismo que `Album`.
+ * La galería de una VISITA: una lista plana de fotos, paginada por cursor.
  *
- * ⚠️ Se llamaba `Album` y colisionaba con el de §16 —dos `interface Album`
- * en este archivo—. TypeScript no las rechazaba: las FUSIONABA, así que el
- * tipo afirmaba que un álbum de galería trae `carpetaId`, `creadoPor` y
- * `_count`, que ese endpoint no devuelve. Compilaba porque nadie construye
- * el tipo a mano, y habría reventado en cuanto alguien leyera un campo
- * fusionado. Son dos proyecciones distintas y ahora se llaman distinto.
+ * ⚠️ Tenía un nivel de ÁLBUM en medio (`AlbumDeGaleria`), con las fotos
+ * anidadas dentro. Se retiró en la Fase 4: el agrupador es el ciclo, y ese
+ * ya lo elige la pantalla antes de pedir esto. Se gana lo que costaba el
+ * nivel de más — una foto se busca por su fecha o por quién la subió, no
+ * por en qué tanda entró.
  */
-export interface AlbumDeGaleria {
-  id: number;
-  /** Nullable: la captura rápida sube sin título (§17). */
-  nombre: string | null;
-  fecha: string | null;
-  descripcion: string | null;
-  creadoEn: string;
-  comentarios: number;
-  subidoPor: { id: number; nombre: string } | null;
-  fotos: FotoDeAlbum[];
-}
-
 export interface Galeria {
-  albumes: AlbumDeGaleria[];
+  fotos: FotoDeGaleria[];
   /** Cursor de la página siguiente; null cuando ya no queda nada. */
   siguiente: number | null;
   totalFotos: number;
 }
 
+/** Quién ha subido fotos a una visita. Para el filtro de la galería. */
 export interface AutorDeCarpeta {
   usuarioId: number;
   nombre: string;
-  albumes: number;
+  fotos: number;
 }
 
 export interface FiltrosGaleria {
@@ -149,7 +160,8 @@ export interface FiltrosGaleria {
 }
 
 export interface ResultadoSubida {
-  albumId: number;
+  /** A qué visita fueron. `null` en la bandeja y en las de actividad. */
+  cicloId: number | null;
   subidas: number;
   fallidas: { archivo: string; motivo: string }[];
   bytesGuardados: number;
@@ -299,29 +311,132 @@ export interface CampoDeCarpeta {
   imagen: { url: string; urlMiniatura: string | null } | null;
 }
 
-// ── Tareas (§13) y comentarios (§14) ──
+// ── Actividades (§13) y comentarios (§14) ──
 
-export type EstadoTarea = 'PENDIENTE' | 'EN_PROCESO' | 'COMPLETADA';
-export type PrioridadTarea = 'BAJA' | 'MEDIA' | 'ALTA';
+// ── Ciclos y estado del equipo (Fase 1 del rediseño) ──
 
-/** Quién hizo algo. Se repite en tarea y comentario, y es la misma forma. */
+/**
+ * La paleta de los estados de equipo. Cerrada, como la de las carpetas.
+ *
+ * ⚠️ Pero se pinta de otra manera, y la diferencia importa. El color de una
+ * CARPETA se mapea a tokens de matiz (`--amarillo`, `--celeste`) porque ahí
+ * el significado ES el color: amarillo no quiere decir nada más que
+ * «carpeta». Aquí sí hay significado detrás —operativo, con observaciones,
+ * inoperativo— y el sistema ya tiene la familia semántica que lo dice:
+ * `success` / `warning` / `destructive`. Inventar tokens de matiz habría
+ * dejado dos maneras de pintar «esto va mal».
+ */
+export type ColorEstado = 'VERDE' | 'NARANJA' | 'ROJO';
+
+/** Un estado del catálogo configurable (§7). Lo administra un ADMIN_GLOBAL. */
+export interface EstadoEquipo {
+  id: number;
+  nombre: string;
+  color: ColorEstado;
+  orden: number;
+  activo: boolean;
+  /** Cuántos ciclos lo usan. Solo llega en la pantalla de administración. */
+  _count?: { ciclos: number };
+}
+
+/**
+ * Una visita al equipo.
+ *
+ * ⚠️ `cerradoEn` no es un detalle de auditoría: es el candado. Un ciclo
+ * cerrado no admite cambios de NADIE —tampoco de un ADMIN_GLOBAL— y de ahí
+ * sale el `deshabilitado` de la pantalla de actividades.
+ */
+export interface Ciclo {
+  id: number;
+  numero: number;
+  abiertoEn: string;
+  cerradoEn: string | null;
+  estado: EstadoEquipo | null;
+  abiertoPor: Persona | null;
+  cerradoPor: Persona | null;
+  /** Solo en el listado, no en el detalle. */
+  _count?: { actividades: number };
+}
+
+// ── Tipo de sistema y catálogo de actividades (Fase 2 del rediseño) ──
+
+/** «Aire Acondicionado», «Ventilación», y lo que HVC añada. */
+export interface FamiliaSistema {
+  id: number;
+  nombre: string;
+  orden: number;
+  activo: boolean;
+  /** Solo en el listado completo, que es como se pinta el desplegable. */
+  tipos?: TipoSistema[];
+}
+
+export interface TipoSistema {
+  id: number;
+  nombre: string;
+  orden: number;
+  activo: boolean;
+  familiaId?: number;
+  /** Viaja con el tipo cuando se lee desde un equipo o desde el catálogo. */
+  familia?: { id: number; nombre: string };
+  _count?: { carpetas: number; actividades: number };
+}
+
+/**
+ * Una actividad del catálogo estándar.
+ *
+ * ⚠️ NO es una actividad de una visita. Ésta es la PROPUESTA; lo que se
+ * recorre en un ciclo es una `Actividad`, que copió el nombre y vive por su
+ * cuenta — por eso renombrar aquí no cambia una inspección ya hecha.
+ */
+export interface DefinicionActividad {
+  id: number;
+  nombre: string;
+  descripcion: string | null;
+  orden: number;
+  activo: boolean;
+  /** Qué evidencia propone pedir (Fase 3). Se copia a la actividad. */
+  evidencia: TipoEvidencia;
+  /** Para qué tipos de sistema se propone. */
+  tipos: TipoSistema[];
+}
+
+// ── Evidencia fotográfica por actividad (Fase 3 del rediseño) ──
+
+/**
+ * Qué se espera fotografiar en una actividad.
+ *
+ * ⚠️ Es una EXPECTATIVA, no un candado: una actividad se completa aunque le
+ * falte la foto. Lo que hace el sistema es DECIRLO —en la tarjeta y en la
+ * exportación—; trabar el check por esto sería el fallo que el módulo evita
+ * en todas partes.
+ */
+export type TipoEvidencia = 'NINGUNA' | 'UNA' | 'ANTES_DESPUES';
+
+/** En qué mitad del antes/después cae una foto. `null` en todo lo demás. */
+export type MomentoEvidencia = 'ANTES' | 'DESPUES';
+
+export type EstadoActividad = 'PENDIENTE' | 'EN_PROCESO' | 'COMPLETADA';
+export type PrioridadActividad = 'BAJA' | 'MEDIA' | 'ALTA';
+
+/** Quién hizo algo. Se repite en actividad y comentario, y es la misma forma. */
 export interface Persona {
   id: number;
   nombre: string;
 }
 
-export interface Tarea {
+export interface Actividad {
   id: number;
-  carpetaId: number;
+  /** De qué visita es. Sustituye a `carpetaId` desde la Fase 1. */
+  cicloId: number;
   titulo: string;
   descripcion: string | null;
-  estado: EstadoTarea;
-  prioridad: PrioridadTarea | null;
+  estado: EstadoActividad;
+  prioridad: PrioridadActividad | null;
   /** El día del trabajo, "YYYY-MM-DD". No es el de creación. */
   fecha: string | null;
   /**
    * Fecha/hora y autor de la finalización (§13). Van SIEMPRE juntos: o los
-   * dos con valor, o los dos en null. Reabrir una tarea los vacía.
+   * dos con valor, o los dos en null. Reabrir una actividad los vacía.
    */
   completadaEn: string | null;
   completadaPor: Persona | null;
@@ -330,26 +445,36 @@ export interface Tarea {
   creadoEn: string;
   actualizadoEn: string;
   _count: { fotos: number; comentarios: number };
+  /** Qué evidencia se le pide (Fase 3). Se hereda entre ciclos. */
+  evidencia: TipoEvidencia;
+  /**
+   * Los tres las CALCULA el servidor a partir de las fotos; no se guardan.
+   * `faltaEvidencia` es la señal que se pinta, y no impide completar nada.
+   */
+  tieneAntes: boolean;
+  tieneDespues: boolean;
+  faltaEvidencia: boolean;
 }
 
-export interface NuevaTarea {
+export interface NuevaActividad {
   titulo: string;
   descripcion?: string | null;
-  estado?: EstadoTarea;
-  prioridad?: PrioridadTarea | null;
+  estado?: EstadoActividad;
+  prioridad?: PrioridadActividad | null;
   fecha?: string | null;
   responsableId?: number | null;
+  evidencia?: TipoEvidencia;
 }
 
 /**
  * Dónde se puede comentar (§14).
  *
- * §14 nombra cuatro —carpeta, equipo, tarea, álbum— y aquí hay `carpeta`
+ * §14 nombra cuatro —carpeta, equipo, actividad, álbum— y aquí hay `carpeta`
  * cubriendo dos: un equipo ES una carpeta de tipo EQUIPO (§12), así que
  * comentar un equipo y comentar una carpeta son la misma llamada. `foto` es
  * el opcional de §14, con ruta desde la Fase 6 y pantalla desde la 9a.
  */
-export type EntidadComentable = 'carpeta' | 'tarea' | 'album' | 'foto';
+export type EntidadComentable = 'carpeta' | 'actividad' | 'album' | 'foto';
 
 export interface Comentario {
   id: number;
@@ -362,21 +487,14 @@ export interface Comentario {
   editadoEn: string | null;
 }
 
-// ── Álbumes y bandeja (Fase 6 · §16-§18) ──
+// ── Bandeja (§17-§18) ──
+//
+// ⚠️ Aquí vivía `Album`, el de §16. Los álbumes se retiraron en la Fase 4 del
+// rediseño: una foto cuelga de un CICLO o de una ACTIVIDAD, y no hay ningún
+// endpoint que devuelva un álbum. La tabla sobrevive en la base solo para que
+// los comentarios que se escribieron sobre uno no se pierdan.
 
-export interface Album {
-  id: number;
-  carpetaId: number;
-  /** Nullable: la captura rápida sube sin título y la galería usa la fecha. */
-  nombre: string | null;
-  descripcion: string | null;
-  fecha: string | null;
-  creadoEn: string;
-  creadoPor: Persona;
-  _count: { fotos: number; comentarios: number };
-}
-
-/** Una foto de la bandeja de §18: sin álbum y sin tarea todavía. */
+/** Una foto de la bandeja de §18: sin ciclo y sin actividad todavía. */
 export interface FotoPendiente {
   id: number;
   descripcion: string | null;
@@ -395,15 +513,18 @@ export interface Bandeja {
 }
 
 /**
- * A dónde van unas fotos. Unión, no tres opcionales: con `albumId?`,
- * `tareaId?` y `carpetaId?` sueltos existirían combinaciones imposibles
- * —dos destinos, ninguno— y el compilador no ayudaría. Misma forma que
- * `DestinoSubida` en el backend.
+ * A dónde van unas fotos.
+ *
+ * Los TRES sitios donde puede estar una foto desde la Fase 4: suelta en la
+ * visita, como evidencia de una actividad, o sin clasificar en la bandeja.
+ *
+ * Unión, no opcionales sueltos: con `cicloId?` y `actividadId?` existirían
+ * combinaciones imposibles —dos destinos, ninguno— y el compilador no
+ * ayudaría. Misma forma que `DestinoSubida` en el backend.
  */
 export type DestinoFotos =
-  | { tipo: 'carpeta'; carpetaId: number }
-  | { tipo: 'album'; albumId: number }
-  | { tipo: 'tarea'; tareaId: number }
+  | { tipo: 'ciclo'; cicloId: number }
+  | { tipo: 'actividad'; actividadId: number }
   | { tipo: 'bandeja' };
 
 // ── Auditoría (§23), plantillas (§20) e importación (§19) ──
@@ -427,7 +548,7 @@ export interface EventoFotos {
   creadoEn: string;
 }
 
-export type TipoNodoPlantilla = 'CARPETA' | 'TAREA' | 'ALBUM';
+export type TipoNodoPlantilla = 'CARPETA' | 'ACTIVIDAD' | 'ALBUM';
 
 export interface NodoPlantilla {
   id: number;
@@ -478,14 +599,14 @@ export interface PreviaImportacion {
   hojas: {
     fila: number;
     camino: string;
-    tipo: 'TAREA' | 'ALBUM';
+    tipo: 'ACTIVIDAD' | 'ALBUM';
     nombre: string;
     descripcion: string | null;
   }[];
   conflictos: {
     fila: number;
     camino: string;
-    tipo: 'TAREA' | 'ALBUM';
+    tipo: 'ACTIVIDAD' | 'ALBUM';
     nombre: string;
     motivo: string;
   }[];
@@ -493,16 +614,16 @@ export interface PreviaImportacion {
 }
 
 /**
- * Una foto tal como la devuelve `GET /fotos/tarea/:id/foto` (§15).
+ * Una foto tal como la devuelve `GET /fotos/actividad/:id/foto` (§15).
  *
  * Extiende la de galería con `descripcion`, que ese endpoint sí manda: la
  * galería la muestra por álbum —es de la subida entera— y aquí es de la foto.
- * Tipo propio y no reutilizar `FotoDeAlbum` a secas por lo aprendido con
+ * Tipo propio y no reutilizar `FotoDeGaleria` a secas por lo aprendido con
  * `AlbumDeGaleria`: dos proyecciones distintas con el mismo nombre acaban
  * fusionándose en silencio.
  */
 /**
- * Igual que `FotoDeAlbum` desde la Fase 2b, cuando la galería empezó a
+ * Igual que `FotoDeGaleria` desde la Fase 2b, cuando la galería empezó a
  * devolver también la descripción por foto.
  *
  * Se conserva el nombre en vez de fundirlos: son dos endpoints distintos y
@@ -510,4 +631,13 @@ export interface PreviaImportacion {
  * prometa algo que no manda. Es el mismo cuidado que obligó a partir
  * `Album` y `AlbumDeGaleria` en 9a.
  */
-export type FotoDeTarea = FotoDeAlbum;
+/**
+ * Una foto de actividad.
+ *
+ * ⚠️ Ya NO es un alias de `FotoDeGaleria`: desde la Fase 3 lleva `momento`, que
+ * una foto de álbum no tiene ni puede tener —lo impide un CHECK—. Es
+ * exactamente el caso que la nota de 9b anticipaba al no reutilizar el tipo.
+ */
+export type FotoDeActividad = FotoDeGaleria & {
+  momento: MomentoEvidencia | null;
+};

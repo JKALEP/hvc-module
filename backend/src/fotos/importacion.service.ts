@@ -3,6 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
+import { CicloService } from './ciclo.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar } from '../common/texto';
 import { rutaDe } from '../common/arbol-ruta';
@@ -10,7 +11,7 @@ import { rutaDe } from '../common/arbol-ruta';
 /**
  * Importación de estructura por Excel (§19).
  *
- * El Excel **no trae fotos**: define qué carpetas, equipos, tareas y álbumes
+ * El Excel **no trae fotos**: define qué carpetas, equipos, actividades y álbumes
  * hay que crear. Columnas de §19:
  *
  *     Carpeta | Subcarpeta | Equipo | Tipo | Nombre | Descripción
@@ -21,7 +22,7 @@ import { rutaDe } from '../common/arbol-ruta';
  * Es la otra puerta a lo mismo que las plantillas de §20, y conviene tenerlo
  * presente: el Excel arranca una obra entera de una vez, desde la hoja que ya
  * tiene el planificador; la plantilla estampa un molde pequeño muchas veces,
- * en campo. Las dos acaban creando carpetas, tareas y álbumes.
+ * en campo. Las dos acaban creando carpetas, actividades y álbumes.
  *
  * El flujo es el mismo de `personal/gestion-personal`: **leer → validar →
  * vista previa → decidir conflictos → confirmar en transacción**. Y por lo
@@ -41,7 +42,15 @@ const COLUMNAS = [
   'Descripción',
 ] as const;
 
-const TIPOS_HOJA = ['TAREA', 'ALBUM'] as const;
+/**
+ * Qué puede pedir una fila del Excel.
+ *
+ * ⚠️ `ALBUM` se retiró en la Fase 4 del rediseño. Una hoja que lo traiga se
+ * rechaza en la vista previa con el motivo, en vez de crear algo distinto en
+ * silencio: la plantilla que HVC tenga guardada hay que actualizarla, igual
+ * que cuando la columna «Tipo» pasó de decir `Tarea` a `Actividad`.
+ */
+const TIPOS_HOJA = ['ACTIVIDAD'] as const;
 type TipoHoja = (typeof TIPOS_HOJA)[number];
 
 /** Tope de filas. Un Excel de obra no pasa de unos cientos. */
@@ -53,6 +62,14 @@ export type Decision = 'CREAR' | 'OMITIR' | 'ACTUALIZAR';
 interface FilaLeida {
   fila: number;
   camino: string[];
+  /**
+   * Si la fila traía columna «Equipo», y por tanto el ÚLTIMO tramo del camino
+   * es un equipo y no una carpeta corriente.
+   *
+   * ⚠️ Hace falta guardarlo aparte porque `camino` es el resultado de filtrar
+   * los huecos, y filtrando se pierde de qué columna venía cada tramo.
+   */
+  ultimoEsEquipo: boolean;
   tipo: TipoHoja;
   nombre: string;
   descripcion: string | null;
@@ -64,6 +81,7 @@ export class ImportacionFotosService {
     private readonly prisma: PrismaService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
+    private readonly ciclos: CicloService,
   ) {}
 
   /**
@@ -176,7 +194,7 @@ export class ImportacionFotosService {
       if (!TIPOS_HOJA.includes(tipo as TipoHoja)) {
         problemas.push({
           fila: numero,
-          motivo: `Tipo "${tipoCrudo ?? ''}" no válido. Debe ser Tarea o Álbum.`,
+          motivo: `Tipo "${tipoCrudo ?? ''}" no válido. Debe ser Actividad o Álbum.`,
         });
         return;
       }
@@ -197,6 +215,7 @@ export class ImportacionFotosService {
         camino: [carpeta, subcarpeta, equipo].filter(
           (s): s is string => s !== null,
         ),
+        ultimoEsEquipo: equipo !== null,
         tipo: tipo as TipoHoja,
         nombre,
         descripcion,
@@ -236,12 +255,21 @@ export class ImportacionFotosService {
     // fila: un Excel con 40 equipos repite «Proyecto A» 40 veces.
     const caminos = new Map<
       string,
-      { camino: string[]; existeId: number | null }
+      { camino: string[]; existeId: number | null; esEquipo: boolean }
     >();
     for (const f of filas) {
       for (let i = 1; i <= f.camino.length; i++) {
         const parcial = f.camino.slice(0, i);
-        caminos.set(parcial.join(' / '), { camino: parcial, existeId: null });
+        const clave = parcial.join(' / ');
+        // Un mismo tramo puede aparecer como equipo en una fila y como paso
+        // intermedio en otra; basta que alguna lo declare equipo.
+        const esEquipo = f.ultimoEsEquipo && i === f.camino.length;
+        const previo = caminos.get(clave);
+        caminos.set(clave, {
+          camino: parcial,
+          existeId: previo?.existeId ?? null,
+          esEquipo: previo?.esEquipo === true || esEquipo,
+        });
       }
     }
 
@@ -267,7 +295,7 @@ export class ImportacionFotosService {
       if (existente) idPorCamino.set(clave, existente.id);
     }
 
-    // Conflictos: una hoja (tarea o álbum) que ya existe en su carpeta.
+    // Conflictos: una hoja (actividad o álbum) que ya existe en su carpeta.
     const conflictos: {
       fila: number;
       camino: string;
@@ -283,15 +311,15 @@ export class ImportacionFotosService {
       if (carpetaId === undefined) continue;
 
       const yaEsta =
-        f.tipo === 'TAREA'
-          ? await this.prisma.tareaFotos.findFirst({
-              where: { carpetaId, titulo: f.nombre },
+        f.tipo === 'ACTIVIDAD'
+          ? await this.prisma.actividadFotos.findFirst({
+              // La actividad cuelga del CICLO, no de la carpeta: el duplicado
+              // se busca en cualquier ciclo de ese equipo, porque «Revisar
+              // pernos» ya existe aunque sea de la visita anterior.
+              where: { ciclo: { carpetaId }, titulo: f.nombre },
               select: { id: true },
             })
-          : await this.prisma.albumFotos.findFirst({
-              where: { carpetaId, nombre: f.nombre },
-              select: { id: true },
-            });
+          : null;
 
       if (yaEsta)
         conflictos.push({
@@ -372,15 +400,32 @@ export class ImportacionFotosService {
         'Ninguna fila del archivo se puede importar. Revisa los problemas de la vista previa.',
       );
 
-    const creado = { carpetas: 0, tareas: 0, albumes: 0 };
-    const omitido = { tareas: 0, albumes: 0 };
-    const actualizado = { tareas: 0, albumes: 0 };
+    const creado = { carpetas: 0, actividades: 0 };
+    const omitido = { actividades: 0 };
+    const actualizado = { actividades: 0 };
 
     await this.prisma.$transaction(async (tx) => {
       const idPorCamino = new Map<string, number>();
 
-      /** Devuelve el id de la carpeta del camino, creándola si hace falta. */
-      const asegurarCarpeta = async (camino: string[]): Promise<number> => {
+      /**
+       * Devuelve el id de la carpeta del camino, creándola si hace falta.
+       *
+       * ⚠️ El último tramo se crea como carpeta de tipo EQUIPO cuando la fila
+       * traía columna «Equipo», y entonces se le abre su Ciclo 1 en la MISMA
+       * transacción. Antes se creaba corriente, y eso escribía actividades en
+       * una carpeta que no era un equipo —el import saltaba §13 por escribir
+       * con `tx` en vez de pasar por el service—. Con el modelo de ciclos ese
+       * atajo dejó de existir: sin equipo no hay ciclo, y sin ciclo no hay
+       * dónde poner una actividad.
+       *
+       * Una carpeta que YA existe no cambia de tipo: el Excel no manda sobre
+       * lo que alguien creó a mano. Si no es un equipo, sus actividades se
+       * omiten y se avisa, como cualquier otra fila que no cabe.
+       */
+      const asegurarCarpeta = async (
+        camino: string[],
+        ultimoEsEquipo: boolean,
+      ): Promise<number> => {
         let padreId = destinoId;
         for (let i = 1; i <= camino.length; i++) {
           const clave = camino.slice(0, i).join(' / ');
@@ -406,12 +451,14 @@ export class ImportacionFotosService {
             where: { id: padreId },
             select: { ruta: true },
           });
+          const esEquipo = ultimoEsEquipo && i === camino.length;
           const nueva = await tx.carpetaFotos.create({
             data: {
               nombre,
               parentId: padreId,
               propietarioId: usuario.id,
               ruta: '',
+              ...(esEquipo ? { tipo: 'EQUIPO' as const } : {}),
             },
             select: { id: true },
           });
@@ -419,6 +466,8 @@ export class ImportacionFotosService {
             where: { id: nueva.id },
             data: { ruta: rutaDe(nueva.id, padre.ruta) },
           });
+          if (esEquipo)
+            await this.ciclos.abrirPrimeroEn(tx, nueva.id, usuario.id);
 
           creado.carpetas++;
           idPorCamino.set(clave, nueva.id);
@@ -428,18 +477,15 @@ export class ImportacionFotosService {
       };
 
       for (const f of filas) {
-        const carpetaId = await asegurarCarpeta(f.camino);
+        const carpetaId = await asegurarCarpeta(f.camino, f.ultimoEsEquipo);
 
         const existente =
-          f.tipo === 'TAREA'
-            ? await tx.tareaFotos.findFirst({
-                where: { carpetaId, titulo: f.nombre },
+          f.tipo === 'ACTIVIDAD'
+            ? await tx.actividadFotos.findFirst({
+                where: { ciclo: { carpetaId }, titulo: f.nombre },
                 select: { id: true },
               })
-            : await tx.albumFotos.findFirst({
-                where: { carpetaId, nombre: f.nombre },
-                select: { id: true },
-              });
+            : null;
 
         // Sin conflicto se crea; con conflicto manda la decisión, y lo que
         // no se decidió se omite.
@@ -448,48 +494,42 @@ export class ImportacionFotosService {
           : 'CREAR';
 
         if (existente && decision === 'OMITIR') {
-          if (f.tipo === 'TAREA') omitido.tareas++;
-          else omitido.albumes++;
+          omitido.actividades++;
           continue;
         }
 
         if (existente && decision === 'ACTUALIZAR') {
-          if (f.tipo === 'TAREA') {
-            await tx.tareaFotos.update({
-              where: { id: existente.id },
-              data: { descripcion: f.descripcion },
-            });
-            actualizado.tareas++;
-          } else {
-            await tx.albumFotos.update({
-              where: { id: existente.id },
-              data: { descripcion: f.descripcion },
-            });
-            actualizado.albumes++;
-          }
+          await tx.actividadFotos.update({
+            where: { id: existente.id },
+            data: { descripcion: f.descripcion },
+          });
+          actualizado.actividades++;
           continue;
         }
 
-        if (f.tipo === 'TAREA') {
-          await tx.tareaFotos.create({
+        if (f.tipo === 'ACTIVIDAD') {
+          // ⚠️ Una actividad necesita un CICLO donde caer, y solo cabe en el
+          // que esté en curso: meterla en uno cerrado reescribiría una visita
+          // ya terminada, que es justo lo que el historial impide. Si el
+          // equipo no tiene ninguno abierto, la fila se OMITE y se avisa —el
+          // mismo criterio que con las actividades fuera de un EQUIPO—.
+          const cicloAbierto = await tx.cicloFotos.findFirst({
+            where: { carpetaId, cerradoEn: null },
+            select: { id: true },
+          });
+          if (!cicloAbierto) {
+            omitido.actividades++;
+            continue;
+          }
+          await tx.actividadFotos.create({
             data: {
-              carpetaId,
+              cicloId: cicloAbierto.id,
               titulo: f.nombre,
               descripcion: f.descripcion,
               creadoPorId: usuario.id,
             },
           });
-          creado.tareas++;
-        } else {
-          await tx.albumFotos.create({
-            data: {
-              carpetaId,
-              nombre: f.nombre,
-              descripcion: f.descripcion,
-              creadoPorId: usuario.id,
-            },
-          });
-          creado.albumes++;
+          creado.actividades++;
         }
       }
     });
@@ -504,7 +544,7 @@ export class ImportacionFotosService {
       accion: 'IMPORTACION_EXCEL',
       descripcion:
         `Importó desde Excel en "${destino.nombre}": ${creado.carpetas} carpeta(s), ` +
-        `${creado.tareas} tarea(s), ${creado.albumes} álbum(es).`,
+        `${creado.actividades} actividad(s).`,
     });
 
     return { ok: true, creado, omitido, actualizado, problemas };

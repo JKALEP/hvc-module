@@ -2,31 +2,32 @@ import { useState, type ReactNode } from 'react';
 
 import { cn } from '@/shared/lib/utils';
 
-type IdPestana = 'albumes' | 'fotos' | 'tareas';
+type IdPestana = 'actividades' | 'fotos';
 
 /**
- * Pestañas de contenido del equipo: Álbumes / Fotos / Tareas.
+ * Pestañas de contenido de la VISITA: Actividades / Fotos.
  *
- * Comentarios YA NO vive aquí: ahora es un panel siempre visible al lado
- * de la ficha del equipo (ver `Fotos.tsx`), así que se saca de la pestaña
- * para no duplicarlo. Cada panel sigue siendo el mismo componente de
- * siempre con las mismas props.
+ * ⚠️ Eran tres —Álbumes / Fotos / Actividades— y la primera se fue con los
+ * álbumes en la Fase 4. Y el orden cambió a propósito: **Actividades primero**,
+ * porque es el checklist de la visita y lo que se viene a hacer; las fotos
+ * sueltas son lo que no encaja en ninguna actividad, no el punto de partida.
+ *
+ * Comentarios YA NO vive aquí: es un panel siempre visible al lado de la
+ * ficha del equipo (ver `Fotos.tsx`), así que se saca de la pestaña para no
+ * duplicarlo.
  */
 export function PestanasFicha({
-  contenidoAlbumes,
+  contenidoActividades,
   contenidoFotos,
-  contenidoTareas,
 }: {
-  contenidoAlbumes: ReactNode;
+  contenidoActividades: ReactNode;
   contenidoFotos: ReactNode;
-  contenidoTareas: ReactNode;
 }) {
-  const [activa, setActiva] = useState<IdPestana>('albumes');
+  const [activa, setActiva] = useState<IdPestana>('actividades');
 
   const pestanas: { id: IdPestana; etiqueta: string }[] = [
-    { id: 'albumes', etiqueta: 'Álbumes' },
+    { id: 'actividades', etiqueta: 'Actividades' },
     { id: 'fotos', etiqueta: 'Fotos' },
-    { id: 'tareas', etiqueta: 'Tareas' },
   ];
 
   return (
@@ -52,9 +53,8 @@ export function PestanasFicha({
       </div>
 
       <div role="tabpanel">
-        {activa === 'albumes' && contenidoAlbumes}
+        {activa === 'actividades' && contenidoActividades}
         {activa === 'fotos' && contenidoFotos}
-        {activa === 'tareas' && contenidoTareas}
       </div>
     </div>
   );

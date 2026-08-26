@@ -15,6 +15,7 @@ import { formatActualizado } from '@/shared/lib/format';
 import { cn } from '@/shared/lib/utils';
 import {
   COLOR_A_CLASES,
+  ESTADO_A_VARIANTE,
   COLOR_POR_DEFECTO,
 } from '@/modules/fotos/lib/colores';
 import { useColoresDeCarpeta } from '@/modules/fotos/hooks/useCamposEquipo';
@@ -90,6 +91,24 @@ export function TarjetaCarpeta({
             <Badge variant="warning" className="shrink-0">
               <ArchiveIcon className="size-3" />
               Archivada
+            </Badge>
+          )}
+
+          {/* El estado del equipo en su visita más reciente (§7): saber si un
+              equipo quedó inoperativo es justo lo que se viene a mirar, y
+              tener que entrar equipo por equipo para averiguarlo era el
+              recorrido que este rediseño quita.
+
+              ⚠️ No se pinta en una carpeta ARCHIVADA: ahí ya no se trabaja,
+              y dos insignias compitiendo dicen menos que una. Es el mismo
+              criterio por el que archivar apaga el color del icono. */}
+          {!carpeta.cerrada && carpeta.estadoEquipo && (
+            <Badge
+              variant={ESTADO_A_VARIANTE[carpeta.estadoEquipo.color]}
+              className="shrink-0 truncate"
+              title={carpeta.estadoEquipo.nombre}
+            >
+              {carpeta.estadoEquipo.nombre}
             </Badge>
           )}
         </div>
