@@ -1,6 +1,6 @@
 import { api } from '@/shared/services/api';
 import type { RespuestaLogin } from '@/modules/auth/types';
-import type { MomentoEvidencia, TipoEvidencia, FamiliaSistema, TipoSistema, DefinicionActividad, Ciclo, EstadoEquipo, ColorEstado, ColoresDeCarpeta, CampoEquipo, CampoDeCarpeta, Persona, FotoDeActividad, EventoFotos, Plantilla, PlantillaResumen, NodoPlantillaNuevo, PreviaImportacion, DecisionImportacion, Bandeja, DestinoFotos, Comentario, EntidadComentable, EstadoActividad, NuevaActividad, Actividad, AutorDeCarpeta, CarpetaCompartible, CarpetaListada, ContenidoCarpeta, FiltrosGaleria, Galeria, InvitacionAbierta, ListaCompartidos, Orden, PermisoCarpeta, ResultadoCompartir, ResultadoSubida } from '@/modules/fotos/types';
+import type { Observacion, MomentoEvidencia, TipoEvidencia, FamiliaSistema, TipoSistema, DefinicionActividad, Intervencion, EstadoEquipo, ColorEstado, ColoresDeCarpeta, CampoEquipo, CampoDeCarpeta, FotoDeActividad, EventoFotos, Plantilla, PlantillaResumen, NodoPlantillaNuevo, PreviaImportacion, DecisionImportacion, Bandeja, DestinoFotos, Comentario, EntidadComentable, EstadoActividad, NuevaActividad, Actividad, AutorDeCarpeta, CarpetaCompartible, CarpetaListada, ContenidoCarpeta, FiltrosGaleria, Galeria, InvitacionAbierta, ListaCompartidos, Orden, PermisoCarpeta, ResultadoCompartir, ResultadoSubida } from '@/modules/fotos/types';
 
 // Módulo Fotos v3. Un recurso, un nombre: las carpetas se leen y se
 // escriben en `/fotos/carpeta`. La `/fotos/sede` de v2 desapareció —creaba
@@ -38,22 +38,22 @@ export async function verRecientes(): Promise<{ carpetas: CarpetaListada[] }> {
   return data;
 }
 
-// ── Las fotos de una visita ──
+// ── Las fotos de una intervención ──
 
 /**
- * Galería de un CICLO: lista plana de fotos, paginada por cursor.
+ * Galería de una INTERVENCIÓN: lista plana de fotos, paginada por cursor.
  *
  * ⚠️ Paginaba por ÁLBUM y devolvía las fotos anidadas. Los álbumes se
- * retiraron en la Fase 4 y el agrupador pasó a ser el ciclo, que la pantalla
+ * retiraron en la Fase 4 y el agrupador pasó a ser la intervención, que la pantalla
  * ya eligió antes de pedir esto.
  */
 export async function verGaleria(
-  cicloId: number,
+  intervencionId: number,
   filtros: FiltrosGaleria,
   cursor?: number,
 ): Promise<Galeria> {
   const { data } = await api.get<Galeria>(
-    `/fotos/ciclo/${cicloId}/foto`,
+    `/fotos/intervencion/${intervencionId}/foto`,
     {
       params: {
         ...(cursor !== undefined ? { cursor } : {}),
@@ -68,22 +68,22 @@ export async function verGaleria(
   return data;
 }
 
-export async function verAutores(cicloId: number): Promise<AutorDeCarpeta[]> {
+export async function verAutores(intervencionId: number): Promise<AutorDeCarpeta[]> {
   const { data } = await api.get<AutorDeCarpeta[]>(
-    `/fotos/ciclo/${cicloId}/autores`,
+    `/fotos/intervencion/${intervencionId}/autores`,
   );
   return data;
 }
 
 /**
- * Sube fotos sueltas a una visita.
+ * Sube fotos sueltas a una intervención.
  *
  * Sin paso previo de «crear álbum» — ya no hay ninguno: el destino existe
  * desde que el equipo se dio de alta. Se manda multipart: el navegador pone
  * el boundary del Content-Type, así que NO se fija a mano.
  */
 export async function subirFotos(
-  cicloId: number,
+  intervencionId: number,
   archivos: File[],
   descripcion: string,
 ): Promise<ResultadoSubida> {
@@ -92,7 +92,7 @@ export async function subirFotos(
   if (descripcion.trim()) form.append('descripcion', descripcion.trim());
 
   const { data } = await api.post<ResultadoSubida>(
-    `/fotos/ciclo/${cicloId}/foto`,
+    `/fotos/intervencion/${intervencionId}/foto`,
     form,
   );
   return data;
@@ -155,7 +155,7 @@ export async function crearCarpeta(payload: {
   /** Qué clase de sistema es (Fase 2). Solo con `tipo = 'EQUIPO'`. */
   tipoSistemaId?: number | null;
   /**
-   * Qué actividades del catálogo estampar en el Ciclo 1 (Fase 2).
+   * Qué actividades del catálogo estampar en el Intervencion 1 (Fase 2).
    *
    * ⚠️ Omitirlo y mandar `[]` NO es lo mismo: sin el campo el servidor
    * estampa la preselección del tipo de sistema; con lista vacía, ninguna.
@@ -438,16 +438,16 @@ export async function verCarpetaPortal(
 }
 
 export async function verGaleriaPortal(
-  cicloId: number,
+  intervencionId: number,
   filtros: FiltrosGaleria,
   cursor?: number,
 ): Promise<Galeria> {
-  // ⚠️ Desde la Fase 4 la galería del portal es la de un CICLO, igual que la
+  // ⚠️ Desde la Fase 4 la galería del portal es la de una INTERVENCIÓN, igual que la
   // interna. Y sigue habiendo un motivo para mirar esta línea con atención:
   // antes pedía `carpeta/:id/foto`, que el backend nunca expuso, así que el
   // cliente veía CERO fotos en silencio. No se detectó en la Fase 7 porque la
   // carpeta con la que se probó el portal no tenía ninguna.
-  const { data } = await api.get<Galeria>(`/portal/ciclo/${cicloId}/foto`, {
+  const { data } = await api.get<Galeria>(`/portal/intervencion/${intervencionId}/foto`, {
     params: {
       ...(cursor !== undefined ? { cursor } : {}),
       ...(filtros.desde ? { desde: filtros.desde } : {}),
@@ -582,48 +582,48 @@ export async function eliminarDefinicionActividad(id: number): Promise<void> {
   await api.delete(`/fotos/catalogo-actividad/${id}`);
 }
 
-/** Trae actividades del catálogo a un ciclo abierto. */
+/** Trae actividades del catálogo a una intervención abierta. */
 export async function anadirDesdeCatalogo(
-  cicloId: number,
+  intervencionId: number,
   definiciones: number[],
 ): Promise<{ anadidas: number; omitidas: number }> {
   const { data } = await api.post<{ anadidas: number; omitidas: number }>(
-    `/fotos/ciclo/${cicloId}/actividad/desde-catalogo`,
+    `/fotos/intervencion/${intervencionId}/actividad/desde-catalogo`,
     { definiciones },
   );
   return data;
 }
 
-// ── Ciclos y estado del equipo (Fase 1 del rediseño) ──
+// ── Intervenciones y estado del equipo (Fase 1 del rediseño) ──
 
-/** El historial de visitas de un equipo, del más reciente al más antiguo. */
-export async function verCiclos(carpetaId: number): Promise<Ciclo[]> {
-  const { data } = await api.get<Ciclo[]>(`/fotos/carpeta/${carpetaId}/ciclo`);
+/** El historial de intervenciónes de un equipo, del más reciente al más antiguo. */
+export async function verIntervenciones(carpetaId: number): Promise<Intervencion[]> {
+  const { data } = await api.get<Intervencion[]>(`/fotos/carpeta/${carpetaId}/intervencion`);
   return data;
 }
 
-/** Abre una visita nueva, heredando el checklist de la anterior (§4.3). */
-export async function abrirCiclo(carpetaId: number): Promise<Ciclo> {
-  const { data } = await api.post<Ciclo>(`/fotos/carpeta/${carpetaId}/ciclo`);
+/** Abre una intervención nueva, heredando el checklist de la anterior (§4.3). */
+export async function abrirIntervencion(carpetaId: number): Promise<Intervencion> {
+  const { data } = await api.post<Intervencion>(`/fotos/carpeta/${carpetaId}/intervencion`);
   return data;
 }
 
-export async function cerrarCiclo(cicloId: number): Promise<Ciclo> {
-  const { data } = await api.post<Ciclo>(`/fotos/ciclo/${cicloId}/cerrar`);
+export async function cerrarIntervencion(intervencionId: number): Promise<Intervencion> {
+  const { data } = await api.post<Intervencion>(`/fotos/intervencion/${intervencionId}/cerrar`);
   return data;
 }
 
-export async function reabrirCiclo(cicloId: number): Promise<Ciclo> {
-  const { data } = await api.post<Ciclo>(`/fotos/ciclo/${cicloId}/reabrir`);
+export async function reabrirIntervencion(intervencionId: number): Promise<Intervencion> {
+  const { data } = await api.post<Intervencion>(`/fotos/intervencion/${intervencionId}/reabrir`);
   return data;
 }
 
-/** `null` lo deja sin definir, que es como nace cada ciclo. */
-export async function cambiarEstadoCiclo(
-  cicloId: number,
+/** `null` lo deja sin definir, que es como nace cada intervención. */
+export async function cambiarEstadoIntervencion(
+  intervencionId: number,
   estadoId: number | null,
-): Promise<Ciclo> {
-  const { data } = await api.patch<Ciclo>(`/fotos/ciclo/${cicloId}/estado`, {
+): Promise<Intervencion> {
+  const { data } = await api.patch<Intervencion>(`/fotos/intervencion/${intervencionId}/estado`, {
     estadoId,
   });
   return data;
@@ -633,7 +633,7 @@ export async function cambiarEstadoCiclo(
  * El catálogo de estados (§7).
  *
  * Leerlo NO exige ser administrador: hace falta para elegir el estado de una
- * visita. `soloActivos` es lo que se ofrece en el formulario; la pantalla de
+ * intervención. `soloActivos` es lo que se ofrece en el formulario; la pantalla de
  * administración los quiere todos, retirados incluidos.
  */
 export async function verEstadosEquipo(
@@ -674,28 +674,100 @@ export async function eliminarEstadoEquipo(id: number): Promise<void> {
   await api.delete(`/fotos/estado-equipo/${id}`);
 }
 
+// ── Observaciones (§8, Fase 5) ──
+
+/**
+ * Las de esta intervención MÁS las arrastradas de intervenciónes anteriores.
+ *
+ * El servidor decide cuáles arrastra y marca cada una: la regla vive en un
+ * solo sitio, y comparar números de intervención aquí sería tenerla en dos.
+ */
+export async function verObservaciones(intervencionId: number): Promise<Observacion[]> {
+  const { data } = await api.get<Observacion[]>(
+    `/fotos/intervencion/${intervencionId}/observacion`,
+  );
+  return data;
+}
+
+/** Las observaciones de UNA actividad. */
+export async function verObservacionesDeActividad(
+  actividadId: number,
+): Promise<Observacion[]> {
+  const { data } = await api.get<Observacion[]>(
+    `/fotos/actividad/${actividadId}/observacion`,
+  );
+  return data;
+}
+
+export async function crearObservacionEnActividad(
+  actividadId: number,
+  texto: string,
+): Promise<Observacion> {
+  const { data } = await api.post<Observacion>(
+    `/fotos/actividad/${actividadId}/observacion`,
+    { texto },
+  );
+  return data;
+}
+
+export async function crearObservacion(
+  intervencionId: number,
+  texto: string,
+): Promise<Observacion> {
+  const { data } = await api.post<Observacion>(
+    `/fotos/intervencion/${intervencionId}/observacion`,
+    { texto },
+  );
+  return data;
+}
+
+export async function editarObservacion(
+  id: number,
+  texto: string,
+): Promise<Observacion> {
+  const { data } = await api.patch<Observacion>(`/fotos/observacion/${id}`, {
+    texto,
+  });
+  return data;
+}
+
+/** Resolver y reabrir son rutas propias: escriben cuatro columnas a la vez. */
+export async function resolverObservacion(
+  id: number,
+  resuelta: boolean,
+): Promise<Observacion> {
+  const { data } = await api.post<Observacion>(
+    `/fotos/observacion/${id}/${resuelta ? 'resolver' : 'reabrir'}`,
+  );
+  return data;
+}
+
+export async function eliminarObservacion(id: number): Promise<void> {
+  await api.delete(`/fotos/observacion/${id}`);
+}
+
 // ── Actividades (§13) ──
 //
-// ⚠️ Cuelgan de un CICLO desde la Fase 1, no de la carpeta: un equipo repite
-// la misma actividad en cada visita, así que «las actividades de esta
+// ⚠️ Cuelgan de una INTERVENCIÓN desde la Fase 1, no de la carpeta: un equipo repite
+// la misma actividad en cada intervención, así que «las actividades de esta
 // carpeta» dejó de tener una respuesta única.
 
 export async function verActividades(
-  cicloId: number,
+  intervencionId: number,
   estado?: EstadoActividad,
 ): Promise<Actividad[]> {
-  const { data } = await api.get<Actividad[]>(`/fotos/ciclo/${cicloId}/actividad`, {
+  const { data } = await api.get<Actividad[]>(`/fotos/intervencion/${intervencionId}/actividad`, {
     params: estado ? { estado } : {},
   });
   return data;
 }
 
 export async function crearActividad(
-  cicloId: number,
+  intervencionId: number,
   payload: NuevaActividad,
 ): Promise<Actividad> {
   const { data } = await api.post<Actividad>(
-    `/fotos/ciclo/${cicloId}/actividad`,
+    `/fotos/intervencion/${intervencionId}/actividad`,
     payload,
   );
   return data;
@@ -768,7 +840,7 @@ export async function eliminarComentario(id: number): Promise<void> {
 
 // ⚠️ Aquí vivían `crearAlbum`, `editarAlbum` y `eliminarAlbum` (§16). Se
 // fueron con los álbumes en la Fase 4: no hay ninguna ruta detrás, y el
-// agrupador que hacía falta —la visita— ya existe sin que nadie lo cree.
+// agrupador que hacía falta —la intervención— ya existe sin que nadie lo cree.
 
 // ── Subir a cualquiera de los TRES destinos (§15-§18) ──
 
@@ -780,8 +852,8 @@ export async function eliminarComentario(id: number): Promise<void> {
  */
 function rutaDeSubida(destino: DestinoFotos): string {
   switch (destino.tipo) {
-    case 'ciclo':
-      return `/fotos/ciclo/${destino.cicloId}/foto`;
+    case 'intervencion':
+      return `/fotos/intervencion/${destino.intervencionId}/foto`;
     case 'actividad':
       return `/fotos/actividad/${destino.actividadId}/foto`;
     case 'bandeja':
@@ -821,29 +893,29 @@ export async function verBandeja(): Promise<Bandeja> {
 /** Traduce el destino tipado a los ids sueltos que espera el cuerpo JSON. */
 function idsDeDestino(destino: DestinoFotos) {
   return {
-    ...(destino.tipo === 'ciclo' ? { cicloId: destino.cicloId } : {}),
+    ...(destino.tipo === 'intervencion' ? { intervencionId: destino.intervencionId } : {}),
     ...(destino.tipo === 'actividad' ? { actividadId: destino.actividadId } : {}),
     ...(destino.tipo === 'bandeja' ? { bandeja: true } : {}),
   };
 }
 
 /**
- * Saca fotos de la bandeja y las mete en una visita o en una actividad.
+ * Saca fotos de la bandeja y las mete en una intervención o en una actividad.
  *
  * ⚠️ Ya no lleva nombre ni descripción: eran del ÁLBUM que se creaba al
  * clasificar hacia una carpeta (Fase 2c), y con los álbumes retirados el
- * destino ya existe y ya tiene nombre — es la visita.
+ * destino ya existe y ya tiene nombre — es la intervención.
  */
 export async function clasificarFotos(
   fotoIds: number[],
   destino: DestinoFotos,
-): Promise<{ clasificadas: number; cicloId: number | null }> {
+): Promise<{ clasificadas: number; intervencionId: number | null }> {
   if (destino.tipo === 'bandeja')
     throw new Error('Clasificar es sacarlas de la bandeja, no devolverlas.');
 
   const { data } = await api.post<{
     clasificadas: number;
-    cicloId: number | null;
+    intervencionId: number | null;
   }>('/fotos/bandeja/clasificar', { fotoIds, ...idsDeDestino(destino) });
   return data;
 }
@@ -989,12 +1061,10 @@ export async function confirmarImportacion(
 }
 
 // ── Actividades completas (§13) — 9b ──
-
-/** Quién puede ser responsable. Solo id y nombre: sin correos. */
-export async function verAsignables(): Promise<Persona[]> {
-  const { data } = await api.get<Persona[]>('/fotos/actividad-asignables');
-  return data;
-}
+//
+// ⚠️ Aquí estaba `verAsignables`, que pedía `/fotos/actividad-asignables` para
+// el desplegable de «responsable». Se fue con el detalle de la actividad, y la
+// ruta del backend también.
 
 /**
  * Las fotos de una actividad (§15).
@@ -1015,15 +1085,15 @@ export async function verFotosDeActividad(
 // es un parámetro sino el CONJUNTO de rutas: el portal no tiene escrituras,
 // así que no hay una función «crear actividad del portal» que pudiera existir.
 
-/** Las visitas del equipo, en solo lectura (§22). */
-export async function verCiclosPortal(carpetaId: number): Promise<Ciclo[]> {
-  const { data } = await api.get<Ciclo[]>(`/portal/carpeta/${carpetaId}/ciclo`);
+/** Las intervenciones del equipo, en solo lectura (§22). */
+export async function verIntervencionesPortal(carpetaId: number): Promise<Intervencion[]> {
+  const { data } = await api.get<Intervencion[]>(`/portal/carpeta/${carpetaId}/intervencion`);
   return data;
 }
 
-export async function verActividadesPortal(cicloId: number): Promise<Actividad[]> {
+export async function verActividadesPortal(intervencionId: number): Promise<Actividad[]> {
   const { data } = await api.get<Actividad[]>(
-    `/portal/ciclo/${cicloId}/actividad`,
+    `/portal/intervencion/${intervencionId}/actividad`,
   );
   return data;
 }

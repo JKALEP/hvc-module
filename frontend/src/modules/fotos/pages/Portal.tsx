@@ -12,9 +12,11 @@ import { TarjetaCarpeta } from '@/modules/fotos/components/TarjetaCarpeta';
 import { RutaSedes } from '@/modules/fotos/components/RutaSedes';
 import { GaleriaDeFotos } from '@/modules/fotos/components/GaleriaFotos';
 import { PanelActividades } from '@/modules/fotos/components/PanelActividades';
-import { SelectorDeCiclo } from '@/modules/fotos/components/SelectorDeCiclo';
-import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
+import { PanelObservaciones } from '@/modules/fotos/components/PanelObservaciones';
+import { SelectorDeIntervencion } from '@/modules/fotos/components/SelectorDeIntervencion';
+import { useIntervenciones } from '@/modules/fotos/hooks/useIntervenciones';
 import { HiloComentarios } from '@/modules/fotos/components/HiloComentarios';
+import { ComentariosDeLaTanda } from '@/modules/fotos/components/ComentariosDeLaTanda';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
 import { Skeleton } from '@/shared/ui/skeleton';
@@ -43,22 +45,22 @@ export function Portal() {
   const [filtros, setFiltros] = useState<FiltrosGaleria>(SIN_FILTROS);
 
   const { data, isError } = useCarpeta(sedeId, { portal: true });
-  // El cliente ve el historial de visitas igual que un interno, en solo
+  // El cliente ve el historial de intervenciónes igual que un interno, en solo
   // lectura: §22 le da el recorrido completo hasta las fotografías, y sin
-  // saber de qué visita son la lista no dice nada.
-  const { data: ciclos } = useCiclos(sedeId, {
+  // saber de qué intervención son la lista no dice nada.
+  const { data: intervenciones } = useIntervenciones(sedeId, {
     habilitado: data?.carpetaActual?.tipo === 'EQUIPO',
     portal: true,
   });
-  const [cicloElegido, setCicloElegido] = useState<number | null>(null);
-  const ciclo =
-    (ciclos ?? []).find((c) => c.id === cicloElegido) ?? ciclos?.[0] ?? null;
-  // La galeria del portal es la de un CICLO desde la Fase 4, igual que la
-  // interna: el cliente recorre carpeta -> equipo -> visita -> fotos (§22).
-  const galeria = useGaleria(ciclo?.id ?? 0, filtros, true);
+  const [intervencionElegida, setIntervencionElegida] = useState<number | null>(null);
+  const intervencion =
+    (intervenciones ?? []).find((c) => c.id === intervencionElegida) ?? intervenciones?.[0] ?? null;
+  // La galeria del portal es la de una INTERVENCIÓN desde la Fase 4, igual que la
+  // interna: el cliente recorre carpeta -> equipo -> intervención -> fotos (§22).
+  const galeria = useGaleria(intervencion?.id ?? 0, filtros, true);
 
   const cargando = !data && !isError;
-  const fotosDelCiclo = galeria.data?.pages.flatMap((p) => p.fotos) ?? [];
+  const fotosDeLaIntervencion = galeria.data?.pages.flatMap((p) => p.fotos) ?? [];
   const totalFotos = galeria.data?.pages[0]?.totalFotos ?? 0;
   const hayFiltro = filtros.desde !== '' || filtros.hasta !== '';
 
@@ -143,20 +145,38 @@ export function Portal() {
               Las actividades solo existen en un equipo (§13), así que la sección
               aparece cuando la carpeta lo es — igual que en el módulo interno.
           */}
-          {data.carpetaActual?.tipo === 'EQUIPO' && ciclo && (
+          {data.carpetaActual?.tipo === 'EQUIPO' && intervencion && (
             <>
-              <SelectorDeCiclo
+              <SelectorDeIntervencion
                 carpetaId={sedeId}
-                ciclos={ciclos}
-                cicloId={ciclo.id}
-                onElegir={setCicloElegido}
+                intervenciones={intervenciones}
+                intervencionId={intervencion.id}
+                onElegir={setIntervencionElegida}
+                permiso={data.permiso}
+                ramaCerrada={data.ramaCerrada}
+                portal
+              />
+              <PanelObservaciones
+                intervencionId={intervencion.id}
+                intervencionCerrada={intervencion.cerradoEn !== null}
                 permiso={data.permiso}
                 ramaCerrada={data.ramaCerrada}
                 portal
               />
               <PanelActividades
-                cicloId={ciclo.id}
-                cicloCerrado={ciclo.cerradoEn !== null}
+                intervencionId={intervencion.id}
+                intervencionCerrada={intervencion.cerradoEn !== null}
+                permiso={data.permiso}
+                ramaCerrada={data.ramaCerrada}
+                portal
+              />
+              {/* §22 le da al cliente el recorrido completo, y eso incluye lo
+                  que se dijo de la tanda —no solo de cada foto—. En solo
+                  lectura, como todo lo suyo: la prop `portal` apaga la
+                  escritura sin mirar el grado, porque `PortalController` no
+                  tiene ni una ruta que escriba. */}
+              <ComentariosDeLaTanda
+                intervencionId={intervencion.id}
                 permiso={data.permiso}
                 ramaCerrada={data.ramaCerrada}
                 portal
@@ -230,7 +250,7 @@ export function Portal() {
           </div>
 
           <GaleriaDeFotos
-            fotos={fotosDelCiclo}
+            fotos={fotosDeLaIntervencion}
             cargando={galeria.isLoading}
             hayMas={Boolean(galeria.hasNextPage)}
             cargandoMas={galeria.isFetchingNextPage}

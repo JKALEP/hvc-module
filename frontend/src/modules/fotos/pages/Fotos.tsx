@@ -14,9 +14,11 @@ import { DialogoNombre } from '@/shared/components/DialogoNombre';
 import { DialogoCompartir } from '@/modules/fotos/components/DialogoCompartir';
 import { PanelSubida } from '@/modules/fotos/components/PanelSubida';
 import { PanelActividades } from '@/modules/fotos/components/PanelActividades';
-import { SelectorDeCiclo } from '@/modules/fotos/components/SelectorDeCiclo';
+import { SelectorDeIntervencion } from '@/modules/fotos/components/SelectorDeIntervencion';
 import { TipoDeSistema } from '@/modules/fotos/components/TipoDeSistema';
-import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
+import { PanelObservaciones } from '@/modules/fotos/components/PanelObservaciones';
+import { ComentariosDeLaTanda } from '@/modules/fotos/components/ComentariosDeLaTanda';
+import { useIntervenciones } from '@/modules/fotos/hooks/useIntervenciones';
 import { CamposDeEquipo } from '@/modules/fotos/components/CamposDeEquipo';
 import { FormularioEquipo } from '@/modules/fotos/components/FormularioEquipo';
 import { HiloComentarios } from '@/modules/fotos/components/HiloComentarios';
@@ -98,19 +100,19 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
   const { data, isError } = useCarpeta(sedeId, { q, orden });
   const esEquipo = data?.carpetaActual?.tipo === 'EQUIPO';
 
-  // ⚠️ La visita elegida se guarda como `number | null` y NO se inicializa
-  // con el ciclo en curso: al montar todavía no hay ciclos cargados. `null`
+  // ⚠️ La intervención elegida se guarda como `number | null` y NO se inicializa
+  // con la intervención en curso: al montar todavía no hay intervenciones cargados. `null`
   // significa «la más reciente», que es la que el backend manda primero, y
   // así el valor por defecto sale del dato en vez de un efecto que lo
   // corrija después —lo mismo que hacen los grupos abiertos del sidebar—.
-  const { data: ciclos } = useCiclos(sedeId, { habilitado: esEquipo });
-  const [cicloElegido, setCicloElegido] = useState<number | null>(null);
-  const ciclo =
-    (ciclos ?? []).find((c) => c.id === cicloElegido) ?? ciclos?.[0] ?? null;
-  // La galeria es del CICLO desde la Fase 4, no de la carpeta. Con `?? 0`
-  // el hook se desactiva solo mientras no hay visita elegida.
-  const galeria = useGaleria(ciclo?.id ?? 0, filtros);
-  const { data: autores } = useAutores(ciclo?.id ?? 0, ciclo !== null);
+  const { data: intervenciones } = useIntervenciones(sedeId, { habilitado: esEquipo });
+  const [intervencionElegida, setIntervencionElegida] = useState<number | null>(null);
+  const intervencion =
+    (intervenciones ?? []).find((c) => c.id === intervencionElegida) ?? intervenciones?.[0] ?? null;
+  // La galeria es de la INTERVENCIÓN desde la Fase 4, no de la carpeta. Con `?? 0`
+  // el hook se desactiva solo mientras no hay intervención elegida.
+  const galeria = useGaleria(intervencion?.id ?? 0, filtros);
+  const { data: autores } = useAutores(intervencion?.id ?? 0, intervencion !== null);
 
   const crear = useCrearCarpeta();
   const editar = useEditarCarpeta();
@@ -119,7 +121,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
 
   const cargando = !data && !isError;
   const cerrar = () => setDialogo(null);
-  const fotosDelCiclo = galeria.data?.pages.flatMap((p) => p.fotos) ?? [];
+  const fotosDeLaIntervencion = galeria.data?.pages.flatMap((p) => p.fotos) ?? [];
   const totalFotos = galeria.data?.pages[0]?.totalFotos ?? 0;
   const secciones = seccion
     ? (data?.secciones ?? []).filter((s) => s.clave === seccion)
@@ -327,22 +329,35 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
           normal — nada nuevo, solo reordenado. */}
       {sedeId !== null && data && esEquipo && !buscando && (
         <div className="space-y-4">
-          {/* Qué visita se está mirando, arriba del todo: lo de abajo
+          {/* Qué intervención se está mirando, arriba del todo: lo de abajo
               —actividades y, en fases siguientes, evidencia y observaciones—
               pertenece a UNA de ellas. */}
-          <SelectorDeCiclo
+          <SelectorDeIntervencion
             carpetaId={sedeId}
-            ciclos={ciclos}
-            cicloId={ciclo?.id ?? null}
-            onElegir={setCicloElegido}
+            intervenciones={intervenciones}
+            intervencionId={intervencion?.id ?? null}
+            onElegir={setIntervencionElegida}
             permiso={data.permiso}
             ramaCerrada={data.ramaCerrada}
           />
 
+          {/* Lo que queda pendiente, ANTES de la ficha y de las pestañas:
+              §8.1 lo pide siempre a la vista, y es lo primero que hay que
+              saber al entrar a un equipo — incluido lo que se arrastra de
+              intervenciones anteriores. */}
+          {intervencion && (
+            <PanelObservaciones
+              intervencionId={intervencion.id}
+              intervencionCerrada={intervencion.cerradoEn !== null}
+              permiso={data.permiso}
+              ramaCerrada={data.ramaCerrada}
+            />
+          )}
+
           <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
             <div className="space-y-4">
-              {/* Describe la MÁQUINA, no la visita: por eso va con la ficha
-                  del equipo y no con el selector de ciclo. */}
+              {/* Describe la MÁQUINA, no la intervención: por eso va con la ficha
+                  del equipo y no con el selector de intervención. */}
               <TipoDeSistema
                 carpetaId={sedeId}
                 tipoSistema={data.carpetaActual?.tipoSistema ?? null}
@@ -373,10 +388,22 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
             <PestanasFicha
               contenidoFotos={
                 <div className="space-y-4">
-                  {/* Con el ciclo cerrado no hay donde subir: el backend lo
+                  {/* Con la intervención cerrada no hay donde subir: el backend lo
                       rechaza, asi que el formulario no se pinta. */}
-                  {data.puedeEscribir && ciclo && ciclo.cerradoEn === null && (
-                    <PanelSubida cicloId={ciclo.id} />
+                  {data.puedeEscribir && intervencion && intervencion.cerradoEn === null && (
+                    <PanelSubida intervencionId={intervencion.id} />
+                  )}
+
+                  {/* El comentario DEL CONJUNTO. Va aquí y no al lado de la
+                      ficha porque aquél es del EQUIPO y éste de ESTA
+                      intervención. Los dos son opcionales, como los de cada
+                      foto en el visor. */}
+                  {intervencion && (
+                    <ComentariosDeLaTanda
+                      intervencionId={intervencion.id}
+                      permiso={data.permiso}
+                      ramaCerrada={data.ramaCerrada}
+                    />
                   )}
 
                   <FiltrosDeGaleria
@@ -387,7 +414,7 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                   />
 
                   <GaleriaDeFotos
-                    fotos={fotosDelCiclo}
+                    fotos={fotosDeLaIntervencion}
                     cargando={galeria.isLoading}
                     hayMas={Boolean(galeria.hasNextPage)}
                     cargandoMas={galeria.isFetchingNextPage}
@@ -399,9 +426,17 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                       titulo: hayFiltro
                         ? 'Ninguna foto con esos filtros'
                         : 'Sin fotos',
+                      // ⚠️ El vacío NO puede prometer «el formulario de
+                      // arriba» sin mirar si está: `PanelSubida` no se pinta
+                      // con la intervención cerrada, así que en ese caso el
+                      // texto mandaba a buscar algo que no existe. Se ve solo
+                      // en una intervención cerrada y sin fotos, que es justo
+                      // lo que uno abre al repasar el historial.
                       descripcion: hayFiltro
                         ? 'Prueba a ampliar el rango de fechas o a quitar el filtro por autor.'
-                        : data.puedeEscribir
+                        : intervencion && intervencion.cerradoEn !== null
+                          ? 'Esta intervención se cerró sin fotos sueltas. Reábrela si hay que añadir alguna.'
+                          : data.puedeEscribir
                           ? 'Sube las primeras con el formulario de arriba.'
                           : 'Todavía no hay fotos aquí.',
                     }}
@@ -409,10 +444,10 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                 </div>
               }
               contenidoActividades={
-                ciclo ? (
+                intervencion ? (
                   <PanelActividades
-                    cicloId={ciclo.id}
-                    cicloCerrado={ciclo.cerradoEn !== null}
+                    intervencionId={intervencion.id}
+                    intervencionCerrada={intervencion.cerradoEn !== null}
                     permiso={data.permiso}
                     ramaCerrada={data.ramaCerrada}
                   />

@@ -456,13 +456,13 @@ function VisorFotoDialog({
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
-// La galería de una VISITA
+// La galería de una INTERVENCIÓN
 //
 // ⚠️ Aquí había también `TarjetaAlbum`, `GrillaDeAlbumes` y
 // `DetalleAlbumDialog`: la pestaña «Álbumes» y su detalle. Se fueron con los
 // álbumes en la Fase 4 del rediseño. La galería plana era la otra pestaña y
 // es la que queda, porque es la que sigue teniendo sentido: las fotos de la
-// visita que se está mirando.
+// intervención que se está mirando.
 // ─────────────────────────────────────────────────────────────
 
 export function GaleriaDeFotos({

@@ -7,13 +7,13 @@ import type { TipoSistema } from '@/modules/fotos/types';
 /**
  * Qué clase de sistema es el equipo (Fase 2).
  *
- * Va en la ficha del equipo y no en la cabecera del ciclo porque describe la
- * MÁQUINA, no la visita: no cambia de un ciclo al siguiente.
+ * Va en la ficha del equipo y no en la cabecera de la intervención porque describe la
+ * MÁQUINA, no la intervención: no cambia de una intervención al siguiente.
  *
- * ⚠️ Corregirlo NO reescribe las visitas, ni las cerradas ni la que está en
+ * ⚠️ Corregirlo NO reescribe las intervenciones, ni las cerradas ni la que está en
  * curso: lo que cambia es qué se propone la próxima vez. El aviso lo dice,
  * porque es justo lo que se espera al cambiarlo y no pasa — para traer las
- * nuevas al ciclo abierto está el botón «Del catálogo» de las actividades.
+ * nuevas a la intervención abierta está el botón «Del catálogo» de las actividades.
  */
 export function TipoDeSistema({
   carpetaId,

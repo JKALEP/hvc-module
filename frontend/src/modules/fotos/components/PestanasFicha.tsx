@@ -5,11 +5,11 @@ import { cn } from '@/shared/lib/utils';
 type IdPestana = 'actividades' | 'fotos';
 
 /**
- * Pestañas de contenido de la VISITA: Actividades / Fotos.
+ * Pestañas de contenido de la INTERVENCIÓN: Actividades / Fotos.
  *
  * ⚠️ Eran tres —Álbumes / Fotos / Actividades— y la primera se fue con los
  * álbumes en la Fase 4. Y el orden cambió a propósito: **Actividades primero**,
- * porque es el checklist de la visita y lo que se viene a hacer; las fotos
+ * porque es el checklist de la intervención y lo que se viene a hacer; las fotos
  * sueltas son lo que no encaja en ninguna actividad, no el punto de partida.
  *
  * Comentarios YA NO vive aquí: es un panel siempre visible al lado de la

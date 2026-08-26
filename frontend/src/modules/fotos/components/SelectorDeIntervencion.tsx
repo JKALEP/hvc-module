@@ -8,12 +8,12 @@ import { alcanza } from '@/modules/fotos/lib/permisos';
 import { ESTADO_A_VARIANTE } from '@/modules/fotos/lib/colores';
 import { useEstadosEquipo } from '@/modules/fotos/hooks/useEstadosEquipo';
 import {
-  useAbrirCiclo,
-  useCerrarCiclo,
-  useReabrirCiclo,
-  useCambiarEstadoCiclo,
-} from '@/modules/fotos/hooks/useCiclos';
-import type { Ciclo, PermisoCarpeta } from '@/modules/fotos/types';
+  useAbrirIntervencion,
+  useCerrarIntervencion,
+  useReabrirIntervencion,
+  useCambiarEstadoIntervencion,
+} from '@/modules/fotos/hooks/useIntervenciones';
+import type { Intervencion, PermisoCarpeta } from '@/modules/fotos/types';
 
 /** El `<select>` desnudo del sistema. Mismo alto y foco que el `Input`. */
 const CLASES_SELECT =
@@ -22,22 +22,22 @@ const CLASES_SELECT =
   'focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50';
 
 /**
- * La cabecera de un equipo: qué visita se está mirando y cómo quedó.
+ * La cabecera de un equipo: qué intervención se está mirando y cómo quedó.
  *
  * Es lo primero que se ve al abrir un equipo porque todo lo de dentro
  * —actividades, y en fases siguientes evidencia y observaciones— pertenece a
- * UNA visita, y mirar la lista sin saber cuál se está mirando es el error
+ * UNA intervención, y mirar la lista sin saber cuál se está mirando es el error
  * que este componente existe para hacer imposible.
  *
- * ⚠️ **El estado del equipo se edita solo en el ciclo EN CURSO.** Un ciclo
- * cerrado es historial: decía «inoperativo» el día que se cerró y eso no se
+ * ⚠️ **El estado del equipo se edita solo en la intervención EN CURSO.** Una intervención
+ * cerrada es historial: decía «inoperativo» el día que se cerró y eso no se
  * retoca sin reabrirlo. El `<select>` se deshabilita en vez de esconderse,
  * para que el valor siga leyéndose.
  */
-export function SelectorDeCiclo({
+export function SelectorDeIntervencion({
   carpetaId,
-  ciclos,
-  cicloId,
+  intervenciones,
+  intervencionId,
   onElegir,
   permiso,
   ramaCerrada,
@@ -45,49 +45,49 @@ export function SelectorDeCiclo({
 }: {
   carpetaId: number;
   /** El historial, del más reciente al más antiguo, como lo manda el backend. */
-  ciclos: Ciclo[] | undefined;
-  cicloId: number | null;
+  intervenciones: Intervencion[] | undefined;
+  intervencionId: number | null;
   onElegir: (id: number) => void;
   permiso: PermisoCarpeta | null;
   ramaCerrada: boolean;
   /** Portal del cliente (§22): se lee, no se escribe. */
   portal?: boolean;
 }) {
-  const abrir = useAbrirCiclo();
-  const cerrar = useCerrarCiclo();
-  const reabrir = useReabrirCiclo();
-  const cambiarEstado = useCambiarEstadoCiclo();
+  const abrir = useAbrirIntervencion();
+  const cerrar = useCerrarIntervencion();
+  const reabrir = useReabrirIntervencion();
+  const cambiarEstado = useCambiarEstadoIntervencion();
   // Solo los activos: un estado retirado no se vuelve a ofrecer, aunque el
-  // ciclo que ya lo tenía lo conserve.
+  // intervención que ya lo tenía lo conserve.
   const { data: estados } = useEstadosEquipo(true);
 
-  if (!ciclos)
+  if (!intervenciones)
     return (
       <div className="flex justify-center py-4">
         <Spinner />
       </div>
     );
 
-  const actual = ciclos.find((c) => c.id === cicloId) ?? ciclos[0] ?? null;
-  const hayAbierto = ciclos.some((c) => c.cerradoEn === null);
+  const actual = intervenciones.find((c) => c.id === intervencionId) ?? intervenciones[0] ?? null;
+  const hayAbierto = intervenciones.some((c) => c.cerradoEn === null);
   const puedeEscribir = !portal && alcanza(permiso, 'EDICION') && !ramaCerrada;
   const enCurso = actual !== null && actual.cerradoEn === null;
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
-      <label className="text-sm text-muted-foreground" htmlFor="ciclo">
-        Visita
+      <label className="text-sm text-muted-foreground" htmlFor="intervencion">
+        Intervención
       </label>
       <select
-        id="ciclo"
+        id="intervencion"
         className={CLASES_SELECT}
         value={actual?.id ?? ''}
         onChange={(e) => onElegir(Number(e.target.value))}
       >
-        {ciclos.map((c) => (
+        {intervenciones.map((c) => (
           <option key={c.id} value={c.id}>
-            Ciclo {c.numero} · {formatFechaCorta(c.abiertoEn)}
-            {c.cerradoEn ? ' (cerrado)' : ' (en curso)'}
+            Intervención {c.numero} · {formatFechaCorta(c.abiertoEn)}
+            {c.cerradoEn ? ' (cerrada)' : ' (en curso)'}
           </option>
         ))}
       </select>
@@ -95,7 +95,7 @@ export function SelectorDeCiclo({
       {actual?.cerradoEn && (
         <Badge variant="secondary" className="gap-1">
           <LockIcon className="size-3" />
-          Cerrado {formatFechaCorta(actual.cerradoEn)}
+          Cerrada {formatFechaCorta(actual.cerradoEn)}
         </Badge>
       )}
 
@@ -104,7 +104,7 @@ export function SelectorDeCiclo({
           Estado
         </label>
         {/* El estado vigente se pinta SIEMPRE como insignia, también en un
-            ciclo cerrado donde el select está apagado: es el dato que se
+            intervención cerrada donde el select está apagado: es el dato que se
             viene a consultar. */}
         {actual?.estado ? (
           <Badge variant={ESTADO_A_VARIANTE[actual.estado.color]}>
@@ -122,7 +122,7 @@ export function SelectorDeCiclo({
             onChange={(e) =>
               actual &&
               cambiarEstado.mutate({
-                cicloId: actual.id,
+                intervencionId: actual.id,
                 estadoId: e.target.value ? Number(e.target.value) : null,
               })
             }
@@ -144,11 +144,11 @@ export function SelectorDeCiclo({
             onClick={() => cerrar.mutate(actual.id)}
           >
             <LockIcon className="size-4" />
-            Cerrar ciclo
+            Cerrar intervencion
           </Button>
         )}
 
-        {/* Reabrir vive junto al ciclo cerrado que se está mirando, y solo se
+        {/* Reabrir vive junto a la intervención cerrada que se está mirando, y solo se
             ofrece si no hay otro en curso: con uno abierto el backend lo
             rechaza, y un botón que contesta 400 es peor que no tenerlo. */}
         {puedeEscribir && actual?.cerradoEn && !hayAbierto && (
@@ -169,7 +169,7 @@ export function SelectorDeCiclo({
             disabled={abrir.isPending}
             onClick={() =>
               abrir.mutate(carpetaId, {
-                // Al abrir se salta a la visita nueva: es donde se va a
+                // Al abrir se salta a la intervención nueva: es donde se va a
                 // trabajar, y dejar la pantalla en la anterior invita a
                 // escribir en el sitio equivocado.
                 onSuccess: (c) => onElegir(c.id),
@@ -177,7 +177,7 @@ export function SelectorDeCiclo({
             }
           >
             <PlusIcon className="size-4" />
-            Nueva visita
+            Nueva intervención
           </Button>
         )}
       </div>

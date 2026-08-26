@@ -6,7 +6,6 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   PlusIcon,
-  PencilIcon,
   Trash2Icon,
 } from 'lucide-react';
 
@@ -15,10 +14,11 @@ import { PanelFotos } from '@/modules/fotos/components/PanelFotos';
 import { Badge } from '@/shared/ui/badge';
 import { Button } from '@/shared/ui/button';
 import { Input } from '@/shared/ui/input';
+import { Select } from '@/shared/ui/select';
 import { Spinner } from '@/shared/ui/spinner';
 import { BotonesExportar } from '@/modules/fotos/components/BotonesExportar';
 import { cn } from '@/shared/lib/utils';
-import { formatActualizado, formatFechaCorta } from '@/shared/lib/format';
+import { formatActualizado } from '@/shared/lib/format';
 import {
   useActividades,
   useCrearActividad,
@@ -28,15 +28,28 @@ import {
 import { useAuth } from '@/modules/auth/hooks/useAuth';
 import { alcanza } from '@/modules/fotos/lib/permisos';
 import { HiloComentarios } from './HiloComentarios';
-import { DialogoActividad } from './DialogoActividad';
 import { DialogoDesdeCatalogo } from './DialogoDesdeCatalogo';
+import { ObservacionesDeActividad } from './ObservacionesDeActividad';
 import { FotosDeActividad } from './FotosDeActividad';
 import type {
   EstadoActividad,
-  PrioridadActividad,
+  TipoEvidencia,
   PermisoCarpeta,
   Actividad,
 } from '@/modules/fotos/types';
+
+/**
+ * Qué evidencia se le pide, como se lee al elegirla.
+ *
+ * Los MISMOS textos que en el catálogo de administración: si divergen, la
+ * propuesta y lo propuesto dejan de parecer lo mismo. `Record` completo, así
+ * que añadir un tipo no compila hasta nombrarlo.
+ */
+const ETIQUETA_TIPO_EVIDENCIA: Record<TipoEvidencia, string> = {
+  NINGUNA: 'No se pide foto',
+  UNA: 'Una foto',
+  ANTES_DESPUES: 'Antes y después',
+};
 
 const ETIQUETA_ESTADO: Record<EstadoActividad, string> = {
   PENDIENTE: 'Pendiente',
@@ -60,20 +73,6 @@ function ETIQUETA_EVIDENCIA(a: Actividad) {
   return 'Faltan antes y después';
 }
 
-/**
- * Tono de la prioridad. NO usa la escalera de `personal/lib/umbrales.ts`:
- * aquélla traduce PORCENTAJES contra un objetivo, y esto es un enum de tres
- * valores sin nada que medir. Es el mismo criterio por el que el mapa
- * ALTA/MEDIA/BAJA de `ListaAlertas` tampoco vive allí.
- */
-const VARIANTE_PRIORIDAD: Record<
-  PrioridadActividad,
-  'secondary' | 'outline' | 'warning'
-> = {
-  BAJA: 'secondary',
-  MEDIA: 'outline',
-  ALTA: 'warning',
-};
 
 /**
  * Las actividades de un equipo (§13).
@@ -86,43 +85,41 @@ const VARIANTE_PRIORIDAD: Record<
  * botones existen, con la misma tabla que hace cumplir el service.
  */
 export function PanelActividades({
-  cicloId,
-  cicloCerrado,
+  intervencionId,
+  intervencionCerrada,
   permiso,
   ramaCerrada,
   portal = false,
 }: {
-  /** La visita que se está mirando. Las actividades son suyas, no de la carpeta. */
-  cicloId: number;
+  /** La intervención que se está mirando. Las actividades son suyas, no de la carpeta. */
+  intervencionId: number;
   /**
    * El segundo candado, y NO es el permiso.
    *
-   * Una rama archivada dice «esta obra terminó»; un ciclo cerrado dice «esta
-   * visita terminó». Los dos apagan la escritura y pueden darse por
+   * Una rama archivada dice «esta obra terminó»; una intervención cerrada dice «esta
+   * intervención terminó». Los dos apagan la escritura y pueden darse por
    * separado, así que llegan por separado y el aviso de cada uno es
-   * distinto: del archivado no se sale desde aquí, del ciclo sí —reabriendo,
+   * distinto: del archivado no se sale desde aquí, de la intervención sí —reabriendo,
    * que es una decisión con su entrada en la bitácora—.
    */
-  cicloCerrado: boolean;
+  intervencionCerrada: boolean;
   permiso: PermisoCarpeta | null;
   ramaCerrada: boolean;
   /** Portal del cliente (§22): lee por otras rutas y nunca escribe. */
   portal?: boolean;
 }) {
   const { usuario } = useAuth();
-  const { data: actividades, isError } = useActividades(cicloId, { portal });
+  const { data: actividades, isError } = useActividades(intervencionId, { portal });
   const crear = useCrearActividad();
   const marcar = useMarcarActividad();
   const eliminar = useEliminarActividad();
 
   const [titulo, setTitulo] = useState('');
   const [abierta, setAbierta] = useState<number | null>(null);
-  // `undefined` = cerrado · `null` = crear · actividad = editarla. Tres estados
-  // de UN diálogo, igual que en `DialogoAlbum`.
-  const [enEdicion, setEnEdicion] = useState<Actividad | null | undefined>(
-    undefined,
-  );
   const [desdeCatalogo, setDesdeCatalogo] = useState(false);
+  // Lo único que se elige al crear, además del nombre: decide si al subir se
+  // pedirá el antes y el después. UNA es el defecto del servidor.
+  const [evidencia, setEvidencia] = useState<TipoEvidencia>('UNA');
 
   // ⚠️ En el portal la escritura se apaga SIEMPRE, no se deduce del grado.
   // A un cliente se le puede compartir con EDICION (§10 lo permite), pero
@@ -130,15 +127,15 @@ export function PanelActividades({
   // sería prometer algo que responde 404. El grado sigue mandando dentro del
   // módulo interno; aquí manda el portal.
   const puedeEscribir =
-    !portal && alcanza(permiso, 'EDICION') && !ramaCerrada && !cicloCerrado;
+    !portal && alcanza(permiso, 'EDICION') && !ramaCerrada && !intervencionCerrada;
   const puedeModerar =
-    !portal && alcanza(permiso, 'TOTAL') && !ramaCerrada && !cicloCerrado;
+    !portal && alcanza(permiso, 'TOTAL') && !ramaCerrada && !intervencionCerrada;
 
   const anadir = () => {
     const limpio = titulo.trim();
     if (!limpio) return;
     crear.mutate(
-      { cicloId, payload: { titulo: limpio } },
+      { intervencionId, payload: { titulo: limpio, evidencia } },
       { onSuccess: () => setTitulo('') },
     );
   };
@@ -183,25 +180,25 @@ export function PanelActividades({
 
         {!portal && actividades && actividades.length > 0 && (
           <BotonesExportar
-            ruta={`/fotos/ciclo/${cicloId}/actividad/exportar`}
+            ruta={`/fotos/intervencion/${intervencionId}/actividad/exportar`}
             nombre="actividades"
           />
         )}
       </div>
 
-      {/* Un ciclo cerrado se lee entero pero no se toca. Se dice aquí, junto a
+      {/* Una intervención cerrada se lee entero pero no se toca. Se dice aquí, junto a
           la lista, y no arriba con el selector: es donde alguien va a
           intentar escribir. */}
-      {cicloCerrado && !portal && (
+      {intervencionCerrada && !portal && (
         <p className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          Este ciclo está cerrado: se puede consultar, no modificar. Para
+          Esta intervención está cerrada: se puede consultar, no modificar. Para
           corregir algo hay que reabrirlo, y queda registrado.
         </p>
       )}
 
       {actividades?.length === 0 && (
         <p className="text-sm text-muted-foreground">
-          Todavía no hay actividades en esta visita.
+          Todavía no hay actividades en esta intervención.
         </p>
       )}
 
@@ -225,47 +222,55 @@ export function PanelActividades({
               })
             }
             onEliminar={() => eliminar.mutate(t.id)}
-            onEditar={() => setEnEdicion(t)}
           />
         ))}
       </ul>
 
-      {enEdicion !== undefined && (
-        <DialogoActividad
-          // El `key` hace que arranque con los datos ya dentro. Ver su cabecera.
-          key={enEdicion?.id ?? 'nueva'}
-          cicloId={cicloId}
-          actividad={enEdicion}
-          abierto
-          onCerrar={() => setEnEdicion(undefined)}
-        />
-      )}
-
       {desdeCatalogo && (
         <DialogoDesdeCatalogo
-          cicloId={cicloId}
+          intervencionId={intervencionId}
           yaPuestas={new Set((actividades ?? []).map((a) => a.titulo))}
           onCerrar={() => setDesdeCatalogo(false)}
         />
       )}
 
+      {/* ⚠️ Ésta es la ÚNICA forma de crear una actividad, y crea una que NO
+          está en el catálogo general: se queda en este equipo y no se propone
+          al dar de alta otro. Llevarla al catálogo es una acción aparte, desde
+          Configuración.
+
+          Al lado, «Con detalle…» abría un formulario con descripción,
+          prioridad, fecha y responsable. Se retiró entero: en obra nadie lo
+          rellenaba —de 50 actividades entre las dos bases, ninguna tenía uno
+          solo de los cuatro—. Lo único que sí se elige en el momento es la
+          EVIDENCIA, porque decide si al subir se pedirá el antes y el
+          después. */}
       {puedeEscribir && (
-        <div className="mt-3 flex gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <Input
+            className="min-w-48 flex-1"
             placeholder="Nueva actividad…"
             value={titulo}
             onChange={(e) => setTitulo(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && anadir()}
           />
+          <Select
+            className="w-44"
+            aria-label="Evidencia que se le pedirá"
+            value={evidencia}
+            onChange={(e) => setEvidencia(e.target.value as TipoEvidencia)}
+          >
+            {(Object.keys(ETIQUETA_TIPO_EVIDENCIA) as TipoEvidencia[]).map(
+              (v) => (
+                <option key={v} value={v}>
+                  {ETIQUETA_TIPO_EVIDENCIA[v]}
+                </option>
+              ),
+            )}
+          </Select>
           <Button onClick={anadir} disabled={!titulo.trim() || crear.isPending}>
             <PlusIcon />
             Añadir
-          </Button>
-          {/* La alta rápida pide solo el título —en obra se apunta y ya—; el
-              formulario completo de §13 está a un clic para cuando hace falta
-              asignar responsable, prioridad o fecha. */}
-          <Button variant="outline" onClick={() => setEnEdicion(null)}>
-            Con detalle…
           </Button>
         </div>
       )}
@@ -291,7 +296,6 @@ function FilaActividad({
   onAlternar,
   onMarcar,
   onEliminar,
-  onEditar,
 }: {
   actividad: Actividad;
   permiso: PermisoCarpeta | null;
@@ -305,7 +309,6 @@ function FilaActividad({
   onAlternar: () => void;
   onMarcar: () => void;
   onEliminar: () => void;
-  onEditar: () => void;
 }) {
   const completada = actividad.estado === 'COMPLETADA';
 
@@ -374,11 +377,6 @@ function FilaActividad({
             <Badge variant={completada ? 'secondary' : 'outline'}>
               {ETIQUETA_ESTADO[actividad.estado]}
             </Badge>
-            {actividad.prioridad && (
-              <Badge variant={VARIANTE_PRIORIDAD[actividad.prioridad]}>
-                {actividad.prioridad}
-              </Badge>
-            )}
             {/* ⚠️ La señal de evidencia (Fase 3). Es un AVISO, no un bloqueo:
                 la actividad se completa igual, y el aviso sigue ahí. Se pinta
                 en `warning` y no en `destructive` porque «falta documentar»
@@ -389,8 +387,6 @@ function FilaActividad({
                 {ETIQUETA_EVIDENCIA(actividad)}
               </Badge>
             )}
-            {actividad.responsable && <span>{actividad.responsable.nombre}</span>}
-            {actividad.fecha && <span>{formatFechaCorta(actividad.fecha)}</span>}
           </div>
 
           {/* Lo que §13 pide registrar del check: cuándo y quién. */}
@@ -398,12 +394,6 @@ function FilaActividad({
             <p className="mt-1 text-xs text-muted-foreground">
               Completada por {actividad.completadaPor.nombre} ·{' '}
               {formatActualizado(actividad.completadaEn)}
-            </p>
-          )}
-
-          {actividad.descripcion && (
-            <p className="mt-1 text-sm text-muted-foreground">
-              {actividad.descripcion}
             </p>
           )}
 
@@ -441,6 +431,16 @@ function FilaActividad({
                 ramaCerrada={ramaCerrada}
                 portal={portal}
               />
+              {/* Lo que queda pendiente EN esta actividad. Va entre las
+                  fotos y la conversación: es un hallazgo, no un comentario —
+                  se resuelve, no se responde. */}
+              <ObservacionesDeActividad
+                actividadId={actividad.id}
+                puedeEscribir={puedeEscribir}
+                puedeModerar={puedeModerar}
+                usuarioId={usuarioId}
+                portal={portal}
+              />
               <HiloComentarios
                 entidad="actividad"
                 entidadId={actividad.id}
@@ -455,19 +455,12 @@ function FilaActividad({
         {/* Borrar la PROPIA basta con EDICION; la ajena exige TOTAL. Es la
             misma distinción que §5 hace con las fotos, y la misma que hace
             cumplir el service — con `puedeModerar` a secas, quien creó una
-            actividad no vería el botón para retirarla. */}
-        {puedeEscribir && (
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            aria-label={`Editar ${actividad.titulo}`}
-            title={`Editar ${actividad.titulo}`}
-            onClick={onEditar}
-          >
-            <PencilIcon />
-          </Button>
-        )}
+            actividad no vería el botón para retirarla.
 
+            El lápiz que había al lado abría el formulario de detalle, que se
+            retiró: sin descripción, prioridad, fecha ni responsable no queda
+            nada que editar salvo el nombre, y para eso no hace falta un
+            diálogo. */}
         {(actividad.creadoPor.id === usuarioId ? puedeEscribir : puedeModerar) && (
           <Button
             size="icon-sm"

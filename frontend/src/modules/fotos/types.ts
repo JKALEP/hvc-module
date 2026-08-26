@@ -44,16 +44,23 @@ export interface CarpetaListada {
    */
   tipo: 'CARPETA' | 'EQUIPO';
   /**
-   * El estado del equipo en su ciclo MÁS RECIENTE (§7), para verlo sin entrar.
+   * El estado del equipo en su intervención MÁS RECIENTE (§7), para verlo sin entrar.
    *
-   * `null` en una carpeta corriente —no tiene ciclos— y en un equipo cuya
-   * visita en curso todavía no se ha revisado.
+   * `null` en una carpeta corriente —no tiene intervenciones— y en un equipo cuya
+   * intervención en curso todavía no se ha revisado.
    *
    * ⚠️ Se llama `estadoEquipo` y no `estado` porque la tarjeta YA tuvo un
    * `estado` que significaba otra cosa: el `EstadoSede` ACTIVA/INACTIVA que
    * v3 retiró.
    */
   estadoEquipo: EstadoEquipo | null;
+  /**
+   * Cuántas observaciones siguen abiertas en este equipo (Fase 5).
+   *
+   * 0 en una carpeta corriente: las observaciones son del equipo. Va en la
+   * tarjeta por lo mismo que el estado — saber qué falta sin entrar.
+   */
+  observacionesPendientes: number;
 }
 
 /**
@@ -126,15 +133,15 @@ export interface FotoDeGaleria {
   subidaPor: { id: number; nombre: string } | null;
   url: string;
   urlMiniatura: string;
-  /** Cuántos comentarios tiene. Solo en la galería del ciclo. */
+  /** Cuántos comentarios tiene. Solo en la galería de la intervención. */
   comentarios?: number;
 }
 
 /**
- * La galería de una VISITA: una lista plana de fotos, paginada por cursor.
+ * La galería de una INTERVENCIÓN: una lista plana de fotos, paginada por cursor.
  *
  * ⚠️ Tenía un nivel de ÁLBUM en medio (`AlbumDeGaleria`), con las fotos
- * anidadas dentro. Se retiró en la Fase 4: el agrupador es el ciclo, y ese
+ * anidadas dentro. Se retiró en la Fase 4: el agrupador es la intervención, y ese
  * ya lo elige la pantalla antes de pedir esto. Se gana lo que costaba el
  * nivel de más — una foto se busca por su fecha o por quién la subió, no
  * por en qué tanda entró.
@@ -146,7 +153,7 @@ export interface Galeria {
   totalFotos: number;
 }
 
-/** Quién ha subido fotos a una visita. Para el filtro de la galería. */
+/** Quién ha subido fotos a una intervención. Para el filtro de la galería. */
 export interface AutorDeCarpeta {
   usuarioId: number;
   nombre: string;
@@ -160,8 +167,8 @@ export interface FiltrosGaleria {
 }
 
 export interface ResultadoSubida {
-  /** A qué visita fueron. `null` en la bandeja y en las de actividad. */
-  cicloId: number | null;
+  /** A qué intervención fueron. `null` en la bandeja y en las de actividad. */
+  intervencionId: number | null;
   subidas: number;
   fallidas: { archivo: string; motivo: string }[];
   bytesGuardados: number;
@@ -313,7 +320,7 @@ export interface CampoDeCarpeta {
 
 // ── Actividades (§13) y comentarios (§14) ──
 
-// ── Ciclos y estado del equipo (Fase 1 del rediseño) ──
+// ── Intervenciones y estado del equipo (Fase 1 del rediseño) ──
 
 /**
  * La paleta de los estados de equipo. Cerrada, como la de las carpetas.
@@ -335,18 +342,18 @@ export interface EstadoEquipo {
   color: ColorEstado;
   orden: number;
   activo: boolean;
-  /** Cuántos ciclos lo usan. Solo llega en la pantalla de administración. */
-  _count?: { ciclos: number };
+  /** Cuántos intervenciones lo usan. Solo llega en la pantalla de administración. */
+  _count?: { intervenciones: number };
 }
 
 /**
- * Una visita al equipo.
+ * Una intervención al equipo.
  *
- * ⚠️ `cerradoEn` no es un detalle de auditoría: es el candado. Un ciclo
+ * ⚠️ `cerradoEn` no es un detalle de auditoría: es el candado. Una intervención
  * cerrado no admite cambios de NADIE —tampoco de un ADMIN_GLOBAL— y de ahí
  * sale el `deshabilitado` de la pantalla de actividades.
  */
-export interface Ciclo {
+export interface Intervencion {
   id: number;
   numero: number;
   abiertoEn: string;
@@ -384,8 +391,8 @@ export interface TipoSistema {
 /**
  * Una actividad del catálogo estándar.
  *
- * ⚠️ NO es una actividad de una visita. Ésta es la PROPUESTA; lo que se
- * recorre en un ciclo es una `Actividad`, que copió el nombre y vive por su
+ * ⚠️ NO es una actividad de una intervención. Ésta es la PROPUESTA; lo que se
+ * recorre en una intervención es una `Actividad`, que copió el nombre y vive por su
  * cuenta — por eso renombrar aquí no cambia una inspección ya hecha.
  */
 export interface DefinicionActividad {
@@ -415,8 +422,39 @@ export type TipoEvidencia = 'NINGUNA' | 'UNA' | 'ANTES_DESPUES';
 /** En qué mitad del antes/después cae una foto. `null` en todo lo demás. */
 export type MomentoEvidencia = 'ANTES' | 'DESPUES';
 
+// ── Observaciones (§8, Fase 5 del rediseño) ──
+
+export type EstadoObservacion = 'PENDIENTE' | 'RESUELTA';
+
+/**
+ * Lo que queda pendiente en un equipo.
+ *
+ * ⚠️ Pertenece al EQUIPO, no a la intervención: se levanta en una intervención y sigue
+ * abierta hasta que alguien la resuelve, aunque esa intervención se cierre. Que
+ * aparezca en la intervención siguiente NO es una copia —es la misma fila—, y por
+ * eso `arrastrada` y `intervencionesAbierta` los calcula el servidor: son función
+ * de la intervención desde el que se mira, no de la observación.
+ */
+export interface Observacion {
+  id: number;
+  carpetaId: number;
+  intervencionOrigenId: number;
+  texto: string;
+  estado: EstadoObservacion;
+  creadoEn: string;
+  actualizadoEn: string;
+  resueltaEn: string | null;
+  creadoPor: Persona;
+  resueltaPor: Persona | null;
+  intervencionOrigen: { id: number; numero: number };
+  intervencionResuelta: { id: number; numero: number } | null;
+  /** Se levantó en una intervención ANTERIOR a la que se está mirando. */
+  arrastrada?: boolean;
+  /** Cuántas intervenciones lleva abierta, contando la suya. 1 = salió en ésta. */
+  intervencionesAbierta?: number;
+}
+
 export type EstadoActividad = 'PENDIENTE' | 'EN_PROCESO' | 'COMPLETADA';
-export type PrioridadActividad = 'BAJA' | 'MEDIA' | 'ALTA';
 
 /** Quién hizo algo. Se repite en actividad y comentario, y es la misma forma. */
 export interface Persona {
@@ -424,28 +462,34 @@ export interface Persona {
   nombre: string;
 }
 
+/**
+ * Una actividad del checklist de una intervención.
+ *
+ * ⚠️ Es SOLO un nombre y un check. Aquí llegaban también `descripcion`,
+ * `prioridad`, `fecha` y `responsable` —el «detalle» que se editaba en un
+ * diálogo aparte—; se retiraron porque en obra nadie los rellenaba: de 50
+ * actividades entre las dos bases, ninguna tenía uno solo de los cuatro.
+ *
+ * Lo que cuelga de ella es lo que se usa: su evidencia, sus fotos, sus
+ * observaciones y sus comentarios.
+ */
 export interface Actividad {
   id: number;
-  /** De qué visita es. Sustituye a `carpetaId` desde la Fase 1. */
-  cicloId: number;
+  /** De qué intervención es. Sustituye a `carpetaId` desde la Fase 1. */
+  intervencionId: number;
   titulo: string;
-  descripcion: string | null;
   estado: EstadoActividad;
-  prioridad: PrioridadActividad | null;
-  /** El día del trabajo, "YYYY-MM-DD". No es el de creación. */
-  fecha: string | null;
   /**
    * Fecha/hora y autor de la finalización (§13). Van SIEMPRE juntos: o los
    * dos con valor, o los dos en null. Reabrir una actividad los vacía.
    */
   completadaEn: string | null;
   completadaPor: Persona | null;
-  responsable: Persona | null;
   creadoPor: Persona;
   creadoEn: string;
   actualizadoEn: string;
   _count: { fotos: number; comentarios: number };
-  /** Qué evidencia se le pide (Fase 3). Se hereda entre ciclos. */
+  /** Qué evidencia se le pide (Fase 3). Se hereda entre intervenciones. */
   evidencia: TipoEvidencia;
   /**
    * Los tres las CALCULA el servidor a partir de las fotos; no se guardan.
@@ -456,25 +500,31 @@ export interface Actividad {
   faltaEvidencia: boolean;
 }
 
+/** Lo que se manda al crear o editar. Tres campos, que es todo lo que tiene. */
 export interface NuevaActividad {
   titulo: string;
-  descripcion?: string | null;
   estado?: EstadoActividad;
-  prioridad?: PrioridadActividad | null;
-  fecha?: string | null;
-  responsableId?: number | null;
   evidencia?: TipoEvidencia;
 }
 
 /**
  * Dónde se puede comentar (§14).
  *
- * §14 nombra cuatro —carpeta, equipo, actividad, álbum— y aquí hay `carpeta`
- * cubriendo dos: un equipo ES una carpeta de tipo EQUIPO (§12), así que
- * comentar un equipo y comentar una carpeta son la misma llamada. `foto` es
- * el opcional de §14, con ruta desde la Fase 6 y pantalla desde la 9a.
+ * §14 nombra cuatro —carpeta, equipo, actividad, álbum— y aquí hay otras
+ * cuatro. `carpeta` cubre dos: un equipo ES una carpeta de tipo EQUIPO (§12),
+ * así que comentar un equipo y comentar una carpeta son la misma llamada.
+ * `album` se retiró con los álbumes y su sitio lo ocupa `intervencion`.
+ *
+ * Las dos escalas de la Fase 6 del rediseño, las dos opcionales:
+ * `intervencion` es el comentario DEL CONJUNTO —lo que se dice de la tanda de
+ * fotos— y `foto` el de UNA. Una subida en conjunto admite el de grupo, los
+ * de cada foto, los dos o ninguno.
  */
-export type EntidadComentable = 'carpeta' | 'actividad' | 'album' | 'foto';
+export type EntidadComentable =
+  | 'carpeta'
+  | 'intervencion'
+  | 'actividad'
+  | 'foto';
 
 export interface Comentario {
   id: number;
@@ -490,11 +540,11 @@ export interface Comentario {
 // ── Bandeja (§17-§18) ──
 //
 // ⚠️ Aquí vivía `Album`, el de §16. Los álbumes se retiraron en la Fase 4 del
-// rediseño: una foto cuelga de un CICLO o de una ACTIVIDAD, y no hay ningún
+// rediseño: una foto cuelga de una INTERVENCIÓN o de una ACTIVIDAD, y no hay ningún
 // endpoint que devuelva un álbum. La tabla sobrevive en la base solo para que
 // los comentarios que se escribieron sobre uno no se pierdan.
 
-/** Una foto de la bandeja de §18: sin ciclo y sin actividad todavía. */
+/** Una foto de la bandeja de §18: sin intervención y sin actividad todavía. */
 export interface FotoPendiente {
   id: number;
   descripcion: string | null;
@@ -516,14 +566,14 @@ export interface Bandeja {
  * A dónde van unas fotos.
  *
  * Los TRES sitios donde puede estar una foto desde la Fase 4: suelta en la
- * visita, como evidencia de una actividad, o sin clasificar en la bandeja.
+ * intervención, como evidencia de una actividad, o sin clasificar en la bandeja.
  *
- * Unión, no opcionales sueltos: con `cicloId?` y `actividadId?` existirían
+ * Unión, no opcionales sueltos: con `intervencionId?` y `actividadId?` existirían
  * combinaciones imposibles —dos destinos, ninguno— y el compilador no
  * ayudaría. Misma forma que `DestinoSubida` en el backend.
  */
 export type DestinoFotos =
-  | { tipo: 'ciclo'; cicloId: number }
+  | { tipo: 'intervencion'; intervencionId: number }
   | { tipo: 'actividad'; actividadId: number }
   | { tipo: 'bandeja' };
 

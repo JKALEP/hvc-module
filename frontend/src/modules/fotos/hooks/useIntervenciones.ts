@@ -6,96 +6,96 @@ import { getErrorMessage } from '@/shared/services/api';
 import { QUERY_KEYS } from '@/shared/lib/constants';
 import { useInvalidarFotos } from './useInvalidarFotos';
 
-// Los ciclos (visitas) de un equipo: lecturas Y escrituras en un solo
+// Las intervenciones de un equipo: lecturas Y escrituras en un solo
 // archivo, nombrado por el recurso, como el resto del módulo.
 
 /**
- * El historial de visitas, del más reciente al más antiguo.
+ * El historial de intervenciónes, del más reciente al más antiguo.
  *
  * `habilitado` porque solo se pide dentro de una carpeta de tipo EQUIPO: en
- * una corriente el backend contesta 400 —no tiene ciclos—, y pedirlo en cada
+ * una corriente el backend contesta 400 —no tiene intervenciones—, y pedirlo en cada
  * carpeta que se abre sería un error garantizado por pantalla.
  */
-export function useCiclos(
+export function useIntervenciones(
   carpetaId: number | null,
   opciones: { habilitado?: boolean; portal?: boolean } = {},
 ) {
   const { habilitado = true, portal = false } = opciones;
   return useQuery({
     queryKey: portal
-      ? QUERY_KEYS.portalCiclos(carpetaId ?? 0)
-      : QUERY_KEYS.ciclos(carpetaId ?? 0),
+      ? QUERY_KEYS.portalIntervenciones(carpetaId ?? 0)
+      : QUERY_KEYS.intervenciones(carpetaId ?? 0),
     queryFn: () =>
-      portal ? fotos.verCiclosPortal(carpetaId!) : fotos.verCiclos(carpetaId!),
+      portal ? fotos.verIntervencionesPortal(carpetaId!) : fotos.verIntervenciones(carpetaId!),
     enabled: habilitado && carpetaId !== null,
   });
 }
 
 /**
- * Abre la visita siguiente.
+ * Abre la intervención siguiente.
  *
  * El aviso nombra cuántas actividades heredó: es lo que el usuario necesita
- * confirmar de un vistazo —que el checklist vino con el ciclo— sin tener que
+ * confirmar de un vistazo —que el checklist vino con la intervención— sin tener que
  * contarlas en la lista.
  */
-export function useAbrirCiclo() {
+export function useAbrirIntervencion() {
   const invalidar = useInvalidarFotos();
   return useMutation({
-    mutationFn: (carpetaId: number) => fotos.abrirCiclo(carpetaId),
+    mutationFn: (carpetaId: number) => fotos.abrirIntervencion(carpetaId),
     onSuccess: (c) => {
       invalidar();
-      toast.success(`Ciclo ${c.numero} abierto`);
+      toast.success(`Intervención ${c.numero} abierta`);
     },
     // El backend dice cuál sigue abierto cuando lo rechaza; reescribirlo aquí
     // sería tener dos versiones de la misma regla.
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo abrir el ciclo')),
+      toast.error(getErrorMessage(error, 'No se pudo abrir la intervención')),
   });
 }
 
-export function useCerrarCiclo() {
+export function useCerrarIntervencion() {
   const invalidar = useInvalidarFotos();
   return useMutation({
-    mutationFn: (cicloId: number) => fotos.cerrarCiclo(cicloId),
+    mutationFn: (intervencionId: number) => fotos.cerrarIntervencion(intervencionId),
     onSuccess: (c) => {
       invalidar();
-      toast.success(`Ciclo ${c.numero} cerrado`);
+      toast.success(`Intervención ${c.numero} cerrada`);
     },
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo cerrar el ciclo')),
+      toast.error(getErrorMessage(error, 'No se pudo cerrar la intervención')),
   });
 }
 
 /**
- * Reabre un ciclo cerrado. Excepcional, y el aviso lo dice.
+ * Reabre una intervención cerrada. Excepcional, y el aviso lo dice.
  *
- * No es un `useCerrarCiclo` con un booleano: son dos decisiones distintas,
+ * No es un `useCerrarIntervencion` con un booleano: son dos decisiones distintas,
  * cada una deja su propia entrada en la bitácora y una de ellas hay que
  * pensársela. Mismo criterio que separa archivar de reabrir una carpeta.
  */
-export function useReabrirCiclo() {
+export function useReabrirIntervencion() {
   const invalidar = useInvalidarFotos();
   return useMutation({
-    mutationFn: (cicloId: number) => fotos.reabrirCiclo(cicloId),
+    mutationFn: (intervencionId: number) => fotos.reabrirIntervencion(intervencionId),
     onSuccess: (c) => {
       invalidar();
-      toast.success(`Ciclo ${c.numero} reabierto — queda registrado`);
+      toast.success(`Intervencion ${c.numero} reabierto — queda registrado`);
     },
     onError: (error) =>
-      toast.error(getErrorMessage(error, 'No se pudo reabrir el ciclo')),
+      toast.error(getErrorMessage(error, 'No se pudo reabrir la intervención')),
   });
 }
 
-export function useCambiarEstadoCiclo() {
+export function useCambiarEstadoIntervencion() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
-      cicloId,
+      intervencionId,
       estadoId,
     }: {
-      cicloId: number;
+      intervencionId: number;
       estadoId: number | null;
-    }) => fotos.cambiarEstadoCiclo(cicloId, estadoId),
+    }) => fotos.cambiarEstadoIntervencion(intervencionId, estadoId),
     onSuccess: (c) => {
       invalidar();
       toast.success(

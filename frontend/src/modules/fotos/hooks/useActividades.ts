@@ -11,15 +11,15 @@ import type { EstadoActividad, NuevaActividad } from '@/modules/fotos/types';
 // el recurso. Un `…Mutations` aparte sería partir el mismo recurso en dos.
 
 /**
- * Las actividades de UNA VISITA.
+ * Las actividades de UNA INTERVENCIÓN.
  *
- * ⚠️ Van por `cicloId` y no por carpeta desde la Fase 1 del rediseño: el
- * mismo equipo repite «Revisar filtros» en cada visita, así que la carpeta
+ * ⚠️ Van por `intervencionId` y no por carpeta desde la Fase 1 del rediseño: el
+ * mismo equipo repite «Revisar filtros» en cada intervención, así que la carpeta
  * no identifica una lista. `habilitado` sigue haciendo falta porque solo hay
- * ciclos dentro de un EQUIPO.
+ * intervenciones dentro de un EQUIPO.
  */
 export function useActividades(
-  cicloId: number | null,
+  intervencionId: number | null,
   opciones: {
     estado?: EstadoActividad | '';
     habilitado?: boolean;
@@ -30,13 +30,13 @@ export function useActividades(
   const { estado = '', habilitado = true, portal = false } = opciones;
   return useQuery({
     queryKey: portal
-      ? QUERY_KEYS.portalActividades(cicloId ?? 0)
-      : QUERY_KEYS.actividades(cicloId ?? 0, estado),
+      ? QUERY_KEYS.portalActividades(intervencionId ?? 0)
+      : QUERY_KEYS.actividades(intervencionId ?? 0, estado),
     queryFn: () =>
       portal
-        ? fotos.verActividadesPortal(cicloId!)
-        : fotos.verActividades(cicloId!, estado || undefined),
-    enabled: habilitado && cicloId !== null,
+        ? fotos.verActividadesPortal(intervencionId!)
+        : fotos.verActividades(intervencionId!, estado || undefined),
+    enabled: habilitado && intervencionId !== null,
   });
 }
 
@@ -44,12 +44,12 @@ export function useCrearActividad() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
-      cicloId,
+      intervencionId,
       payload,
     }: {
-      cicloId: number;
+      intervencionId: number;
       payload: NuevaActividad;
-    }) => fotos.crearActividad(cicloId, payload),
+    }) => fotos.crearActividad(intervencionId, payload),
     onSuccess: (t) => {
       invalidar();
       toast.success(`Actividad creada: ${t.titulo}`);
@@ -116,22 +116,10 @@ export function useEliminarActividad() {
   });
 }
 
-/**
- * Quién puede ser responsable de una actividad (§13).
- *
- * Se pide una vez y se reutiliza: la lista no cambia mientras se rellena un
- * formulario, y pedirla por cada actividad abierta serían N llamadas iguales.
- */
-export function useAsignables(habilitado = true) {
-  return useQuery({
-    queryKey: QUERY_KEYS.asignablesFotos,
-    queryFn: fotos.verAsignables,
-    enabled: habilitado,
-    // Cambia cuando el SuperAdmin da de alta a alguien, no dentro de una
-    // sesión de trabajo en obra.
-    staleTime: 5 * 60 * 1000,
-  });
-}
+// ⚠️ Aquí estaba `useAsignables`, que servía el desplegable de «responsable».
+// Se fue con el detalle de la actividad: sin responsable no hay a quién
+// asignar, y la ruta del backend se retiró entera en vez de dejarla
+// respondiendo una lista que nadie consume.
 
 /** Las fotos que documentan una actividad (§15). */
 export function useFotosDeActividad(

@@ -16,24 +16,24 @@ import {
 } from '@/modules/fotos/hooks/useCatalogoFotos';
 
 /**
- * Traer actividades del catálogo a la visita en curso (Fase 2).
+ * Traer actividades del catálogo a la intervención en curso (Fase 2).
  *
  * Enseña el catálogo ENTERO y no solo lo del tipo de sistema del equipo, a
  * propósito: aquí no se está dando de alta nada, se está completando una
- * visita concreta, y en obra aparece trabajo que el molde no previó. La
+ * intervención concreta, y en obra aparece trabajo que el molde no previó. La
  * preselección por tipo manda en el alta; aquí manda quien está delante.
  *
- * ⚠️ Lo que ya está en el ciclo se enseña marcado y deshabilitado en vez de
+ * ⚠️ Lo que ya está en la intervención se enseña marcado y deshabilitado en vez de
  * esconderse: ver que «Limpieza de filtros» ya está puesta contesta la
  * pregunta, y ocultarla haría pensar que falta del catálogo.
  */
 export function DialogoDesdeCatalogo({
-  cicloId,
+  intervencionId,
   yaPuestas,
   onCerrar,
 }: {
-  cicloId: number;
-  /** Los títulos que ya tiene el ciclo. El servidor salta por TÍTULO. */
+  intervencionId: number;
+  /** Los títulos que ya tiene la intervención. El servidor salta por TÍTULO. */
   yaPuestas: Set<string>;
   onCerrar: () => void;
 }) {
@@ -51,7 +51,7 @@ export function DialogoDesdeCatalogo({
         <DialogHeader>
           <DialogTitle>Añadir del catálogo</DialogTitle>
           <DialogDescription>
-            Se añaden a la visita en curso. Las que ya están se saltan.
+            Se añaden a la intervención en curso. Las que ya están se saltan.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,7 +98,7 @@ export function DialogoDesdeCatalogo({
                     {d.nombre}
                     {puesta && (
                       <span className="ml-2 text-xs text-muted-foreground">
-                        ya está en esta visita
+                        ya está en esta intervención
                       </span>
                     )}
                     {d.descripcion && (
@@ -123,7 +123,7 @@ export function DialogoDesdeCatalogo({
             }
             onClick={() =>
               anadir.mutate(
-                { cicloId, definiciones: [...elegidas] },
+                { intervencionId, definiciones: [...elegidas] },
                 { onSuccess: onCerrar },
               )
             }

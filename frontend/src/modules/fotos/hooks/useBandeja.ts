@@ -66,7 +66,7 @@ export function useSubirA() {
  *
  * ⚠️ Ya no lleva `album`: era el nombre del álbum que recogía el lote cuando
  * el destino era una carpeta (Fase 2c). Con los álbumes retirados el destino
- * ya existe y ya tiene nombre — es la visita.
+ * ya existe y ya tiene nombre — es la intervención.
  */
 export function useClasificar() {
   const invalidar = useInvalidarFotos();

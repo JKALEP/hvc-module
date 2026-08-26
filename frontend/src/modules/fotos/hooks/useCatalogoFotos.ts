@@ -207,8 +207,8 @@ export function useEditarDefinicionActividad() {
 /**
  * Borrar del catálogo.
  *
- * ⚠️ El aviso dice explícitamente que las visitas no se tocan, porque es la
- * pregunta que se hace quien pulsa: la actividad de un ciclo copió el nombre
+ * ⚠️ El aviso dice explícitamente que las intervenciones no se tocan, porque es la
+ * pregunta que se hace quien pulsa: la actividad de una intervención copió el nombre
  * y vive por su cuenta.
  */
 export function useEliminarDefinicionActividad() {
@@ -217,31 +217,31 @@ export function useEliminarDefinicionActividad() {
     mutationFn: (id: number) => fotos.eliminarDefinicionActividad(id),
     onSuccess: () => {
       invalidar();
-      toast.success('Retirada del catálogo — las visitas ya hechas no cambian');
+      toast.success('Retirada del catálogo — las intervenciones ya hechas no cambian');
     },
     onError: (error) =>
       toast.error(getErrorMessage(error, 'No se pudo retirar del catálogo')),
   });
 }
 
-/** Trae actividades del catálogo a un ciclo abierto. */
+/** Trae actividades del catálogo a una intervención abierta. */
 export function useAnadirDesdeCatalogo() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
-      cicloId,
+      intervencionId,
       definiciones,
     }: {
-      cicloId: number;
+      intervencionId: number;
       definiciones: number[];
-    }) => fotos.anadirDesdeCatalogo(cicloId, definiciones),
+    }) => fotos.anadirDesdeCatalogo(intervencionId, definiciones),
     onSuccess: (r) => {
       invalidar();
       // Las omitidas se nombran: si alguien marca cinco y entran dos, el
       // silencio parecería un fallo cuando en realidad ya estaban.
       toast.success(
         r.anadidas === 0
-          ? 'Todas estaban ya en esta visita'
+          ? 'Todas estaban ya en esta intervención'
           : `${r.anadidas} actividad(es) añadida(s)` +
               (r.omitidas > 0 ? ` · ${r.omitidas} ya estaban` : ''),
       );

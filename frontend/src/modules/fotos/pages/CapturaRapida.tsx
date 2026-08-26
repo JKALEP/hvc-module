@@ -12,7 +12,7 @@ import { Spinner } from '@/shared/ui/spinner';
 import { cn } from '@/shared/lib/utils';
 import { useCarpeta } from '@/modules/fotos/hooks/useCarpetas';
 import { useActividades } from '@/modules/fotos/hooks/useActividades';
-import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
+import { useIntervenciones } from '@/modules/fotos/hooks/useIntervenciones';
 import {
   useBandeja,
   useSubirA,
@@ -41,13 +41,13 @@ export function CapturaRapida() {
   const { data: dentro } = useCarpeta(carpetaId);
 
   const esEquipo = dentro?.carpetaActual?.tipo === 'EQUIPO';
-  // ⚠️ Desde la Fase 4 la foto va a una VISITA, no a una carpeta: se toma la
-  // que esté en curso, que es donde se está trabajando. Sin ciclo abierto no
+  // ⚠️ Desde la Fase 4 la foto va a una INTERVENCIÓN, no a una carpeta: se toma la
+  // que esté en curso, que es donde se está trabajando. Sin intervención abierta no
   // hay dónde clasificar, y la pantalla lo dice.
-  const { data: ciclos } = useCiclos(carpetaId, { habilitado: esEquipo });
-  const cicloAbierto = (ciclos ?? []).find((c) => c.cerradoEn === null) ?? null;
-  const { data: actividades } = useActividades(cicloAbierto?.id ?? null, {
-    habilitado: cicloAbierto !== null,
+  const { data: intervenciones } = useIntervenciones(carpetaId, { habilitado: esEquipo });
+  const intervencionAbierta = (intervenciones ?? []).find((c) => c.cerradoEn === null) ?? null;
+  const { data: actividades } = useActividades(intervencionAbierta?.id ?? null, {
+    habilitado: intervencionAbierta !== null,
   });
   const [actividadId, setActividadId] = useState<number | null>(null);
 
@@ -78,14 +78,14 @@ export function CapturaRapida() {
   };
 
   /**
-   * El destino, derivado de lo elegido. La actividad gana al ciclo: si se
-   * eligió una, es más específica que la visita que la contiene.
+   * El destino, derivado de lo elegido. La actividad gana a la intervención: si se
+   * eligió una, es más específica que la intervención que la contiene.
    */
   const destino: DestinoFotos =
     actividadId !== null
       ? { tipo: 'actividad', actividadId }
-      : cicloAbierto !== null
-        ? { tipo: 'ciclo', cicloId: cicloAbierto.id }
+      : intervencionAbierta !== null
+        ? { tipo: 'intervencion', intervencionId: intervencionAbierta.id }
         : { tipo: 'bandeja' };
 
   const enviar = (aBandeja: boolean) => {

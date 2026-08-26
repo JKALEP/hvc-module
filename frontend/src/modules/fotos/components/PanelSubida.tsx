@@ -33,7 +33,7 @@ function formatPeso(bytes: number): string {
  * siendo una sola llamada con `File[]`, así que no requiere cambios en
  * backend, servicios ni hooks existentes.
  */
-export function PanelSubida({ cicloId }: { cicloId: number }) {
+export function PanelSubida({ intervencionId }: { intervencionId: number }) {
   const subir = useSubirFotos();
 
   const [archivos, setArchivos] = useState<File[]>([]);
@@ -116,7 +116,7 @@ export function PanelSubida({ cicloId }: { cicloId: number }) {
 
     subir.mutate(
       {
-        cicloId,
+        intervencionId,
         archivos,
         descripcion,
       },

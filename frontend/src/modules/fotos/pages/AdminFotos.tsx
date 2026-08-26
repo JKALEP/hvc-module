@@ -252,7 +252,7 @@ const ETIQUETA_TIPO = Object.fromEntries(
  * genera las clases que ve escritas.
  *
  * Retirar (`activo`) y eliminar son dos cosas distintas y las dos existen:
- * retirado deja de ofrecerse pero los ciclos que ya lo tenían lo conservan
+ * retirado deja de ofrecerse pero las intervenciones que ya lo tenían lo conservan
  * —son historial—; eliminar solo cabe si no lo usa ninguno, y el backend lo
  * rechaza con un mensaje que ya dice cuántos son.
  */
@@ -285,8 +285,8 @@ function EstadosDeEquipo() {
     <PanelFotos as="section">
       <h2 className="mb-1 font-medium text-foreground">Estados de equipo</h2>
       <p className="mb-4 text-sm text-muted-foreground">
-        En qué condición quedó el equipo tras cada visita. Se elige dentro del
-        ciclo en curso y se ve en la tarjeta del explorador sin entrar.
+        En qué condición quedó el equipo tras cada intervención. Se elige dentro del
+        intervención en curso y se ve en la tarjeta del explorador sin entrar.
       </p>
 
       <div className="mb-4 flex flex-wrap items-end gap-2">
@@ -317,7 +317,7 @@ function EstadosDeEquipo() {
         <EmptyState
           icon={ActivityIcon}
           title="Sin estados"
-          description="Añade al menos uno para poder calificar una visita."
+          description="Añade al menos uno para poder calificar una intervención."
         />
       )}
 
@@ -332,7 +332,7 @@ function EstadosDeEquipo() {
               <span className="text-xs text-muted-foreground">Retirado</span>
             )}
             <span className="text-xs text-muted-foreground tabular-nums">
-              {e._count?.ciclos ?? 0} ciclo(s)
+              {e._count?.intervenciones ?? 0} intervención(es)
             </span>
 
             <div className="ml-auto flex items-center gap-2">
@@ -363,11 +363,11 @@ function EstadosDeEquipo() {
               >
                 {e.activo ? 'Retirar' : 'Reactivar'}
               </Button>
-              {/* Solo si nadie lo usa. Con ciclos detrás el backend contesta
+              {/* Solo si nadie lo usa. Con intervenciones detrás el backend contesta
                   400 diciendo cuántos, y ofrecer un botón que responde 400 es
                   peor que no ofrecerlo — el mismo criterio que el borrado de
                   un álbum con fotos. */}
-              {(e._count?.ciclos ?? 0) === 0 && (
+              {(e._count?.intervenciones ?? 0) === 0 && (
                 <Button
                   variant="ghost"
                   size="icon"
@@ -571,7 +571,7 @@ function TiposDeSistema() {
  *
  * ⚠️ Lo que se define aquí es una PROPUESTA. Al dar de alta un equipo se
  * preselecciona lo de su tipo de sistema y quien lo crea lo ajusta; y lo que
- * acaba en una visita es una COPIA del nombre. Por eso renombrar o borrar
+ * acaba en una intervención es una COPIA del nombre. Por eso renombrar o borrar
  * aquí no cambia ni una inspección ya hecha — y por eso el borrado no está
  * bloqueado como el de un tipo de sistema, donde sí hay filas apuntando.
  */
@@ -615,7 +615,7 @@ function CatalogoDeActividades() {
       </h2>
       <p className="mb-4 text-sm text-muted-foreground">
         Lo que se propone al dar de alta un equipo, según su tipo de sistema.
-        Se puede añadir o quitar en cada visita: esto es la propuesta, no la
+        Se puede añadir o quitar en cada intervención: esto es la propuesta, no la
         obligación.
       </p>
 

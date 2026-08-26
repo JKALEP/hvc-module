@@ -9,7 +9,7 @@ import type { ColorEstado } from '@/modules/fotos/types';
 
 // El catálogo de estados de equipo (§7). Archivo propio y no dentro de
 // `useAdminFotos` porque no es solo de administración: LEERLO hace falta en
-// cada equipo para elegir el estado de la visita, y solo escribir es de
+// cada equipo para elegir el estado de la intervención, y solo escribir es de
 // ADMIN_GLOBAL. Es la misma frontera que separa definir un campo de
 // rellenarlo.
 
@@ -72,9 +72,9 @@ export function useEditarEstadoEquipo() {
 }
 
 /**
- * Borrado real, y el backend lo rechaza si algún ciclo lo usa.
+ * Borrado real, y el backend lo rechaza si alguna intervención lo usa.
  *
- * El mensaje sale TAL CUAL del servidor: ya dice cuántos ciclos lo sostienen
+ * El mensaje sale TAL CUAL del servidor: ya dice cuántas intervenciones lo sostienen
  * y ofrece retirarlo en su lugar. Mismo criterio que la administración de
  * Costos.
  */

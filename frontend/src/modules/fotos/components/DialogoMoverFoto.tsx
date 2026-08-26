@@ -12,7 +12,7 @@ import { Button } from '@/shared/ui/button';
 import { Select } from '@/shared/ui/select';
 import { Spinner } from '@/shared/ui/spinner';
 import { useCarpeta } from '@/modules/fotos/hooks/useCarpetas';
-import { useCiclos } from '@/modules/fotos/hooks/useCiclos';
+import { useIntervenciones } from '@/modules/fotos/hooks/useIntervenciones';
 import { useActividades } from '@/modules/fotos/hooks/useActividades';
 import type { DestinoFotos } from '@/modules/fotos/types';
 
@@ -52,15 +52,15 @@ export function DialogoMoverFoto({
   const [carpetaId, setCarpetaId] = useState<number | null>(null);
   const { data: dentro } = useCarpeta(carpetaId);
 
-  // ⚠️ Desde la Fase 4 el destino de una foto es una VISITA, no una carpeta:
-  // por eso hace falta elegir el ciclo, y por eso solo un EQUIPO admite fotos.
+  // ⚠️ Desde la Fase 4 el destino de una foto es una INTERVENCIÓN, no una carpeta:
+  // por eso hace falta elegir la intervención, y por eso solo un EQUIPO admite fotos.
   const esEquipo = dentro?.carpetaActual?.tipo === 'EQUIPO';
-  const { data: ciclos } = useCiclos(carpetaId, { habilitado: esEquipo });
-  const [cicloId, setCicloId] = useState<number | null>(null);
-  const cicloElegido =
-    (ciclos ?? []).find((c) => c.id === cicloId) ?? ciclos?.[0] ?? null;
-  const { data: actividades } = useActividades(cicloElegido?.id ?? null, {
-    habilitado: cicloElegido !== null,
+  const { data: intervenciones } = useIntervenciones(carpetaId, { habilitado: esEquipo });
+  const [intervencionId, setIntervencionId] = useState<number | null>(null);
+  const intervencionElegida =
+    (intervenciones ?? []).find((c) => c.id === intervencionId) ?? intervenciones?.[0] ?? null;
+  const { data: actividades } = useActividades(intervencionElegida?.id ?? null, {
+    habilitado: intervencionElegida !== null,
   });
 
   const [destinoFino, setDestinoFino] = useState<string>('');
@@ -76,19 +76,19 @@ export function DialogoMoverFoto({
   /**
    * El destino final.
    *
-   * `destinoFino` codifica qué se eligió dentro de la visita: una actividad,
-   * o nada —en cuyo caso la foto queda suelta en el ciclo, que es el sitio
+   * `destinoFino` codifica qué se eligió dentro de la intervención: una actividad,
+   * o nada —en cuyo caso la foto queda suelta en la intervención, que es el sitio
    * por defecto—.
    */
   const destino: DestinoFotos | null = (() => {
     if (destinoFino === 'bandeja') return { tipo: 'bandeja' };
-    if (cicloElegido === null) return null;
+    if (intervencionElegida === null) return null;
     if (destinoFino.startsWith('actividad:'))
       return {
         tipo: 'actividad',
         actividadId: Number(destinoFino.slice('actividad:'.length)),
       };
-    return { tipo: 'ciclo', cicloId: cicloElegido.id };
+    return { tipo: 'intervencion', intervencionId: intervencionElegida.id };
   })();
 
   return (
@@ -165,42 +165,42 @@ export function DialogoMoverFoto({
           {carpetaId !== null && !esEquipo && (
             <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
               Una carpeta corriente no guarda fotos. Elige un equipo: las fotos
-              van a una de sus visitas.
+              van a una de sus intervenciones.
             </p>
           )}
 
-          {esEquipo && (ciclos ?? []).length > 0 && (
+          {esEquipo && (intervenciones ?? []).length > 0 && (
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">
-                Visita
+                Intervención
               </label>
               <Select
-                value={cicloElegido?.id ?? ''}
+                value={intervencionElegida?.id ?? ''}
                 onChange={(e) => {
-                  setCicloId(Number(e.target.value));
+                  setIntervencionId(Number(e.target.value));
                   setDestinoFino('');
                 }}
               >
-                {(ciclos ?? []).map((c) => (
+                {(intervenciones ?? []).map((c) => (
                   <option key={c.id} value={c.id}>
-                    Ciclo {c.numero}
-                    {c.cerradoEn ? ' (cerrado)' : ' (en curso)'}
+                    Intervención {c.numero}
+                    {c.cerradoEn ? ' (cerrada)' : ' (en curso)'}
                   </option>
                 ))}
               </Select>
             </div>
           )}
 
-          {cicloElegido !== null && (
+          {intervencionElegida !== null && (
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-foreground">
-                Dentro de la visita
+                Dentro de la intervención
               </label>
               <Select
                 value={destinoFino}
                 onChange={(e) => setDestinoFino(e.target.value)}
               >
-                <option value="">Suelta en la visita</option>
+                <option value="">Suelta en la intervención</option>
                 {(actividades ?? []).map((t) => (
                   <option key={t.id} value={`actividad:${t.id}`}>
                     Actividad: {t.titulo}

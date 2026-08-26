@@ -147,14 +147,26 @@ export const QUERY_KEYS = {
     ['fotos', 'campos-carpeta', carpetaId] as const,
   // Actividades (§13) y comentarios (§14). Bajo la misma raíz 'fotos', así que
   // `useInvalidarFotos` las refresca sin tener que enumerarlas.
-  // ⚠️ La clave es por CICLO desde la Fase 1 del rediseño, no por carpeta:
+  // ⚠️ La clave es por INTERVENCIÓN desde la Fase 1 del rediseño, no por carpeta:
   // el mismo equipo repite «Revisar filtros» en cada visita, y con la carpeta
   // por clave las dos visitas compartían caché.
-  actividades: (cicloId: number, estado = '') =>
-    ['fotos', 'actividades', cicloId, estado] as const,
-  // Ciclos (visitas) de un equipo, y el catálogo de estados (§7). El catálogo
+  actividades: (intervencionId: number, estado = '') =>
+    ['fotos', 'actividades', intervencionId, estado] as const,
+  // Intervenciones de un equipo, y el catálogo de estados (§7). El catálogo
   // no lleva parámetros: es el mismo para todo el módulo.
-  ciclos: (carpetaId: number) => ['fotos', 'ciclos', carpetaId] as const,
+  intervenciones: (carpetaId: number) => ['fotos', 'intervenciones', carpetaId] as const,
+  // ⚠️ `observacionesFotos` y no `observaciones` a secas: ese nombre ya lo
+  // ocupa COSTOS en este mismo objeto, y son dos cosas distintas —allí es la
+  // observación de un requerimiento—. Mismo criterio que llevó a `ClienteCostos`
+  // y `CotizacionProveedor` en el modelo.
+  //
+  // Se piden por INTERVENCIÓN porque la respuesta depende de él: qué se arrastra y
+  // cuántas visitas lleva abierta cada una es función de desde qué visita se
+  // mira.
+  observacionesFotos: (intervencionId: number) =>
+    ['fotos', 'observaciones', intervencionId] as const,
+  observacionesDeActividad: (actividadId: number) =>
+    ['fotos', 'observaciones-actividad', actividadId] as const,
   // El vocabulario de la Fase 2. `catalogoActividades` lleva el tipo en la
   // clave porque acotar es pedir OTRA cosa, no recortar lo ya pedido — el
   // mismo criterio que los filtros de auditoría.
@@ -175,19 +187,18 @@ export const QUERY_KEYS = {
   plantillasFotos: (soloActivas: boolean) =>
     ['fotos', 'plantillas', soloActivas] as const,
   plantillaFotos: (id: number) => ['fotos', 'plantilla', id] as const,
-  // Actividades completas (§13). `asignables` no lleva parámetros: es la misma
-  // lista para todo el módulo.
-  asignablesFotos: ['fotos', 'asignables'] as const,
+  // ⚠️ Aquí estaba `asignablesFotos`, la lista de posibles responsables. Se
+  // fue con el detalle de la actividad.
   fotosDeActividad: (actividadId: number) => ['fotos', 'actividad-fotos', actividadId] as const,
   // Las del portal (§22) van con `'portal'` en 2.ª posición, como
   // `portalCarpeta` y `portalGaleria`. Clave distinta y no la misma con un
   // parámetro: lo que devuelve el portal está ANONIMIZADO en la galería, así
   // que compartir caché con la vista interna daría datos distintos bajo la
   // misma clave según quién preguntara primero.
-  portalCiclos: (carpetaId: number) =>
-    ['fotos', 'portal', 'ciclos', carpetaId] as const,
-  portalActividades: (cicloId: number) =>
-    ['fotos', 'portal', 'actividades', cicloId] as const,
+  portalIntervenciones: (carpetaId: number) =>
+    ['fotos', 'portal', 'intervenciones', carpetaId] as const,
+  portalActividades: (intervencionId: number) =>
+    ['fotos', 'portal', 'actividades', intervencionId] as const,
   portalComentarios: (entidad: string, entidadId: number) =>
     ['fotos', 'portal', 'comentarios', entidad, entidadId] as const,
   portalFotosDeActividad: (actividadId: number) =>

@@ -8,43 +8,43 @@ import { useInvalidarFotos } from './useInvalidarFotos';
 import type { DestinoFotos } from '@/modules/fotos/types';
 import type { FiltrosGaleria, ResultadoSubida } from '@/modules/fotos/types';
 
-// Las fotos de una VISITA: lecturas y escrituras en un solo archivo,
+// Las fotos de una INTERVENCIÓN: lecturas y escrituras en un solo archivo,
 // nombrado por el recurso.
 //
 // ⚠️ Se llamaba `useAlbumes` y paginaba por álbum. Los álbumes se retiraron
-// en la Fase 4 del rediseño: el agrupador es el ciclo, que la pantalla ya
+// en la Fase 4 del rediseño: el agrupador es la intervención, que la pantalla ya
 // eligió antes de pedir esto, así que la galería es una lista plana.
 
 /**
- * Galería de un ciclo, paginada por cursor.
+ * Galería de una intervención, paginada por cursor.
  *
  * `useInfiniteQuery` con el cursor que devuelve el backend: se pide más
  * cuando el usuario lo pide, no todo de golpe.
  */
 export function useGaleria(
-  cicloId: number,
+  intervencionId: number,
   filtros: FiltrosGaleria,
   portal = false,
 ) {
   return useInfiniteQuery({
     queryKey: portal
-      ? QUERY_KEYS.portalGaleria(cicloId, filtros)
-      : QUERY_KEYS.galeria(cicloId, filtros),
+      ? QUERY_KEYS.portalGaleria(intervencionId, filtros)
+      : QUERY_KEYS.galeria(intervencionId, filtros),
     queryFn: ({ pageParam }) =>
       portal
-        ? fotos.verGaleriaPortal(cicloId, filtros, pageParam ?? undefined)
-        : fotos.verGaleria(cicloId, filtros, pageParam ?? undefined),
+        ? fotos.verGaleriaPortal(intervencionId, filtros, pageParam ?? undefined)
+        : fotos.verGaleria(intervencionId, filtros, pageParam ?? undefined),
     initialPageParam: null as number | null,
     getNextPageParam: (ultima) => ultima.siguiente,
-    enabled: Number.isFinite(cicloId) && cicloId > 0,
+    enabled: Number.isFinite(intervencionId) && intervencionId > 0,
   });
 }
 
-export function useAutores(cicloId: number, habilitado = true) {
+export function useAutores(intervencionId: number, habilitado = true) {
   return useQuery({
-    queryKey: QUERY_KEYS.autores(cicloId),
-    queryFn: () => fotos.verAutores(cicloId),
-    enabled: habilitado && Number.isFinite(cicloId) && cicloId > 0,
+    queryKey: QUERY_KEYS.autores(intervencionId),
+    queryFn: () => fotos.verAutores(intervencionId),
+    enabled: habilitado && Number.isFinite(intervencionId) && intervencionId > 0,
   });
 }
 
@@ -68,14 +68,14 @@ export function useSubirFotos() {
   const invalidar = useInvalidarFotos();
   return useMutation({
     mutationFn: ({
-      cicloId,
+      intervencionId,
       archivos,
       descripcion,
     }: {
-      cicloId: number;
+      intervencionId: number;
       archivos: File[];
       descripcion: string;
-    }) => fotos.subirFotos(cicloId, archivos, descripcion),
+    }) => fotos.subirFotos(intervencionId, archivos, descripcion),
     onSuccess: (r) => {
       invalidar();
       avisarSubida(r);
@@ -142,4 +142,4 @@ export function useEliminarFoto() {
 
 // ⚠️ Aquí vivían `useCrearAlbum`, `useEditarAlbum` y `useEliminarAlbum`.
 // Se fueron con los álbumes en la Fase 4: no queda ninguna ruta detrás, y el
-// agrupador que hacía falta —la visita— existe sin que nadie lo cree.
+// agrupador que hacía falta —la intervención— existe sin que nadie lo cree.

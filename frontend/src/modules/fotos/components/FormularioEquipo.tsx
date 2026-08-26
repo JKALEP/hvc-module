@@ -168,7 +168,7 @@ export function FormularioEquipo({
           {checklist.length > 0 && (
             <div className="space-y-1.5">
               <p className="text-sm font-medium text-foreground">
-                Actividades de la primera visita
+                Actividades de la primera intervención
               </p>
               <ul className="space-y-1 rounded-md border border-border/60 p-2">
                 {checklist.map((d) => (

@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import {
+  AlertCircleIcon,
   ArchiveIcon,
   FolderIcon,
   ImageIcon,
@@ -94,7 +95,7 @@ export function TarjetaCarpeta({
             </Badge>
           )}
 
-          {/* El estado del equipo en su visita más reciente (§7): saber si un
+          {/* El estado del equipo en su intervención más reciente (§7): saber si un
               equipo quedó inoperativo es justo lo que se viene a mirar, y
               tener que entrar equipo por equipo para averiguarlo era el
               recorrido que este rediseño quita.
@@ -102,6 +103,15 @@ export function TarjetaCarpeta({
               ⚠️ No se pinta en una carpeta ARCHIVADA: ahí ya no se trabaja,
               y dos insignias compitiendo dicen menos que una. Es el mismo
               criterio por el que archivar apaga el color del icono. */}
+          {/* Lo pendiente pesa tanto como el estado: son las dos cosas que
+              se vienen a saber sin abrir el equipo. */}
+          {!carpeta.cerrada && carpeta.observacionesPendientes > 0 && (
+            <Badge variant="warning" className="shrink-0 gap-1">
+              <AlertCircleIcon className="size-3" />
+              {carpeta.observacionesPendientes}
+            </Badge>
+          )}
+
           {!carpeta.cerrada && carpeta.estadoEquipo && (
             <Badge
               variant={ESTADO_A_VARIANTE[carpeta.estadoEquipo.color]}

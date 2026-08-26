@@ -375,7 +375,7 @@ export function CamaraFotos({
     }
 
     /**
-     * Si volvemos al modo cámara, esperamos un ciclo
+     * Si volvemos al modo cámara, esperamos una intervención
      * para asegurarnos de que <video> ya exista nuevamente.
      */
     const timer = window.setTimeout(() => {
