@@ -12,20 +12,31 @@ import { limpiar, describir } from '../common/texto';
 /**
  * Dónde se puede comentar.
  *
- * §14 nombra CUATRO —carpeta, equipo, actividad, álbum— y aquí hay tres, y no
- * es un recorte: en este módulo **un equipo ES una carpeta** de
- * `tipo = EQUIPO` (§12), así que comentar un equipo y comentar una carpeta
- * son la misma fila con la misma FK. Inventar una cuarta columna
- * `equipoId` habría dado dos caminos para el mismo comentario y una
- * pregunta sin respuesta: cuál de los dos lee la pantalla del equipo.
+ * §14 nombra CUATRO —carpeta, equipo, actividad, álbum— y aquí hay otras
+ * cuatro, y no es la misma lista. Dos diferencias, las dos deliberadas:
  *
- * `foto` entró en la Fase 6, que es lo que §14 marca como OPCIONAL. Su
- * permiso NO se resuelve aquí: lo hace `AccesoService.exigirSobreFoto`,
- * porque una foto tiene tres casos —álbum, actividad y la bandeja de §18, que
- * no cuelga de ninguna carpeta y es solo de quien la subió—. Ese era el
- * cabo que la Fase 5 dejó suelto.
+ *  · **`equipo` no está porque un equipo ES una carpeta** de `tipo = EQUIPO`
+ *    (§12), así que comentar un equipo y comentar una carpeta son la misma
+ *    fila con la misma FK. Una columna `equipoId` habría dado dos caminos
+ *    para el mismo comentario y una pregunta sin respuesta: cuál lee la
+ *    pantalla del equipo.
+ *  · **`album` se fue y lo sustituye `intervencion`.** El álbum era el
+ *    agrupador hasta la Fase 4; hoy la tanda de fotos sueltas es de una
+ *    intervención. La columna `albumId` sigue en la tabla y en el CHECK,
+ *    pero ya no tiene puerta: medido antes de retirarla, **no hay ni un
+ *    comentario de álbum en local ni en Neon**, así que no se pierde nada.
+ *
+ * Las dos escalas de la Fase 6 del rediseño conviven y son opcionales:
+ * `intervencion` es el comentario DEL CONJUNTO —lo que se dice de la tanda—
+ * y `foto` es el de UNA. Subir en conjunto admite el de grupo, los de cada
+ * foto, los dos o ninguno.
+ *
+ * `foto` es lo que §14 marca como OPCIONAL, y su permiso NO se resuelve
+ * aquí: lo hace `AccesoService.exigirSobreFoto`, porque una foto tiene tres
+ * casos —intervención, actividad y la bandeja de §18, que no cuelga de
+ * ninguna carpeta y es solo de quien la subió—.
  */
-const ENTIDADES = ['carpeta', 'actividad', 'album', 'foto'] as const;
+const ENTIDADES = ['carpeta', 'intervencion', 'actividad', 'foto'] as const;
 export type EntidadComentable = (typeof ENTIDADES)[number];
 
 const SELECT_COMENTARIO = {
@@ -35,8 +46,8 @@ const SELECT_COMENTARIO = {
   creadoEn: true,
   editadoEn: true,
   carpetaId: true,
+  intervencionId: true,
   actividadId: true,
-  albumId: true,
   fotoId: true,
   autor: { select: { id: true, nombre: true } },
 } as const;
@@ -92,20 +103,21 @@ export class ComentarioService {
     if (entidad === 'actividad') {
       const actividad = await this.prisma.actividadFotos.findUnique({
         where: { id: entidadId },
-        select: { ciclo: { select: { carpetaId: true } } },
+        select: { intervencion: { select: { carpetaId: true } } },
       });
       if (!actividad)
         throw new NotFoundException(noExisteOSinAcceso('Esa actividad'));
-      return actividad.ciclo.carpetaId;
+      return actividad.intervencion.carpetaId;
     }
 
-    if (entidad === 'album') {
-      const album = await this.prisma.albumFotos.findUnique({
+    if (entidad === 'intervencion') {
+      const intervencion = await this.prisma.intervencionFotos.findUnique({
         where: { id: entidadId },
         select: { carpetaId: true },
       });
-      if (!album) throw new NotFoundException(noExisteOSinAcceso('Ese álbum'));
-      return album.carpetaId;
+      if (!intervencion)
+        throw new NotFoundException(noExisteOSinAcceso('Esa intervención'));
+      return intervencion.carpetaId;
     }
 
     // `foto` es el único que NO devuelve carpeta: puede no tenerla. Se
@@ -113,12 +125,18 @@ export class ComentarioService {
     return null;
   }
 
-  /** La columna que toca rellenar, con las otras tres en null. */
+  /**
+   * La columna que toca rellenar, con las otras en null.
+   *
+   * ⚠️ `albumId` NO aparece, y por eso se queda siempre en null: es la
+   * columna sin puerta. Sigue contando en el CHECK —que exige exactamente
+   * un dueño entre CINCO— pero nada la escribe desde la Fase 6.
+   */
   private dueño(entidad: EntidadComentable, entidadId: number) {
     return {
       carpetaId: entidad === 'carpeta' ? entidadId : null,
+      intervencionId: entidad === 'intervencion' ? entidadId : null,
       actividadId: entidad === 'actividad' ? entidadId : null,
-      albumId: entidad === 'album' ? entidadId : null,
       fotoId: entidad === 'foto' ? entidadId : null,
     };
   }
@@ -225,10 +243,10 @@ export class ComentarioService {
   /**
    * El comentario y CÓMO exigir permiso sobre él, sea cual sea su dueño.
    *
-   * Devuelve la entidad y su id en vez de una carpeta, porque desde la Fase
-   * 6 no todos los dueños tienen una: un comentario sobre una foto de la
-   * bandeja de §18 no cuelga de ninguna. Quien llama pasa eso por
-   * `exigirSobre`, que es el único que sabe resolver los cuatro casos.
+   * Devuelve la entidad y su id en vez de una carpeta, porque no todos los
+   * dueños tienen una: un comentario sobre una foto de la bandeja de §18 no
+   * cuelga de ninguna. Quien llama pasa eso por `exigirSobre`, que es el
+   * único que sabe resolver los cuatro casos.
    */
   private async comentarioConDueño(comentarioId: number) {
     const comentario = await this.prisma.comentarioFotos.findUnique({
@@ -237,6 +255,7 @@ export class ComentarioService {
         id: true,
         autorId: true,
         carpetaId: true,
+        intervencionId: true,
         actividadId: true,
         albumId: true,
         fotoId: true,
@@ -248,18 +267,25 @@ export class ComentarioService {
     const dueño: { entidad: EntidadComentable; id: number } | null =
       comentario.carpetaId !== null
         ? { entidad: 'carpeta', id: comentario.carpetaId }
-        : comentario.actividadId !== null
-          ? { entidad: 'actividad', id: comentario.actividadId }
-          : comentario.albumId !== null
-            ? { entidad: 'album', id: comentario.albumId }
+        : comentario.intervencionId !== null
+          ? { entidad: 'intervencion', id: comentario.intervencionId }
+          : comentario.actividadId !== null
+            ? { entidad: 'actividad', id: comentario.actividadId }
             : comentario.fotoId !== null
               ? { entidad: 'foto', id: comentario.fotoId }
               : null;
 
+    // ⚠️ `albumId` se lee arriba pero NO entra en la cadena, y es a
+    // propósito: si un comentario de álbum existiera —no existe ninguno, se
+    // midió— caería en `dueño === null` y contestaría el 404 uniforme. Es lo
+    // correcto: sin puerta en la API no hay pantalla desde la que editarlo
+    // ni borrarlo, así que fingir que sí la hay sería peor. Dejarlo fuera de
+    // la cadena en vez de fuera del `select` deja dicho que se sabe que está.
+    //
     // El CHECK `comentarios_fotos_un_solo_dueno_chk` garantiza que hay
-    // exactamente uno, así que esto no puede pasar. Se comprueba porque el
-    // tipo lo admite y callarlo sería dejar un `!` que el día que el CHECK
-    // cambie miente en silencio.
+    // exactamente un dueño entre los CINCO, así que este null solo puede
+    // venir de ese caso. Se comprueba porque el tipo lo admite y callarlo
+    // sería dejar un `!` que el día que el CHECK cambie miente en silencio.
     if (!dueño)
       throw new NotFoundException(noExisteOSinAcceso('Ese comentario'));
 

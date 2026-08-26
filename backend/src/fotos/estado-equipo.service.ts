@@ -69,7 +69,7 @@ export class EstadoEquipoService {
       color: true,
       orden: true,
       activo: true,
-      _count: { select: { ciclos: true } },
+      _count: { select: { intervenciones: true } },
     };
   }
 
@@ -77,7 +77,7 @@ export class EstadoEquipoService {
    * Los estados.
    *
    * Leerlos NO exige ser administrador: los necesita cualquiera que abra un
-   * equipo para elegir el estado de la visita, y son nombres, no datos de
+   * equipo para elegir el estado de la intervención, y son nombres, no datos de
    * nadie.
    */
   async listar(soloActivos = false) {
@@ -188,10 +188,10 @@ export class EstadoEquipoService {
   }
 
   /**
-   * Borrado real, y solo si ningún ciclo lo usa.
+   * Borrado real, y solo si ninguna intervención lo usa.
    *
-   * Con ciclos detrás se rechaza y se ofrece retirarlo, que es la vía normal:
-   * esos ciclos son historial y un estado borrado los dejaría sin decir en
+   * Con intervenciones detrás se rechaza y se ofrece retirarlo, que es la vía normal:
+   * esos intervenciones son historial y un estado borrado los dejaría sin decir en
    * qué condición estaba el equipo aquel día. La FK ya es `Restrict`; esto
    * solo traduce el fallo a un mensaje que dice qué hacer.
    */
@@ -199,12 +199,12 @@ export class EstadoEquipoService {
     this.exigirAdmin(usuario);
     const estado = await this.exigir(id);
 
-    const enUso = await this.prisma.cicloFotos.count({
+    const enUso = await this.prisma.intervencionFotos.count({
       where: { estadoId: id },
     });
     if (enUso > 0)
       throw new BadRequestException(
-        `No se puede eliminar: ${enUso} ciclo(s) están marcados como "${estado.nombre}". ` +
+        `No se puede eliminar: ${enUso} intervención(es) están marcadas como "${estado.nombre}". ` +
           'Retíralo en su lugar: deja de ofrecerse y el historial se conserva.',
       );
 

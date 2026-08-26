@@ -3,7 +3,7 @@ import type { UsuarioAutenticado } from '../auth/tipos';
 import type { Exportable } from '../common/exportacion.service';
 import type { AccionFotos, EntidadFotos } from '../../generated/prisma/enums';
 import { AccesoService } from './acceso.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import { ActividadService } from './actividad.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
 
@@ -79,12 +79,6 @@ const ETIQUETA_ESTADO_ACTIVIDAD: Record<string, string> = {
   COMPLETADA: 'Completada',
 };
 
-const ETIQUETA_PRIORIDAD: Record<string, string> = {
-  BAJA: 'Baja',
-  MEDIA: 'Media',
-  ALTA: 'Alta',
-};
-
 const ETIQUETA_ACCION: Record<AccionFotos, string> = {
   CREACION: 'Creación',
   EDICION: 'Edición',
@@ -111,9 +105,19 @@ const ETIQUETA_ACCION: Record<AccionFotos, string> = {
   IMPORTACION_EXCEL: 'Importación por Excel',
   CREACION_DESDE_PLANTILLA: 'Creación desde plantilla',
   EQUIPO_CREADO_DESDE_FOTOS: 'Equipo creado desde Fotos',
-  CICLO_ABIERTO: 'Ciclo abierto',
-  CICLO_CERRADO: 'Ciclo cerrado',
-  CICLO_REABIERTO: 'Ciclo reabierto',
+  // ⚠️ Los tres CICLO_* son HISTÓRICOS: nada nuevo los escribe, pero hay
+  // filas que los usan y sin su etiqueta saldrían crudos en la tabla y en el
+  // Excel de auditoría. Se leen con el nombre de hoy —lo que se registró es
+  // lo mismo, solo cambió cómo lo llamamos—. Mismo caso que TAREA_* desde la
+  // Fase 0.
+  CICLO_ABIERTO: 'Intervención abierta',
+  CICLO_CERRADO: 'Intervención cerrada',
+  CICLO_REABIERTO: 'Intervención reabierta',
+  INTERVENCION_ABIERTA: 'Intervención abierta',
+  INTERVENCION_CERRADA: 'Intervención cerrada',
+  INTERVENCION_REABIERTA: 'Intervención reabierta',
+  OBSERVACION_RESUELTA: 'Observación resuelta',
+  OBSERVACION_REABIERTA: 'Observación reabierta',
 };
 
 /**
@@ -152,12 +156,15 @@ const ETIQUETA_ENTIDAD: Record<EntidadFotos, string> = {
   INVITACION: 'Invitación',
   PLANTILLA: 'Plantilla',
   IMPORTACION: 'Importación',
-  CICLO: 'Ciclo',
+  /** Histórica: sustituida por INTERVENCION. Se lee con el nombre de hoy. */
+  CICLO: 'Intervención',
+  INTERVENCION: 'Intervención',
   ESTADO_EQUIPO: 'Estado de equipo',
   EQUIPO: 'Equipo',
   FAMILIA_SISTEMA: 'Familia de sistemas',
   TIPO_SISTEMA: 'Tipo de sistema',
   DEFINICION_ACTIVIDAD: 'Actividad de catálogo',
+  OBSERVACION: 'Observación',
 };
 
 /** Lo que la bitácora devuelve, visto desde aquí. */
@@ -203,7 +210,7 @@ export class ExportableFotosService {
     private readonly acceso: AccesoService,
     private readonly actividades: ActividadService,
     private readonly auditoria: AuditoriaFotosService,
-    private readonly ciclos: CicloService,
+    private readonly intervenciones: IntervencionService,
   ) {}
 
   /**
@@ -216,42 +223,47 @@ export class ExportableFotosService {
    * que estoy viendo» es lo que se espera al pulsar el botón; un archivo con
    * más filas que la tabla de al lado parece un fallo.
    */
-  async actividadesDeCiclo(
+  async actividadesDeIntervencion(
     usuario: UsuarioAutenticado,
-    cicloId: number,
+    intervencionId: number,
     filtros: { estado?: string | null } = {},
   ): Promise<Exportable> {
     // `listar` ya exige LECTURA: si no la tiene, no llegamos a la línea
     // siguiente y la negativa es el 404 uniforme del módulo.
     const actividades = await this.actividades.listar(
       usuario,
-      cicloId,
+      intervencionId,
       filtros,
     );
-    // ⚠️ Se exporta UN ciclo, no el historial entero: el archivo tiene que
+    // ⚠️ Se exporta UN intervención, no el historial entero: el archivo tiene que
     // decir lo mismo que la pantalla de al lado, y la pantalla siempre está
-    // mirando una visita concreta. Un Excel con las actividades de las seis
-    // visitas mezcladas parecería un error de duplicados.
-    const ciclo = await this.ciclos.detalle(usuario, cicloId);
-    const carpeta = await this.acceso.carpetaPorId(ciclo.carpetaId);
+    // mirando una intervención concreta. Un Excel con las actividades de las seis
+    // intervenciones mezcladas parecería un error de duplicados.
+    const intervencion = await this.intervenciones.detalle(
+      usuario,
+      intervencionId,
+    );
+    const carpeta = await this.acceso.carpetaPorId(intervencion.carpetaId);
 
     const pendientes = actividades.filter(
       (t) => t.estado !== 'COMPLETADA',
     ).length;
 
     return {
-      titulo: `Actividades · ${carpeta.nombre} · ciclo ${ciclo.numero}`,
-      nombreArchivo: `actividades-${carpeta.nombre}-ciclo-${ciclo.numero}`,
+      titulo: `Actividades · ${carpeta.nombre} · intervención ${intervencion.numero}`,
+      nombreArchivo: `actividades-${carpeta.nombre}-intervencion-${intervencion.numero}`,
       datos: [
         { etiqueta: 'Carpeta', valor: carpeta.nombre },
-        { etiqueta: 'Ciclo', valor: String(ciclo.numero) },
+        { etiqueta: 'Intervención', valor: String(intervencion.numero) },
         {
           etiqueta: 'Estado del equipo',
-          valor: ciclo.estado?.nombre ?? 'Sin definir',
+          valor: intervencion.estado?.nombre ?? 'Sin definir',
         },
         {
-          etiqueta: 'Ciclo cerrado',
-          valor: ciclo.cerradoEn ? instanteLima(ciclo.cerradoEn) : 'En curso',
+          etiqueta: 'Intervención cerrado',
+          valor: intervencion.cerradoEn
+            ? instanteLima(intervencion.cerradoEn)
+            : 'En curso',
         },
         // ⚠️ Aquí iba una fila «Equipo» con el `codigoInterno` del catálogo
         // de Gestión de Equipos. Se retiró en la Fase 1a de «Gestión de
@@ -282,9 +294,9 @@ export class ExportableFotosService {
             { titulo: '#', ancho: 6, anchoPdf: 24 },
             { titulo: 'Actividad', ancho: 34, anchoPdf: 150 },
             { titulo: 'Estado', ancho: 13, anchoPdf: 62 },
-            { titulo: 'Prioridad', ancho: 11, anchoPdf: 52 },
-            { titulo: 'Responsable', ancho: 22, anchoPdf: 92 },
-            { titulo: 'Fecha', ancho: 12, anchoPdf: 58 },
+            // ⚠️ Aquí iban Prioridad, Responsable y Fecha. Se fueron con el
+            // detalle de la actividad: eran tres columnas que salían vacías
+            // en todas las filas, porque ninguna actividad las tenía.
             { titulo: 'Fotos', ancho: 8, anchoPdf: 36, derecha: true },
             // ⚠️ La evidencia se exporta porque es LO QUE FALTA lo que se
             // lleva a una reunión: «pendiente» dice que no se hizo, y
@@ -297,13 +309,6 @@ export class ExportableFotosService {
             n + 1,
             t.titulo,
             ETIQUETA_ESTADO_ACTIVIDAD[t.estado] ?? t.estado,
-            // §13 marca la prioridad OPCIONAL, así que aquí llega null a
-            // menudo — HVC no la exige para el flujo básico.
-            t.prioridad
-              ? (ETIQUETA_PRIORIDAD[t.prioridad] ?? t.prioridad)
-              : '—',
-            guion(t.responsable?.nombre),
-            diaCalendario(t.fecha),
             t._count.fotos,
             ETIQUETA_EVIDENCIA(t),
             // Las tres columnas de `marcaDeCompletada` se llenan y se vacían

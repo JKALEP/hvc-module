@@ -22,7 +22,7 @@ export const LIMITES = {
   /** Por archivo. Una foto de móvil moderno cabe de sobra; un RAW no. */
   bytesMaximos: 15 * 1024 * 1024,
   /** El supervisor sube la jornada de una vez, no de una en una. */
-  fotosPorSubida: 10,
+  fotosPorSubida: 15,
   /** Lado mayor de la imagen que se sirve. */
   anchoMaximo: 1600,
   calidad: 80,

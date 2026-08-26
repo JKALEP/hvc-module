@@ -21,6 +21,8 @@
     "seed:superadmin": "npm run build && node dist/src/cli/seed-superadmin.js",
     "seed:costos": "npm run build && node dist/src/cli/seed-costos.js",
     "r2:vaciar": "node scripts/vaciar-r2.cjs",
+    "migrar": "node scripts/exigir-local.cjs && prisma migrate deploy",
+    "migrar:estado": "prisma migrate status",
     "verificar:fotos": "node scripts/verificar-fotos.cjs",
     "r2:huerfanos": "node scripts/limpiar-r2-huerfanos.cjs"
   },

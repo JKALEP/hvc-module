@@ -9,11 +9,12 @@ import { PortalController } from './portal.controller';
 import { ExportacionFotosController } from './exportacion.controller';
 import { CarpetaService } from './carpeta.service';
 import { CampoFotosService } from './campo.service';
-import { CicloService } from './ciclo.service';
-import { CicloController } from './ciclo.controller';
+import { IntervencionService } from './intervencion.service';
+import { IntervencionController } from './intervencion.controller';
 import { EstadoEquipoService } from './estado-equipo.service';
 import { SistemaFotosService } from './sistema.service';
 import { CatalogoActividadService } from './catalogo-actividad.service';
+import { ObservacionService } from './observacion.service';
 import { ConfiguracionFotosService } from './configuracion.service';
 import { ValorCampoFotosService } from './valor-campo-fotos.service';
 import { FotoService } from './foto.service';
@@ -53,7 +54,7 @@ import { ExportableFotosService } from './exportable-fotos.service';
   // (Fase 1b).
   controllers: [
     FotoController,
-    CicloController,
+    IntervencionController,
     CarpetaController,
     ActividadController,
     AdministracionFotosController,
@@ -68,12 +69,13 @@ import { ExportableFotosService } from './exportable-fotos.service';
     // `CampoFotosService` los DEFINE (ADMIN_GLOBAL) y
     // `ValorCampoFotosService` los RELLENA (EDICION sobre la carpeta).
     // Dos services y no uno porque son dos permisos distintos.
-    // Los ciclos (Fase 1): el historial de visitas de un equipo, con su
+    // Las intervenciones (Fase 1): el historial de intervenciónes de un equipo, con su
     // catálogo administrable de estados.
-    CicloService,
+    IntervencionService,
     EstadoEquipoService,
     SistemaFotosService,
     CatalogoActividadService,
+    ObservacionService,
     CampoFotosService,
     ValorCampoFotosService,
     ConfiguracionFotosService,

@@ -6,29 +6,31 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService, noExisteOSinAcceso } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import { AlmacenamientoService } from './almacenamiento.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar, describir } from '../common/texto';
-import { aIdOpcional } from '../common/validacion';
-import { aFechaUTC, claveDia } from '../common/fechas';
+import { claveDia } from '../common/fechas';
 import type {
   EstadoActividadFotos,
-  PrioridadActividadFotos,
   TipoEvidenciaFotos,
 } from '../../generated/prisma/enums';
 
 const ESTADOS = ['PENDIENTE', 'EN_PROCESO', 'COMPLETADA'] as const;
-const PRIORIDADES = ['BAJA', 'MEDIA', 'ALTA'] as const;
 const EVIDENCIAS = ['NINGUNA', 'UNA', 'ANTES_DESPUES'] as const;
 
+/**
+ * Lo que se puede mandar de una actividad.
+ *
+ * ⚠️ Son TRES campos, y eso es todo lo que una actividad tiene. Aquí había
+ * también `descripcion`, `prioridad`, `fecha` y `responsableId` —el «detalle»
+ * que se editaba en un diálogo aparte—; se retiraron enteros porque en obra
+ * nadie los rellenaba: de 50 actividades entre las dos bases, ninguna tenía
+ * uno solo de los cuatro.
+ */
 export interface CrearActividadDto {
   titulo?: string | null;
-  descripcion?: string | null;
   estado?: string | null;
-  prioridad?: string | null;
-  fecha?: string | null;
-  responsableId?: number | string | null;
   /** Qué evidencia se le pide (Fase 3): NINGUNA, UNA o ANTES_DESPUES. */
   evidencia?: string | null;
 }
@@ -36,25 +38,21 @@ export interface CrearActividadDto {
 export type EditarActividadDto = CrearActividadDto;
 
 /** Lo que se devuelve de cada actividad. Nunca la fila cruda. */
-// ⚠️ Lleva `cicloId` y NO `carpetaId`: desde la Fase 1 la actividad cuelga
-// del ciclo, y la carpeta se deduce de él. `carpetaId` sobrevivió aquí al
+// ⚠️ Lleva `intervencionId` y NO `carpetaId`: desde la Fase 1 la actividad cuelga
+// de la intervención, y la carpeta se deduce de él. `carpetaId` sobrevivió aquí al
 // cambio de modelo y **el compilador no lo vio** —un `select` que es una
 // constante con nombre no pasa por la comprobación de propiedades de más de
 // TypeScript, que solo se aplica a los literales—; reventó en la primera
 // llamada real, que es justo lo que este `select` alimenta.
 const SELECT_ACTIVIDAD = {
   id: true,
-  cicloId: true,
+  intervencionId: true,
   titulo: true,
-  descripcion: true,
   estado: true,
-  prioridad: true,
   evidencia: true,
-  fecha: true,
   completadaEn: true,
   creadoEn: true,
   actualizadoEn: true,
-  responsable: { select: { id: true, nombre: true } },
   creadoPor: { select: { id: true, nombre: true } },
   completadaPor: { select: { id: true, nombre: true } },
   _count: { select: { fotos: true, comentarios: true } },
@@ -65,14 +63,13 @@ const SELECT_ACTIVIDAD = {
 } as const;
 
 /** Lo que devuelve Prisma para una actividad, antes de normalizarla. */
-type ActividadCruda = { fecha: Date | null } & Record<string, unknown>;
+type ActividadCruda = Record<string, unknown>;
 
 /** Lo que trae la relación `fotos` del select, reducido a su hueco. */
 type HuecoDeFoto = { momento: 'ANTES' | 'DESPUES' | null };
 
-/** Lo que se añade al salir: la fecha en texto y el estado de la evidencia. */
-type ActividadNormalizada<T> = Omit<T, 'fecha' | 'fotos'> & {
-  fecha: string | null;
+/** Lo que se añade al salir: el estado de la evidencia, derivado. */
+type ActividadNormalizada<T> = Omit<T, 'fotos'> & {
   tieneAntes: boolean;
   tieneDespues: boolean;
   faltaEvidencia: boolean;
@@ -81,21 +78,21 @@ type ActividadNormalizada<T> = Omit<T, 'fecha' | 'fotos'> & {
 /**
  * Las actividades de §13.
  *
- * Desde la Fase 1 del rediseño cuelgan de un CICLO —una visita concreta al
+ * Desde la Fase 1 del rediseño cuelgan de una INTERVENCIÓN —una intervención concreta al
  * equipo— y no de la carpeta. El cambio no es de forma: el mismo equipo
- * repite «Revisar filtros» en cada visita, así que preguntar «las actividades
+ * repite «Revisar filtros» en cada intervención, así que preguntar «las actividades
  * de esta carpeta» dejó de tener una respuesta única.
  *
- * La carpeta se deduce del ciclo, y por ahí se resuelven los permisos: una
+ * La carpeta se deduce de la intervención, y por ahí se resuelven los permisos: una
  * actividad no tiene permisos propios, igual que antes.
  *
  * ⚠️ **La regla de §13 —solo dentro de un EQUIPO— se hace cumplir un escalón
- * más arriba**, en `CicloService`: los ciclos son de un equipo, así que una
+ * más arriba**, en `IntervencionService`: las intervenciones son de un equipo, así que una
  * carpeta corriente no tiene dónde colgar actividades y aquí no hace falta
  * volver a comprobarlo.
  *
- * ⚠️ Y hay un segundo candado, distinto del permiso: en un ciclo CERRADO no
- * se escribe, tampoco siendo `ADMIN_GLOBAL` (`CicloService.exigirAbierto`).
+ * ⚠️ Y hay un segundo candado, distinto del permiso: en una intervención CERRADO no
+ * se escribe, tampoco siendo `ADMIN_GLOBAL` (`IntervencionService.exigirAbierto`).
  *
  * Ninguna operación decide permisos por su cuenta: todas pasan por
  * `AccesoService`, que además corta la escritura en una rama archivada.
@@ -107,7 +104,7 @@ export class ActividadService {
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
     private readonly almacenamiento: AlmacenamientoService,
-    private readonly ciclos: CicloService,
+    private readonly intervenciones: IntervencionService,
   ) {}
 
   /**
@@ -127,12 +124,12 @@ export class ActividadService {
       where: { id: actividadId },
       select: {
         id: true,
-        cicloId: true,
+        intervencionId: true,
         creadoPorId: true,
         estado: true,
-        // El ciclo viaja con la actividad: quien la va a tocar necesita
-        // saber si su visita sigue abierta, y la carpeta sale de aquí.
-        ciclo: {
+        // La intervención viaja con la actividad: quien la va a tocar necesita
+        // saber si su intervención sigue abierta, y la carpeta sale de aquí.
+        intervencion: {
           select: { id: true, numero: true, cerradoEn: true, carpetaId: true },
         },
       },
@@ -142,7 +139,7 @@ export class ActividadService {
 
     const carpeta = await this.acceso.exigirPermiso(
       usuario,
-      actividad.ciclo.carpetaId,
+      actividad.intervencion.carpetaId,
       minimo,
     );
 
@@ -150,35 +147,33 @@ export class ActividadService {
     //
     // Se decide por el mínimo pedido, igual que la rama archivada en
     // `exigirPermiso`: si exiges EDICION o más, vas a escribir, y en un
-    // ciclo cerrado no se escribe. Repartido por `editar`, `completar` y
+    // intervención cerrada no se escribe. Repartido por `editar`, `completar` y
     // `eliminar` bastaba olvidarlo en uno para abrir el historial entero
     // —que es exactamente lo que pasó: los tres se lo saltaban y un
-    // ADMIN_GLOBAL podía retocar una visita cerrada—.
+    // ADMIN_GLOBAL podía retocar una intervención cerrada—.
     //
-    // LECTURA pasa siempre: un ciclo cerrado es historial, no un secreto.
-    if (minimo !== 'LECTURA') this.ciclos.exigirAbierto(actividad.ciclo);
+    // LECTURA pasa siempre: una intervención cerrada es historial, no un secreto.
+    if (minimo !== 'LECTURA')
+      this.intervenciones.exigirAbierto(actividad.intervencion);
 
     return { actividad, carpeta };
   }
 
   /**
-   * Normaliza `fecha` a "YYYY-MM-DD" antes de salir.
+   * Lo que se añade al salir: el estado de la evidencia.
    *
-   * ⚠️ `@db.Date` llega como `Date` y se serializa a
-   * `"2026-08-21T00:00:00.000Z"`. Un `<input type="date">` no acepta eso, así
-   * que el formulario de edición se quedaba con la fecha VACÍA aunque la
-   * actividad la tuviera —el listado sí la pintaba, porque ahí solo se formatea—.
-   * Se corta aquí y no en el cliente para que el contrato diga la verdad: el
-   * tipo del frontend ya prometía "YYYY-MM-DD". Es lo mismo que hace la
-   * galería con la fecha del álbum.
+   * ⚠️ Se llamaba `conFecha` y normalizaba el `@db.Date` de la actividad a
+   * "YYYY-MM-DD". Esa columna se fue con el detalle, así que el nombre habría
+   * pasado a mentir sobre lo único que hace hoy — derivar las tres banderas
+   * de evidencia.
    */
-  private conFecha<T extends ActividadCruda>(
+  private normalizar<T extends ActividadCruda>(
     actividad: T,
   ): ActividadNormalizada<T>;
-  private conFecha<T extends ActividadCruda>(
+  private normalizar<T extends ActividadCruda>(
     actividades: T[],
   ): ActividadNormalizada<T>[];
-  private conFecha<T extends ActividadCruda>(
+  private normalizar<T extends ActividadCruda>(
     entrada: T | T[],
   ): ActividadNormalizada<T> | ActividadNormalizada<T>[] {
     const una = (t: T) => {
@@ -199,8 +194,7 @@ export class ActividadService {
       const resto = { ...(t as T & { fotos?: HuecoDeFoto[] }) };
       delete resto.fotos;
       return {
-        ...(resto as Omit<T, 'fecha' | 'fotos'>),
-        fecha: t.fecha ? claveDia(t.fecha) : null,
+        ...(resto as Omit<T, 'fotos'>),
         tieneAntes,
         tieneDespues,
         /**
@@ -247,33 +241,6 @@ export class ActividadService {
     return evidencia as TipoEvidenciaFotos;
   }
 
-  private validarPrioridad(valor: unknown): PrioridadActividadFotos | null {
-    const texto = limpiar(valor);
-    if (texto === null) return null;
-    const prioridad = texto.toUpperCase();
-    if (!PRIORIDADES.includes(prioridad as PrioridadActividadFotos))
-      throw new BadRequestException(
-        `Prioridad inválida: "${describir(valor)}". Valores permitidos: ${PRIORIDADES.join(', ')}.`,
-      );
-    return prioridad as PrioridadActividadFotos;
-  }
-
-  /** El responsable tiene que existir. No se le exige tener acceso: §13 no lo pide. */
-  private async validarResponsable(valor: unknown) {
-    const responsableId = aIdOpcional(
-      valor,
-      'El responsable que indicaste no es válido.',
-    );
-    if (responsableId === null) return null;
-    const existe = await this.prisma.usuario.findUnique({
-      where: { id: responsableId },
-      select: { id: true },
-    });
-    if (!existe)
-      throw new NotFoundException('Ese usuario ya no existe en el sistema.');
-    return responsableId;
-  }
-
   /**
    * Las tres columnas de «completada» se escriben y se borran JUNTAS.
    *
@@ -289,38 +256,6 @@ export class ActividadService {
     return estado === 'COMPLETADA'
       ? { completadaEn: new Date(), completadaPorId: usuario.id }
       : { completadaEn: null, completadaPorId: null };
-  }
-
-  /**
-   * Quién puede ser RESPONSABLE de una actividad (§13).
-   *
-   * Solo id y nombre, y solo de cuentas ACTIVAS con el módulo FOTOS (más el
-   * SuperAdmin, que llega a todo por su rol). **Sin correos**: §10 exige
-   * TOTAL para ver la lista de colaboradores justamente porque ahí van
-   * correos de terceros; un nombre para rellenar un desplegable no es lo
-   * mismo, pero no hay razón para añadir el correo al lado.
-   *
-   * Vive aquí y no en `/usuario`, que es `@SoloSuperAdmin`: abrir aquella
-   * ruta para esto habría dado a cualquier supervisor la ficha completa de
-   * todas las cuentas del sistema. Es el mismo criterio que llevó el
-   * catálogo de Equipos a un controller propio en la Fase 4.
-   *
-   * Los CLIENTES quedan fuera: son cuentas externas del portal (§4) y
-   * asignarles trabajo de obra no significa nada.
-   */
-  async asignables() {
-    return this.prisma.usuario.findMany({
-      where: {
-        estado: 'ACTIVO',
-        OR: [
-          { rol: 'SUPERADMIN' },
-          { permisos: { some: { modulo: 'FOTOS' } } },
-        ],
-        NOT: { rol: 'CLIENTE' },
-      },
-      select: { id: true, nombre: true },
-      orderBy: { nombre: 'asc' },
-    });
   }
 
   /**
@@ -381,23 +316,27 @@ export class ActividadService {
   }
 
   /**
-   * Las actividades de UN CICLO. §5: ver es LECTURA.
+   * Las actividades de UNA INTERVENCIÓN. §5: ver es LECTURA.
    *
-   * ⚠️ Por ciclo y no por carpeta desde la Fase 1: un equipo tiene una
-   * actividad «Limpieza de filtro» por cada visita, y listarlas todas
+   * ⚠️ Por intervención y no por carpeta desde la Fase 1: un equipo tiene una
+   * actividad «Limpieza de filtro» por cada intervención, y listarlas todas
    * juntas mezclaría el trabajo de marzo con el de agosto.
    */
   async listar(
     usuario: UsuarioAutenticado,
-    cicloId: number,
+    intervencionId: number,
     filtros: { estado?: string | null } = {},
   ) {
-    await this.ciclos.exigirCiclo(usuario, cicloId, 'LECTURA');
+    await this.intervenciones.exigirIntervencion(
+      usuario,
+      intervencionId,
+      'LECTURA',
+    );
     const estado = this.validarEstado(filtros.estado);
 
-    return this.conFecha(
+    return this.normalizar(
       await this.prisma.actividadFotos.findMany({
-        where: { cicloId, ...(estado ? { estado } : {}) },
+        where: { intervencionId, ...(estado ? { estado } : {}) },
         select: SELECT_ACTIVIDAD,
         // Pendientes arriba y, dentro de cada estado, lo más reciente
         // primero: una lista de actividades se mira para saber qué falta.
@@ -412,28 +351,32 @@ export class ActividadService {
       where: { id: actividadId },
       select: SELECT_ACTIVIDAD,
     });
-    return this.conFecha(actividad);
+    return this.normalizar(actividad);
   }
 
   /**
-   * Crear dentro de un ciclo. §5: escribir es EDICION.
+   * Crear dentro de una intervención. §5: escribir es EDICION.
    *
-   * ⚠️ Ya no hace falta comprobar que la carpeta sea un EQUIPO: los ciclos
-   * SOLO existen en equipos —lo hace cumplir `CicloService`— así que tener
-   * un `cicloId` válido ya lo garantiza. La regla de §13 no desapareció:
+   * ⚠️ Ya no hace falta comprobar que la carpeta sea un EQUIPO: las intervenciones
+   * SOLO existen en equipos —lo hace cumplir `IntervencionService`— así que tener
+   * un `intervencionId` válido ya lo garantiza. La regla de §13 no desapareció:
    * se movió una capa más abajo, donde no se puede esquivar.
    *
-   * Lo que sí se comprueba aquí es que la visita siga abierta.
+   * Lo que sí se comprueba aquí es que la intervención siga abierta.
    */
   async crear(
     usuario: UsuarioAutenticado,
-    cicloId: number,
+    intervencionId: number,
     dto: CrearActividadDto,
   ) {
-    const ciclo = await this.ciclos.exigirCiclo(usuario, cicloId, 'EDICION');
-    this.ciclos.exigirAbierto(ciclo);
-    const carpeta = ciclo.carpeta;
-    const carpetaId = ciclo.carpetaId;
+    const intervencion = await this.intervenciones.exigirIntervencion(
+      usuario,
+      intervencionId,
+      'EDICION',
+    );
+    this.intervenciones.exigirAbierto(intervencion);
+    const carpeta = intervencion.carpeta;
+    const carpetaId = intervencion.carpetaId;
 
     const titulo = limpiar(dto.titulo);
     if (titulo === null)
@@ -443,20 +386,14 @@ export class ActividadService {
 
     const actividad = await this.prisma.actividadFotos.create({
       data: {
-        cicloId,
+        intervencionId,
         titulo,
-        descripcion: limpiar(dto.descripcion),
         estado,
-        prioridad: this.validarPrioridad(dto.prioridad),
         // Sin decir nada se queda el defecto de la columna (UNA), que es lo
         // razonable para una actividad de inspección escrita a mano.
         ...(this.validarEvidencia(dto.evidencia)
           ? { evidencia: this.validarEvidencia(dto.evidencia)! }
           : {}),
-        fecha: dto.fecha
-          ? aFechaUTC(dto.fecha, 'La fecha de la actividad')
-          : null,
-        responsableId: await this.validarResponsable(dto.responsableId),
         creadoPorId: usuario.id,
         ...this.marcaDeCompletada(estado, usuario),
       },
@@ -473,7 +410,7 @@ export class ActividadService {
       accion: 'CREACION',
       descripcion: `Creó la actividad "${actividad.titulo}".`,
     });
-    return this.conFecha(actividad);
+    return this.normalizar(actividad);
   }
 
   /**
@@ -508,9 +445,6 @@ export class ActividadService {
         throw new BadRequestException('La actividad necesita un título.');
       datos.titulo = titulo;
     }
-    if ('descripcion' in dto) datos.descripcion = limpiar(dto.descripcion);
-    if ('prioridad' in dto)
-      datos.prioridad = this.validarPrioridad(dto.prioridad);
     if ('evidencia' in dto) {
       const evidencia = this.validarEvidencia(dto.evidencia);
       if (evidencia === null)
@@ -519,13 +453,6 @@ export class ActividadService {
         );
       datos.evidencia = evidencia;
     }
-    if ('fecha' in dto)
-      datos.fecha = dto.fecha
-        ? aFechaUTC(dto.fecha, 'La fecha de la actividad')
-        : null;
-    if ('responsableId' in dto)
-      datos.responsableId = await this.validarResponsable(dto.responsableId);
-
     if ('estado' in dto) {
       const estado = this.validarEstado(dto.estado);
       if (estado === null)
@@ -547,16 +474,15 @@ export class ActividadService {
     // Un evento POR CAMPO que cambió, con su valor anterior (§23). §23 no
     // nombra «editar actividad» entre sus trece acciones —sí «crear» y
     // «completar»—, pero una carpeta ya lo registra y no tenerlo aquí
-    // dejaba un agujero raro: se sabía quién creó la actividad y quién la dio
-    // por hecha, pero no quién le cambió el responsable por el camino.
+    // dejaba un agujero raro.
+    //
+    // ⚠️ Quedan TRES campos porque una actividad tiene tres. La lista
+    // incluía descripción, prioridad, fecha y responsable, que se retiraron
+    // con el detalle.
     const comoTexto = (t: typeof antes) => ({
       titulo: t.titulo,
-      descripcion: t.descripcion,
       estado: t.estado,
-      prioridad: t.prioridad ?? null,
       evidencia: t.evidencia,
-      fecha: t.fecha ? claveDia(t.fecha) : null,
-      responsable: t.responsable?.nombre ?? null,
     });
 
     await this.auditoria.registrar(
@@ -568,7 +494,7 @@ export class ActividadService {
       }),
     );
 
-    return this.conFecha(actividad);
+    return this.normalizar(actividad);
   }
 
   /**
@@ -614,7 +540,7 @@ export class ActividadService {
       accion: completada ? 'ACTIVIDAD_COMPLETADA' : 'ACTIVIDAD_REABIERTA',
       descripcion: `${completada ? 'Completó' : 'Reabrió'} "${actividad.titulo}".`,
     });
-    return this.conFecha(actividad);
+    return this.normalizar(actividad);
   }
 
   /**

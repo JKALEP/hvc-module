@@ -109,11 +109,12 @@ model Usuario {
   // nombre en texto donde hace falta.
   carpetasFotosPropias        CarpetaFotos[]        @relation("CarpetasFotosPropias")
   albumesCreados              AlbumFotos[]          @relation("AlbumesCreados")
-  actividadesCreadas               ActividadFotos[]          @relation("ActividadesCreadas")
-  actividadesResponsable           ActividadFotos[]          @relation("ActividadesResponsable")
-  actividadesCompletadas           ActividadFotos[]          @relation("ActividadesCompletadas")
-  ciclosAbiertos              CicloFotos[]          @relation("CiclosAbiertos")
-  ciclosCerrados              CicloFotos[]          @relation("CiclosCerrados")
+  actividadesCreadas          ActividadFotos[]      @relation("ActividadesCreadas")
+  actividadesCompletadas      ActividadFotos[]      @relation("ActividadesCompletadas")
+  intervencionesAbiertas      IntervencionFotos[]   @relation("IntervencionesAbiertas")
+  intervencionesCerradas      IntervencionFotos[]   @relation("IntervencionesCerradas")
+  observacionesCreadas        ObservacionFotos[]    @relation("ObservacionesCreadasPor")
+  observacionesResueltas      ObservacionFotos[]    @relation("ObservacionesResueltasPor")
   comentariosFotos            ComentarioFotos[]     @relation("ComentariosFotos")
   compartidoConmigo           AccesoCompartido[]    @relation("CompartidoConmigo")
   compartidosPorMi            AccesoCompartido[]    @relation("CompartidosPorMi")
@@ -313,19 +314,21 @@ model CarpetaFotos {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  padre        CarpetaFotos?       @relation("CarpetaFotosJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
-  hijas        CarpetaFotos[]      @relation("CarpetaFotosJerarquia")
-  propietario  Usuario             @relation("CarpetasFotosPropias", fields: [propietarioId], references: [id], onDelete: Restrict)
-  albumes      AlbumFotos[]
-  /// El historial de visitas. Las actividades cuelgan de estos, no de aquí.
-  ciclos       CicloFotos[]
-  accesos      AccesoCompartido[]
-  invitaciones InvitacionCarpeta[]
-  comentarios  ComentarioFotos[]
-  eventos      EventoFotos[]
+  padre          CarpetaFotos?       @relation("CarpetaFotosJerarquia", fields: [parentId], references: [id], onDelete: Restrict)
+  hijas          CarpetaFotos[]      @relation("CarpetaFotosJerarquia")
+  propietario    Usuario             @relation("CarpetasFotosPropias", fields: [propietarioId], references: [id], onDelete: Restrict)
+  albumes        AlbumFotos[]
+  /// El historial de intervenciones. Las actividades cuelgan de estos, no de aquí.
+  intervenciones IntervencionFotos[]
+  accesos        AccesoCompartido[]
+  invitaciones   InvitacionCarpeta[]
+  comentarios    ComentarioFotos[]
+  eventos        EventoFotos[]
   /// Los valores de los campos configurables, cuando es de tipo EQUIPO.
-  valoresCampo ValorCampoFotos[]
-  tipoSistema  TipoSistemaFotos?   @relation(fields: [tipoSistemaId], references: [id], onDelete: Restrict)
+  valoresCampo   ValorCampoFotos[]
+  /// Lo que quedó pendiente en este equipo, visita tras visita (Fase 5).
+  observaciones  ObservacionFotos[]
+  tipoSistema    TipoSistemaFotos?   @relation(fields: [tipoSistemaId], references: [id], onDelete: Restrict)
 
   // Sin dos hermanas con el mismo nombre bajo la misma madre.
   @@unique([parentId, nombre])
@@ -407,7 +410,7 @@ model DefinicionCampoFotos {
   /// Es lo que hace que borrar de verdad sea excepcional —solo cuando
   /// nadie lo usa— y no la vía normal. Mismo criterio que `EstadoCatalogo`
   /// en Costos y que `DefinicionCampo.activo` en Equipos.
-  activo Boolean        @default(true)
+  activo Boolean @default(true)
 
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
@@ -534,15 +537,15 @@ model ConfiguracionColorCarpeta {
 }
 
 // ─────────────────────────────────────────────────────────────
-// CICLOS — el eje del rediseño
+// INTERVENCIONES — el eje del rediseño
 //
 // Un equipo deja de tener UN set fijo de actividades y pasa a tener un
-// HISTORIAL: cada ciclo es una visita completa, con su fecha, su estado y
+// HISTORIAL: cada intervención es una intervención completa, con su fecha, su estado y
 // su checklist, y queda congelado al cerrarse.
 //
-// El ciclo cuelga de la carpeta de tipo EQUIPO, y las actividades cuelgan
-// del ciclo. Por eso `ActividadFotos` PERDIÓ su `carpetaId`: la carpeta se
-// deduce del ciclo, y guardarla además sería una segunda fuente de verdad
+// La intervención cuelga de la carpeta de tipo EQUIPO, y las actividades cuelgan
+// dla intervención. Por eso `ActividadFotos` PERDIÓ su `carpetaId`: la carpeta se
+// deduce dla intervención, y guardarla además sería una segunda fuente de verdad
 // —exactamente el motivo por el que `Foto` nunca tuvo `carpetaId`—.
 // ─────────────────────────────────────────────────────────────
 
@@ -603,7 +606,7 @@ model TipoSistemaFotos {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  familia     FamiliaSistemaFotos        @relation(fields: [familiaId], references: [id], onDelete: Restrict)
+  familia     FamiliaSistemaFotos       @relation(fields: [familiaId], references: [id], onDelete: Restrict)
   carpetas    CarpetaFotos[]
   actividades ActividadPorTipoSistema[]
 
@@ -619,13 +622,13 @@ model TipoSistemaFotos {
 ///
 /// Es la respuesta al problema que §20 ya resolvía para las plantillas: sin
 /// catálogo, uno escribe «Pernos», otro «Revisar pernos» y otro «Pernería», y
-/// entonces no se puede comparar una visita con la siguiente ni contar nada.
+/// entonces no se puede comparar una intervención con la siguiente ni contar nada.
 ///
 /// ⚠️ Define el checklist, NO lo impone. Al dar de alta un equipo se
 /// PRESELECCIONAN las de su tipo de sistema y quien lo crea las ajusta; y
-/// dentro de un ciclo se pueden seguir añadiendo a mano. Una actividad de un
-/// ciclo es una fila propia (`ActividadFotos`) con su título COPIADO, no una
-/// FK a esta tabla: renombrar aquí no puede reescribir lo que dice una visita
+/// dentro de una intervención se pueden seguir añadiendo a mano. Una actividad de un
+/// intervención es una fila propia (`ActividadFotos`) con su título COPIADO, no una
+/// FK a esta tabla: renombrar aquí no puede reescribir lo que dice una intervención
 /// ya hecha. Es el mismo criterio que `CostoItem` con los ítems de Costos.
 model DefinicionActividadFotos {
   id          Int     @id @default(autoincrement())
@@ -664,6 +667,78 @@ model ActividadPorTipoSistema {
   @@map("actividades_por_tipo_sistema_fotos")
 }
 
+/// Pendiente o resuelta. Dos valores y no tres: «en curso» sería un estado
+/// que nadie puede definir sin ambigüedad —¿desde cuándo?, ¿quién lo
+/// decide?— y lo que HVC pregunta es binario: qué queda por resolver.
+enum EstadoObservacionFotos {
+  PENDIENTE
+  RESUELTA
+}
+
+/// Una observación levantada durante una intervención (Fase 5 del rediseño).
+///
+/// ⚠️ **Pertenece al EQUIPO, no a la intervención, y de ahí sale el arrastre.**
+/// Cuelga de `carpetaId` y solo RECUERDA en qué intervención se levantó
+/// (`intervencionOrigenId`). Una observación que nadie resolvió sigue abierta en la
+/// visita siguiente sin que nada la copie: se arrastra porque nunca dejó de
+/// ser del equipo.
+///
+/// La alternativa —copiarla al abrir la intervención, como se hereda el checklist—
+/// se descartó a propósito: duplicaría la misma observación en cada intervención,
+/// dejaría sin respuesta «¿cuándo se levantó?» y obligaría a resolver la
+/// copia buena de entre cinco. El checklist se copia porque cada intervención
+/// REHACE ese trabajo; una observación no se rehace, se resuelve una vez.
+///
+/// Es el mismo criterio que el resto del módulo: derivar en lectura en vez de
+/// materializar. La cascada de permisos, el avance de un proyecto y
+/// `faltaEvidencia` se resuelven igual.
+model ObservacionFotos {
+  id Int @id @default(autoincrement())
+
+  /// El equipo. Es lo que hace que la observación sobreviva a su intervención.
+  carpetaId            Int
+  /// En qué visita se levantó. Solo memoria: no la contiene.
+  intervencionOrigenId Int
+
+  /// De qué ACTIVIDAD concreta es, si lo es. `null` = del equipo en general.
+  ///
+  /// ⚠️ `SetNull` y no `Cascade`: una actividad es de UNA visita —cada intervencion
+  /// crea las suyas—, así que atar la observación a su vida la borraría al
+  /// borrar la actividad, y una observación pendiente no se resuelve
+  /// borrándola. Perder el puntero es aceptable; perder el pendiente, no.
+  actividadId Int?
+
+  texto  String
+  estado EstadoObservacionFotos @default(PENDIENTE)
+
+  creadoPorId   Int
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  /// Quién la resolvió, cuándo, y en qué visita. Las tres se llenan y se
+  /// vacían JUNTAS, igual que la marca de completada de una actividad:
+  /// reabrir una observación borra las tres, porque conservarlas afirmaría
+  /// algo que ya no es cierto. El historial de eso es la bitácora.
+  resueltaEn             DateTime?
+  resueltaPorId          Int?
+  intervencionResueltaId Int?
+
+  carpeta              CarpetaFotos       @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  intervencionOrigen   IntervencionFotos  @relation("ObservacionesLevantadas", fields: [intervencionOrigenId], references: [id], onDelete: Cascade)
+  /// SetNull y no Cascade: si se borra la intervención donde se resolvió, la
+  /// observación sigue resuelta — lo que se pierde es dónde, no el hecho.
+  actividad            ActividadFotos?    @relation(fields: [actividadId], references: [id], onDelete: SetNull)
+  intervencionResuelta IntervencionFotos? @relation("ObservacionesResueltas", fields: [intervencionResueltaId], references: [id], onDelete: SetNull)
+  creadoPor            Usuario            @relation("ObservacionesCreadasPor", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  resueltaPor          Usuario?           @relation("ObservacionesResueltasPor", fields: [resueltaPorId], references: [id], onDelete: SetNull)
+
+  /// «Qué sigue pendiente en este equipo» es LA consulta del módulo.
+  @@index([carpetaId, estado])
+  @@index([intervencionOrigenId])
+  @@index([actividadId])
+  @@map("observaciones_fotos")
+}
+
 /// Catálogo administrable de estados de equipo.
 ///
 /// Operativo / Operativo con observaciones / Inoperativo se siembran como
@@ -677,37 +752,37 @@ model EstadoEquipoFotos {
   orden  Int              @default(0)
 
   /// Visibilidad, no borrado: un estado retirado deja de ofrecerse pero los
-  /// ciclos que ya lo tienen lo conservan.
+  /// intervenciones que ya lo tienen lo conservan.
   activo Boolean @default(true)
 
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  ciclos CicloFotos[]
+  intervenciones IntervencionFotos[]
 
   @@index([orden])
   @@map("estados_equipo_fotos")
 }
 
-/// Una visita al equipo: su checklist, su estado y su evidencia.
-model CicloFotos {
+/// Una intervención al equipo: su checklist, su estado y su evidencia.
+model IntervencionFotos {
   id        Int @id @default(autoincrement())
   carpetaId Int
 
-  /// Correlativo POR EQUIPO, no global: «Ciclo 3» de este equipo. Se calcula
+  /// Correlativo POR EQUIPO, no global: «Intervención 3» de este equipo. Se calcula
   /// al abrir y no se reutiliza aunque se borre uno.
   numero Int
 
-  /// ⚠️ NULLABLE a propósito: un ciclo nace SIN estado y NO hereda el del
+  /// ⚠️ NULLABLE a propósito: una intervención nace SIN estado y NO hereda el del
   /// anterior. Que la tarjeta se vea sin estado hasta que alguien revise el
-  /// equipo es correcto; arrastrar «Inoperativo» de la visita pasada sería
+  /// equipo es correcto; arrastrar «Inoperativo» de la intervención pasada sería
   /// afirmar algo que nadie ha comprobado todavía.
   estadoId Int?
 
   abiertoEn    DateTime @default(now())
   abiertoPorId Int
 
-  /// Cerrado = congelado. Nadie edita un ciclo cerrado, tampoco un
+  /// Cerrado = congelado. Nadie edita una intervención cerrada, tampoco un
   /// ADMIN_GLOBAL: para corregir hay que REABRIRLO, y eso deja su propia
   /// entrada en la bitácora.
   cerradoEn    DateTime?
@@ -716,33 +791,40 @@ model CicloFotos {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  /// Cascade: el ciclo es contenido DEL equipo. Si el equipo se borra
-  /// —solo se puede vacío— sus ciclos se van con él. Sin esto, el Ciclo 1
+  /// Cascade: la intervención es contenido DEL equipo. Si el equipo se borra
+  /// —solo se puede vacío— sus intervenciones se van con él. Sin esto, la Intervención 1
   /// que se crea automáticamente haría que ningún equipo pudiera borrarse.
-  carpeta     CarpetaFotos       @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  carpeta                CarpetaFotos       @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
   /// Restrict: un estado en uso no se borra; para retirarlo está `activo`.
-  estado      EstadoEquipoFotos? @relation(fields: [estadoId], references: [id], onDelete: Restrict)
-  abiertoPor  Usuario            @relation("CiclosAbiertos", fields: [abiertoPorId], references: [id], onDelete: Restrict)
-  cerradoPor  Usuario?           @relation("CiclosCerrados", fields: [cerradoPorId], references: [id], onDelete: SetNull)
-  actividades ActividadFotos[]
-  /// Las fotos SUELTAS de la visita (Fase 4): lo que documenta el equipo sin
+  estado                 EstadoEquipoFotos? @relation(fields: [estadoId], references: [id], onDelete: Restrict)
+  abiertoPor             Usuario            @relation("IntervencionesAbiertas", fields: [abiertoPorId], references: [id], onDelete: Restrict)
+  cerradoPor             Usuario?           @relation("IntervencionesCerradas", fields: [cerradoPorId], references: [id], onDelete: SetNull)
+  actividades            ActividadFotos[]
+  /// Las observaciones LEVANTADAS en esta intervención. Las que se arrastran de
+  /// intervenciones anteriores no cuelgan de aquí: son del equipo (Fase 5).
+  observaciones          ObservacionFotos[] @relation("ObservacionesLevantadas")
+  observacionesResueltas ObservacionFotos[] @relation("ObservacionesResueltas")
+  /// Las fotos SUELTAS de la intervención (Fase 4): lo que documenta el equipo sin
   /// corresponder a una actividad concreta. Sustituyen al álbum.
-  fotos       Foto[]
+  fotos                  Foto[]
+  /// El comentario DEL CONJUNTO (Fase 6): lo que se dice de la tanda, no de
+  /// una foto suelta.
+  comentarios            ComentarioFotos[]
 
   @@unique([carpetaId, numero])
-  /// ⚠️ Falta aquí el invariante MÁS importante: **un solo ciclo abierto por
+  /// ⚠️ Falta aquí el invariante MÁS importante: **una sola intervención abierta por
   /// equipo**. Es un índice único PARCIAL (`WHERE "cerradoEn" IS NULL`) y
   /// Prisma no sabe declararlo, así que lo añade la migración a mano —igual
   /// que los dos CHECK del módulo—. Nada en este archivo delata que existe
   /// salvo este comentario.
   @@index([carpetaId, abiertoEn])
-  @@map("ciclos_fotos")
+  @@map("intervenciones_fotos")
 }
 
 /// ⚠️ **RETIRADO en la Fase 4 del rediseño. Es historia de solo lectura.**
 ///
 /// Nada crea, edita ni borra álbumes ya: no hay rutas, no hay pantalla, y
-/// ninguna foto cuelga de aquí —desde la Fase 4 cuelgan de un CICLO o de una
+/// ninguna foto cuelga de aquí —desde la Fase 4 cuelgan de una INTERVENCIÓN o de una
 /// ACTIVIDAD—. La tabla sobrevive por UNA razón: `ComentarioFotos.albumId` se
 /// conserva de solo lectura para no perder los comentarios que se escribieron
 /// sobre un álbum, y esa FK necesita que las filas sigan existiendo. Mismo
@@ -795,13 +877,6 @@ enum EstadoActividadFotos {
   COMPLETADA
 }
 
-/// Opcional (§13): HVC no la exige para el flujo básico.
-enum PrioridadActividadFotos {
-  BAJA
-  MEDIA
-  ALTA
-}
-
 /// Una tarea de inspección (§13).
 ///
 /// Cuelga de una CARPETA y no de un `Equipo`, aunque §13 diga «dentro de
@@ -834,28 +909,35 @@ enum MomentoEvidenciaFotos {
 }
 
 model ActividadFotos {
-  id     Int    @id @default(autoincrement())
-  /// ⚠️ Cuelga del CICLO, no de la carpeta. La carpeta se deduce del ciclo;
-  /// guardarla además sería una segunda fuente de verdad y la primera vez
-  /// que alguien moviera un ciclo empezaría a mentir. Es el mismo criterio
-  /// por el que `Foto` nunca tuvo `carpetaId`.
-  cicloId Int
+  id             Int @id @default(autoincrement())
+  /// ⚠️ Cuelga de la INTERVENCIÓN, no de la carpeta. La carpeta se deduce de
+  /// ella; guardarla además sería una segunda fuente de verdad y la primera
+  /// vez que alguien moviera una intervención empezaría a mentir. Es el mismo
+  /// criterio por el que `Foto` nunca tuvo `carpetaId`.
+  intervencionId Int
+
+  /// ⚠️ **Una actividad es SOLO un nombre y un check.**
+  ///
+  /// Aquí vivían `descripcion`, `prioridad`, `fecha` y `responsableId`: el
+  /// «detalle» que se editaba en un diálogo aparte. Se retiraron enteros
+  /// —columnas incluidas— porque en obra nadie los rellenaba: al medirlo,
+  /// de 49 actividades en local y 1 en producción, **ninguna tenía ni uno
+  /// de los cuatro**. No es un recorte a ciegas: sin datos que preservar no
+  /// aplica el trato de «dejar de exponer pero conservar» que sí recibieron
+  /// los valores viejos de los enums de la bitácora.
+  ///
+  /// Lo que cuelga de una actividad es lo que se usa: su evidencia, sus
+  /// fotos, sus observaciones y sus comentarios.
   titulo String
 
-  descripcion String?
-  estado      EstadoActividadFotos     @default(PENDIENTE)
-  prioridad   PrioridadActividadFotos?
+  estado EstadoActividadFotos @default(PENDIENTE)
 
   /// Qué se espera fotografiar aquí (Fase 3). Se COPIA del catálogo, como el
   /// título, y por lo mismo: cambiarlo en el catálogo no puede reescribir lo
-  /// que se le pidió a una visita ya hecha.
+  /// que se le pidió a una intervención ya hecha.
   evidencia TipoEvidenciaFotos @default(UNA)
 
-  /// El día al que corresponde el trabajo, no el de creación.
-  fecha DateTime? @db.Date
-
-  responsableId Int?
-  creadoPorId   Int
+  creadoPorId Int
 
   /// Quién la completó y cuándo (§13). Se rellenan a la vez al pasar a
   /// COMPLETADA y se vacían al reabrirla: «completada» sin saber por
@@ -866,15 +948,15 @@ model ActividadFotos {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
-  ciclo         CicloFotos        @relation(fields: [cicloId], references: [id], onDelete: Cascade)
-  responsable   Usuario?          @relation("ActividadesResponsable", fields: [responsableId], references: [id], onDelete: SetNull)
-  creadoPor     Usuario           @relation("ActividadesCreadas", fields: [creadoPorId], references: [id], onDelete: Restrict)
-  completadaPor Usuario?          @relation("ActividadesCompletadas", fields: [completadaPorId], references: [id], onDelete: SetNull)
+  intervencion  IntervencionFotos  @relation(fields: [intervencionId], references: [id], onDelete: Cascade)
+  creadoPor     Usuario            @relation("ActividadesCreadas", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  completadaPor Usuario?           @relation("ActividadesCompletadas", fields: [completadaPorId], references: [id], onDelete: SetNull)
   fotos         Foto[]
   comentarios   ComentarioFotos[]
+  /// Lo que quedó pendiente EN esta actividad concreta.
+  observaciones ObservacionFotos[]
 
-  @@index([cicloId, estado])
-  @@index([responsableId, estado])
+  @@index([intervencionId, estado])
   @@map("actividades_fotos")
 }
 
@@ -933,7 +1015,7 @@ model InvitacionCliente {
   creadoEn   DateTime         @default(now())
   aceptadaEn DateTime?
   /// Se rellena al activar: la cuenta que nació de esta invitación.
-  clienteId Int?
+  clienteId  Int?
 
   invitadoPor Usuario             @relation("InvitacionesHechas", fields: [invitadoPorId], references: [id], onDelete: Restrict)
   cliente     Usuario?            @relation("InvitacionAceptada", fields: [clienteId], references: [id], onDelete: SetNull)
@@ -980,16 +1062,16 @@ model InvitacionCarpeta {
 model Foto {
   id Int @id @default(autoincrement())
 
-  /// Una foto suelta de la VISITA: lo que se documenta del equipo sin que
+  /// Una foto suelta de la INTERVENCIÓN: lo que se documenta del equipo sin que
   /// corresponda a una actividad concreta (Fase 4 del rediseño).
   ///
   /// ⚠️ Sustituye a `albumId`, que se fue con los álbumes. Los TRES sitios
-  /// donde puede estar una foto son ahora: colgando de un ciclo, colgando de
+  /// donde puede estar una foto son ahora: colgando de una intervención, colgando de
   /// una actividad, o en la bandeja de §18 —las dos en null—. Nunca las dos
   /// a la vez, y eso lo hace cumplir `fotos_un_solo_dueno_chk`, que la
-  /// migración reescribió para nombrar `cicloId` en vez de `albumId`.
-  cicloId     Int?
-  actividadId Int?
+  /// migración reescribió para nombrar `intervencionId` en vez de `albumId`.
+  intervencionId Int?
+  actividadId    Int?
 
   subidaPorId Int
 
@@ -1018,12 +1100,12 @@ model Foto {
 
   creadoEn DateTime @default(now())
 
-  ciclo       CicloFotos?       @relation(fields: [cicloId], references: [id], onDelete: Cascade)
-  actividad   ActividadFotos?   @relation(fields: [actividadId], references: [id], onDelete: Cascade)
-  subidaPor   Usuario           @relation("FotosSubidas", fields: [subidaPorId], references: [id], onDelete: Restrict)
-  comentarios ComentarioFotos[]
+  intervencion IntervencionFotos? @relation(fields: [intervencionId], references: [id], onDelete: Cascade)
+  actividad    ActividadFotos?    @relation(fields: [actividadId], references: [id], onDelete: Cascade)
+  subidaPor    Usuario            @relation("FotosSubidas", fields: [subidaPorId], references: [id], onDelete: Restrict)
+  comentarios  ComentarioFotos[]
 
-  @@index([cicloId, creadoEn])
+  @@index([intervencionId, creadoEn])
   @@index([actividadId, creadoEn])
   /// «El antes de esta actividad» es la consulta de cada tarjeta (Fase 3).
   @@index([actividadId, momento])
@@ -1048,10 +1130,24 @@ model Foto {
 model ComentarioFotos {
   id Int @id @default(autoincrement())
 
-  carpetaId Int?
-  actividadId Int?
-  albumId   Int?
-  fotoId    Int?
+  /// Los CINCO sitios donde puede colgar un comentario, y exactamente uno
+  /// va relleno. Lo hace cumplir `comentarios_fotos_un_solo_dueno_chk`.
+  ///
+  /// `intervencionId` es el comentario DEL CONJUNTO: lo que se dice de la
+  /// tanda de fotos sueltas de esa intervención, frente a `fotoId`, que es lo
+  /// que se dice de UNA. Los dos son opcionales y no se excluyen —una subida
+  /// en conjunto puede llevar su comentario de grupo, comentarios por foto,
+  /// los dos o ninguno—.
+  ///
+  /// ⚠️ `albumId` NO tiene ya puerta en la API: el álbum se retiró en la Fase
+  /// 4 y la intervención ocupó su sitio como agrupador. La columna se queda
+  /// porque tirarla obligaría a decidir qué hacer con filas que pudieran
+  /// existir en otra base; medido, no existen —0 en local y 0 en Neon—.
+  carpetaId      Int?
+  intervencionId Int?
+  actividadId    Int?
+  albumId        Int?
+  fotoId         Int?
 
   texto String
 
@@ -1065,13 +1161,15 @@ model ComentarioFotos {
   /// mismo instante en que se creó».
   editadoEn DateTime?
 
-  carpeta CarpetaFotos? @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
-  actividad ActividadFotos? @relation(fields: [actividadId], references: [id], onDelete: Cascade)
-  album   AlbumFotos?   @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  foto    Foto?         @relation(fields: [fotoId], references: [id], onDelete: Cascade)
-  autor   Usuario?      @relation("ComentariosFotos", fields: [autorId], references: [id], onDelete: SetNull)
+  carpeta      CarpetaFotos?      @relation(fields: [carpetaId], references: [id], onDelete: Cascade)
+  intervencion IntervencionFotos? @relation(fields: [intervencionId], references: [id], onDelete: Cascade)
+  actividad    ActividadFotos?    @relation(fields: [actividadId], references: [id], onDelete: Cascade)
+  album        AlbumFotos?        @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  foto         Foto?              @relation(fields: [fotoId], references: [id], onDelete: Cascade)
+  autor        Usuario?           @relation("ComentariosFotos", fields: [autorId], references: [id], onDelete: SetNull)
 
   @@index([carpetaId, creadoEn])
+  @@index([intervencionId, creadoEn])
   @@index([actividadId, creadoEn])
   @@index([albumId, creadoEn])
   @@index([fotoId, creadoEn])
@@ -1167,18 +1265,21 @@ enum EntidadFotos {
   /// conserva porque hay filas históricas que lo usan; nada nuevo lo
   /// escribe. Mismo trato que `EQUIPO`.
   TAREA
-  /// Una actividad de un ciclo. Sustituye a `TAREA` desde la Fase 0.
+  /// Una actividad de una intervención. Sustituye a `TAREA` desde la Fase 0.
   ACTIVIDAD
   /// ⚠️ Del atajo de §12 —un equipo creado DESDE Fotos en el catálogo de
   /// Gestión de Equipos—, retirado en la Fase 1a. El valor se conserva
   /// porque hay filas históricas que lo usan; nada nuevo lo escribe.
   EQUIPO
+  /// ⚠️ Histórica: sustituida por INTERVENCION. Se conserva de solo lectura.
   CICLO
+  INTERVENCION
   ESTADO_EQUIPO
   /// Una DEFINICIÓN de campo configurable (Fase 1b): el catálogo que el
   /// ADMIN_GLOBAL configura, no el valor que rellena un supervisor. Los
   /// valores se auditan como EDICION de su CARPETA, que es donde se leen.
   CAMPO_EQUIPO
+  OBSERVACION
   /// El vocabulario de la Fase 2: familias y tipos de sistema, y el catálogo
   /// de actividades estándar. Son configuración del módulo, así que sus
   /// eventos van sin `carpetaId`, como las plantillas.
@@ -1200,11 +1301,25 @@ enum AccionFotos {
   TAREA_REABIERTA
   ACTIVIDAD_COMPLETADA
   ACTIVIDAD_REABIERTA
+  /// Las observaciones de §8 (Fase 5). Resolver y reabrir tienen acción
+  /// propia por lo mismo que completar una actividad: es lo que HVC quiere
+  /// poder auditar —quién dio por cerrado qué, y cuándo—.
+  OBSERVACION_RESUELTA
+  OBSERVACION_REABIERTA
+  /// ⚠️ Renombrados a INTERVENCION_* al pasar Ciclo → Intervención. Los tres
+  /// se conservan porque hay filas históricas que los usan; nada nuevo los
+  /// escribe. Mismo trato que `TAREA_COMPLETADA` en la Fase 0 y que `EQUIPO`
+  /// en la 1a: renombrarlos sobre las filas existentes reescribiría el
+  /// pasado — un evento de agosto pasaría a hablar de algo que entonces no
+  /// se llamaba así.
   CICLO_ABIERTO
   CICLO_CERRADO
-  /// Reabrir un ciclo cerrado es excepcional y por eso tiene acción propia:
-  /// que se pueda auditar «quién descongeló este historial y cuándo».
   CICLO_REABIERTO
+  INTERVENCION_ABIERTA
+  INTERVENCION_CERRADA
+  /// Reabrir una intervención cerrada es excepcional y por eso tiene acción
+  /// propia: que se pueda auditar «quién descongeló este historial y cuándo».
+  INTERVENCION_REABIERTA
   SUBIDA_FOTO
   DESCARGA_FOTO
   CLASIFICACION
@@ -1219,7 +1334,7 @@ enum AccionFotos {
 }
 
 model EventoFotos {
-  id        Int @id @default(autoincrement())
+  id        Int  @id @default(autoincrement())
   carpetaId Int?
 
   entidad   EntidadFotos

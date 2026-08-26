@@ -15,6 +15,7 @@ import type {
   EditarActividadDto,
 } from './actividad.service';
 import { ComentarioService } from './comentario.service';
+import { ObservacionService } from './observacion.service';
 import { RequiereModulo, UsuarioActual } from '../auth/decoradores';
 import { Modulo } from '../../generated/prisma/enums';
 import type { UsuarioAutenticado } from '../auth/tipos';
@@ -40,43 +41,65 @@ export class ActividadController {
   constructor(
     private readonly actividades: ActividadService,
     private readonly comentarios: ComentarioService,
+    private readonly observaciones: ObservacionService,
   ) {}
 
   // ── Actividades ──
 
   /**
-   * Las actividades de UN CICLO. `estado` filtra; sin él, todas.
+   * Las actividades de UNA INTERVENCIÓN. `estado` filtra; sin él, todas.
    *
-   * ⚠️ Cuelga de `ciclo/:id` y no de `carpeta/:id` desde la Fase 1. Es un
+   * ⚠️ Cuelga de `intervencion/:id` y no de `carpeta/:id` desde la Fase 1. Es un
    * cambio de contrato deliberado: un equipo tiene la misma actividad
-   * repetida en cada visita, así que pedirlas «de la carpeta» no tiene una
-   * respuesta única. La pantalla siempre está mirando UN ciclo.
+   * repetida en cada intervención, así que pedirlas «de la carpeta» no tiene una
+   * respuesta única. La pantalla siempre está mirando UN intervencion.
    */
-  @Get('ciclo/:id/actividad')
+  @Get('intervencion/:id/actividad')
   listar(
     @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) cicloId: number,
+    @Param('id', ParseIntPipe) intervencionId: number,
     @Query('estado') estado?: string,
   ) {
-    return this.actividades.listar(usuario, cicloId, { estado });
+    return this.actividades.listar(usuario, intervencionId, { estado });
   }
 
-  @Post('ciclo/:id/actividad')
+  @Post('intervencion/:id/actividad')
   crear(
     @UsuarioActual() usuario: UsuarioAutenticado,
-    @Param('id', ParseIntPipe) cicloId: number,
+    @Param('id', ParseIntPipe) intervencionId: number,
     @Body() dto: CrearActividadDto,
   ) {
-    return this.actividades.crear(usuario, cicloId, dto);
+    return this.actividades.crear(usuario, intervencionId, dto);
   }
 
+  // ⚠️ Aquí estaba `GET actividad-asignables`, que servía el desplegable de
+  // «responsable». Se fue con el detalle de la actividad: sin responsable no
+  // hay a quién asignar. La ruta se retira entera en vez de dejarla
+  // respondiendo una lista que nadie consume — un endpoint sin puerta es el
+  // patrón que este módulo lleva dos fases persiguiendo.
+
   /**
-   * Quién puede ser responsable (§13). Hermana de `actividad/:id` y declarada
-   * ANTES, para que `asignables` no caiga en el parámetro `:id`.
+   * Las observaciones de UNA actividad.
+   *
+   * Cuelgan de `actividad/:id` y no de `intervencion/:id` porque se leen dentro de
+   * la actividad, junto a sus fotos y sus comentarios. El panel general del
+   * equipo no las repite: las cuenta una sola vez, en su sitio.
    */
-  @Get('actividad-asignables')
-  asignables() {
-    return this.actividades.asignables();
+  @Get('actividad/:id/observacion')
+  observacionesDeActividad(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.observaciones.listarDeActividad(usuario, id);
+  }
+
+  @Post('actividad/:id/observacion')
+  crearObservacionEnActividad(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: { texto?: unknown },
+  ) {
+    return this.observaciones.crearEnActividad(usuario, id, dto?.texto);
   }
 
   /** Las fotos de una actividad (§15). */

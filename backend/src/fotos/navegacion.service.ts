@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
+import { ObservacionService } from './observacion.service';
 import type { Alcance } from './acceso.service';
 import type {
   PermisoCarpeta,
@@ -57,7 +58,7 @@ export interface CarpetaListada {
    * ⚠️ Aquí iba también `albumes`. Se fue con ellos en la Fase 4: la tarjeta
    * contaba dos agrupadores —«3 álbumes · 12 fotos»— y con el álbum retirado
    * el otro sería «3 visitas», que es un dato del equipo y no del subárbol.
-   * Cuenta las fotos SUELTAS de los ciclos y también las de las actividades:
+   * Cuenta las fotos SUELTAS de las intervenciones y también las de las actividades:
    * para quien mira una tarjeta, «12 fotos» son las que hay dentro, no las
    * que están en un sitio concreto.
    */
@@ -78,17 +79,26 @@ export interface CarpetaListada {
    */
   tipo: TipoCarpetaFotos;
   /**
-   * El estado del equipo en su ciclo MÁS RECIENTE (§7), para pintar la
-   * tarjeta sin entrar. `null` en una carpeta corriente —no tiene ciclos— y
-   * en un equipo cuya visita en curso aún no se ha revisado.
+   * El estado del equipo en su intervención MÁS RECIENTE (§7), para pintar la
+   * tarjeta sin entrar. `null` en una carpeta corriente —no tiene intervenciones— y
+   * en un equipo cuya intervención en curso aún no se ha revisado.
    *
    * ⚠️ Se llama `estadoEquipo` y no `estado` a propósito: la tarjeta YA tuvo
    * un campo `estado` que significaba otra cosa —el `EstadoSede`
    * ACTIVA/INACTIVA que se retiró en v3—, y reusar el nombre para un
    * concepto distinto es la clase de cosa que se lee mal año y medio
-   * después. El ciclo sí llama `estado` al suyo: ahí no hay ambigüedad.
+   * después. La intervención sí llama `estado` al suyo: ahí no hay ambigüedad.
    */
   estadoEquipo: { id: number; nombre: string; color: string } | null;
+  /**
+   * Cuántas observaciones siguen abiertas en este equipo (Fase 5).
+   *
+   * Va en la tarjeta por lo mismo que el estado: saber qué falta sin entrar
+   * equipo por equipo es justo el recorrido que este rediseño quita. Cuenta
+   * las del EQUIPO, no las del subárbol —una carpeta de proyecto no tiene
+   * observaciones propias— y por eso es 0 en cualquier carpeta corriente.
+   */
+  observacionesPendientes: number;
 }
 
 /**
@@ -140,11 +150,11 @@ const CAMPOS_CARPETA = {
   cerrada: true,
   actualizadoEn: true,
   tipo: true,
-  // ⚠️ El estado que se pinta en la tarjeta es el del ciclo MÁS RECIENTE
+  // ⚠️ El estado que se pinta en la tarjeta es el de la intervención MÁS RECIENTE
   // (§7), abierto o cerrado. Se pide 1 ordenado por `numero` desc en vez de
   // traer el historial entero: una rejilla con 40 equipos no puede cargar
   // sus 40 historiales para enseñar un color.
-  ciclos: {
+  intervenciones: {
     orderBy: { numero: 'desc' as const },
     take: 1,
     select: {
@@ -162,7 +172,7 @@ interface FilaCarpeta {
   cerrada: boolean;
   actualizadoEn: Date;
   tipo: TipoCarpetaFotos;
-  ciclos: {
+  intervenciones: {
     numero: number;
     cerradoEn: Date | null;
     estado: { id: number; nombre: string; color: string } | null;
@@ -180,6 +190,7 @@ export class NavegacionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly acceso: AccesoService,
+    private readonly observaciones: ObservacionService,
   ) {}
 
   /** ¿Este alcance recorre el árbol completo? */
@@ -524,35 +535,42 @@ export class NavegacionService {
     );
     const idsVisibles = ramaVisible.map((d) => d.id);
 
-    // 2. Los CICLOS de esas carpetas: hacen de puente para las fotos, igual
+    // 2. Las INTERVENCIONES de esas carpetas: hacen de puente para las fotos, igual
     // que lo hacían los álbumes antes de la Fase 4. Prisma no agrupa por
     // campo de una relación, así que el puente sigue haciendo falta.
-    const ciclos = await this.prisma.cicloFotos.findMany({
+    const intervenciones = await this.prisma.intervencionFotos.findMany({
       where: { carpetaId: { in: idsVisibles } },
       select: { id: true, carpetaId: true },
     });
-    const carpetaDeCiclo = new Map(ciclos.map((c) => [c.id, c.carpetaId]));
+    const carpetaDeIntervención = new Map(
+      intervenciones.map((c) => [c.id, c.carpetaId]),
+    );
 
-    // 3. Fotos por ciclo, acotadas a esos ciclos. Las que no cuelgan de uno
+    // 3. Fotos por intervención, acotadas a esos intervenciones. Las que no cuelgan de uno
     // son las de la bandeja de §18 —que no están en ninguna carpeta— y las
     // de una actividad, que se cuentan aparte en el paso siguiente.
-    const fotosPorCiclo =
-      ciclos.length === 0
+    const fotosPorIntervencion =
+      intervenciones.length === 0
         ? []
         : await this.prisma.foto.groupBy({
-            by: ['cicloId'],
-            where: { cicloId: { in: ciclos.map((c) => c.id) } },
+            by: ['intervencionId'],
+            where: { intervencionId: { in: intervenciones.map((c) => c.id) } },
             _count: { _all: true },
           });
+
+    // 5. Y lo que sigue pendiente en cada equipo (Fase 5). Una consulta
+    // agrupada más, acotada al mismo subárbol que todo lo anterior.
+    const pendientesDe =
+      await this.observaciones.pendientesPorCarpeta(idsVisibles);
 
     const fotosDe = new Map<number, number>();
     const sumar = (carpetaId: number, cuantas: number) =>
       fotosDe.set(carpetaId, (fotosDe.get(carpetaId) ?? 0) + cuantas);
 
-    for (const f of fotosPorCiclo) {
-      // `by: ['cicloId']` lo tipa nullable aunque el where ya lo excluya.
-      if (f.cicloId === null) continue;
-      const carpeta = carpetaDeCiclo.get(f.cicloId);
+    for (const f of fotosPorIntervencion) {
+      // `by: ['intervencionId']` lo tipa nullable aunque el where ya lo excluya.
+      if (f.intervencionId === null) continue;
+      const carpeta = carpetaDeIntervención.get(f.intervencionId);
       if (carpeta === undefined) continue;
       sumar(carpeta, f._count._all);
     }
@@ -562,13 +580,15 @@ export class NavegacionService {
     // no las que están en un sitio concreto. Antes no existía este paso
     // porque toda foto de una carpeta colgaba de un álbum.
     const actividades =
-      ciclos.length === 0
+      intervenciones.length === 0
         ? []
         : await this.prisma.actividadFotos.findMany({
-            where: { cicloId: { in: ciclos.map((c) => c.id) } },
-            select: { id: true, cicloId: true },
+            where: { intervencionId: { in: intervenciones.map((c) => c.id) } },
+            select: { id: true, intervencionId: true },
           });
-    const cicloDeActividad = new Map(actividades.map((a) => [a.id, a.cicloId]));
+    const intervencionDeActividad = new Map(
+      actividades.map((a) => [a.id, a.intervencionId]),
+    );
 
     const fotosPorActividad =
       actividades.length === 0
@@ -581,9 +601,9 @@ export class NavegacionService {
 
     for (const f of fotosPorActividad) {
       if (f.actividadId === null) continue;
-      const ciclo = cicloDeActividad.get(f.actividadId);
-      if (ciclo === undefined) continue;
-      const carpeta = carpetaDeCiclo.get(ciclo);
+      const intervencion = intervencionDeActividad.get(f.actividadId);
+      if (intervencion === undefined) continue;
+      const carpeta = carpetaDeIntervención.get(intervencion);
       if (carpeta === undefined) continue;
       sumar(carpeta, f._count._all);
     }
@@ -600,10 +620,11 @@ export class NavegacionService {
         actualizadoEn: c.actualizadoEn,
         permiso,
         tipo: c.tipo,
-        // El estado del ciclo más reciente (§7). `null` en una carpeta
-        // corriente —no tiene ciclos— y también en un equipo cuya visita en
+        // El estado de la intervención más reciente (§7). `null` en una carpeta
+        // corriente —no tiene intervenciones— y también en un equipo cuya intervención en
         // curso todavía no ha sido revisada: nace sin estado a propósito.
-        estadoEquipo: c.ciclos[0]?.estado ?? null,
+        estadoEquipo: c.intervenciones[0]?.estado ?? null,
+        observacionesPendientes: pendientesDe.get(c.id) ?? 0,
       };
     });
   }

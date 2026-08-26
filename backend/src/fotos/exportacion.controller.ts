@@ -48,8 +48,8 @@ export class ExportacionFotosController {
     private readonly exportacion: ExportacionService,
   ) {}
 
-  /** Las actividades de UN CICLO (§13). */
-  @Get('ciclo/:id/actividad/exportar')
+  /** Las actividades de UNA INTERVENCIÓN (§13). */
+  @Get('intervencion/:id/actividad/exportar')
   async exportarActividades(
     @Res() res: Response,
     @UsuarioActual() usuario: UsuarioAutenticado,
@@ -60,7 +60,7 @@ export class ExportacionFotosController {
     await this.enviar(
       res,
       formato,
-      await this.exportable.actividadesDeCiclo(usuario, id, { estado }),
+      await this.exportable.actividadesDeIntervencion(usuario, id, { estado }),
     );
   }
 

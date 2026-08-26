@@ -8,7 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar, describir } from '../common/texto';
 import type { TipoEvidenciaFotos } from '../../generated/prisma/enums';
@@ -53,16 +53,16 @@ const SELECT_DEFINICION = {
 /**
  * El catálogo de actividades estándar (Fase 2 del rediseño).
  *
- * Resuelve para las visitas el mismo problema que §20 resolvía para las
+ * Resuelve para las intervenciones el mismo problema que §20 resolvía para las
  * estructuras: sin catálogo, uno escribe «Pernos», otro «Revisar pernos» y
- * otro «Pernería», y entonces no se puede comparar una visita con la
+ * otro «Pernería», y entonces no se puede comparar una intervención con la
  * siguiente ni contar nada.
  *
  * ⚠️ **Define el checklist, NO lo impone.** Al dar de alta un equipo se
  * PRESELECCIONAN las actividades de su tipo de sistema y quien lo crea las
- * ajusta; dentro de un ciclo abierto se pueden seguir añadiendo. Y lo que se
+ * ajusta; dentro de una intervención abierta se pueden seguir añadiendo. Y lo que se
  * escribe en `ActividadFotos` es una COPIA del nombre, no una FK: renombrar
- * una definición no puede reescribir lo que dice una visita ya hecha. Es el
+ * una definición no puede reescribir lo que dice una intervención ya hecha. Es el
  * mismo criterio que `CostoItem` con los ítems de Costos.
  *
  * ⚠️ Y por eso mismo **no hay «actualizar las actividades ya creadas»**. Si
@@ -76,7 +76,7 @@ export class CatalogoActividadService {
     private readonly prisma: PrismaService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
-    private readonly ciclos: CicloService,
+    private readonly intervenciones: IntervencionService,
   ) {}
 
   /** El tipo de evidencia que propone la definición (Fase 3). */
@@ -321,9 +321,9 @@ export class CatalogoActividadService {
    *
    * ⚠️ Y aquí SÍ se puede borrar aunque «se haya usado», al revés que un
    * estado de equipo o un tipo de sistema. La diferencia es que nada apunta
-   * aquí: las actividades de un ciclo copiaron el nombre y viven por su
+   * aquí: las actividades de una intervención copiaron el nombre y viven por su
    * cuenta, así que borrar una definición no deja ninguna fila coja ni
-   * cambia una sola visita. Lo único que se pierde es la propuesta para las
+   * cambia una sola intervención. Lo único que se pierde es la propuesta para las
    * próximas altas.
    */
   async eliminar(usuario: UsuarioAutenticado, id: number) {
@@ -356,7 +356,7 @@ export class CatalogoActividadService {
     return this.aplanar(definicion);
   }
 
-  // ── Estampar el catálogo en un ciclo ──────────────────────────
+  // ── Estampar el catálogo en una intervención ──────────────────────────
 
   /**
    * Las que se proponen para un tipo de sistema. Solo ACTIVAS.
@@ -369,15 +369,15 @@ export class CatalogoActividadService {
     return this.prisma.definicionActividadFotos.findMany({
       where: { activo: true, tipos: { some: { tipoSistemaId } } },
       orderBy: [{ orden: 'asc' }, { id: 'asc' }],
-      select: { id: true, nombre: true, descripcion: true, evidencia: true },
+      select: { id: true, nombre: true, evidencia: true },
     });
   }
 
   /**
-   * Escribe el checklist inicial de un ciclo recién creado.
+   * Escribe el checklist inicial de una intervención recién creado.
    *
    * Lo llama `CarpetaService.crear` DENTRO de su transacción, igual que
-   * `CicloService.abrirPrimeroEn`: un equipo que nace con su ciclo y su
+   * `IntervencionService.abrirPrimeroEn`: un equipo que nace con su intervención y su
    * checklist a medias es peor que uno que no nace.
    *
    * ⚠️ **`undefined` y `[]` significan cosas distintas, y la diferencia es
@@ -392,7 +392,7 @@ export class CatalogoActividadService {
    */
   async estamparEn(
     tx: Tx,
-    cicloId: number,
+    intervencionId: number,
     usuarioId: number,
     tipoSistemaId: number | null,
     elegidas: number[] | undefined,
@@ -411,12 +411,21 @@ export class CatalogoActividadService {
     if (aCrear.length === 0) return 0;
 
     await tx.actividadFotos.createMany({
+      // ⚠️ Se copian el NOMBRE y la EVIDENCIA, y nada más.
+      //
+      // La descripción del catálogo se queda EN el catálogo: una actividad ya
+      // no tiene descripción. Sigue sirviendo donde se elige —el checklist
+      // del alta y el diálogo «Del catálogo» la enseñan para saber qué es—,
+      // pero no viaja a la intervención.
+      //
+      // ⚠️ Y ojo con este `createMany`: un `data:` construido con `.map()` NO
+      // pasa por la comprobación de propiedades de más de TypeScript, que
+      // solo se aplica a los literales. Copiar aquí un campo que ya no existe
+      // compila y revienta en la primera llamada real — pasó exactamente eso
+      // al retirar el detalle. Es la misma trampa que `SELECT_ACTIVIDAD`.
       data: aCrear.map((p) => ({
-        cicloId,
+        intervencionId,
         titulo: p.nombre,
-        descripcion: p.descripcion,
-        // La evidencia se COPIA, como el nombre y por lo mismo: cambiarla en
-        // el catálogo no puede reescribir lo que se le pidió a una visita.
         evidencia: p.evidencia,
         creadoPorId: usuarioId,
       })),
@@ -425,24 +434,28 @@ export class CatalogoActividadService {
   }
 
   /**
-   * Añade actividades del catálogo a un ciclo YA abierto.
+   * Añade actividades del catálogo a una intervención YA abierto.
    *
    * Existe porque el catálogo no puede servir solo en el alta: un equipo dado
    * de alta antes de que HVC cargara su checklist se quedaría sin él para
    * siempre, y cambiar el tipo de sistema de un equipo no reescribe sus
-   * visitas (ni debe).
+   * intervenciones (ni debe).
    *
-   * Salta las que ya están por TÍTULO, no por id: la actividad del ciclo es
+   * Salta las que ya están por TÍTULO, no por id: la actividad de la intervención es
    * una copia, así que el título es lo único que las relaciona — y es lo que
    * evita duplicar «Limpieza de filtros» al pulsar dos veces.
    */
-  async anadirACiclo(
+  async anadirAIntervencion(
     usuario: UsuarioAutenticado,
-    cicloId: number,
+    intervencionId: number,
     definicionIds: unknown,
   ) {
-    const ciclo = await this.ciclos.exigirCiclo(usuario, cicloId, 'EDICION');
-    this.ciclos.exigirAbierto(ciclo);
+    const intervencion = await this.intervenciones.exigirIntervencion(
+      usuario,
+      intervencionId,
+      'EDICION',
+    );
+    this.intervenciones.exigirAbierto(intervencion);
 
     if (!Array.isArray(definicionIds) || definicionIds.length === 0)
       throw new BadRequestException(
@@ -459,7 +472,7 @@ export class CatalogoActividadService {
     const definiciones = await this.prisma.definicionActividadFotos.findMany({
       where: { id: { in: ids } },
       orderBy: [{ orden: 'asc' }, { id: 'asc' }],
-      select: { id: true, nombre: true, descripcion: true, evidencia: true },
+      select: { id: true, nombre: true, evidencia: true },
     });
     if (definiciones.length === 0)
       throw new NotFoundException(
@@ -467,7 +480,10 @@ export class CatalogoActividadService {
       );
 
     const yaEstan = await this.prisma.actividadFotos.findMany({
-      where: { cicloId, titulo: { in: definiciones.map((d) => d.nombre) } },
+      where: {
+        intervencionId,
+        titulo: { in: definiciones.map((d) => d.nombre) },
+      },
       select: { titulo: true },
     });
     const titulos = new Set(yaEstan.map((a) => a.titulo));
@@ -476,24 +492,23 @@ export class CatalogoActividadService {
     if (nuevas.length > 0)
       await this.prisma.actividadFotos.createMany({
         data: nuevas.map((d) => ({
-          cicloId,
+          intervencionId,
           titulo: d.nombre,
-          descripcion: d.descripcion,
           evidencia: d.evidencia,
           creadoPorId: usuario.id,
         })),
       });
 
-    await this.acceso.marcarActividad(ciclo.carpeta.ruta);
+    await this.acceso.marcarActividad(intervencion.carpeta.ruta);
     if (nuevas.length > 0)
       await this.auditoria.registrar(usuario, {
-        carpetaId: ciclo.carpetaId,
+        carpetaId: intervencion.carpetaId,
         entidad: 'ACTIVIDAD',
-        entidadId: ciclo.id,
+        entidadId: intervencion.id,
         accion: 'CREACION',
         descripcion:
-          `Añadió ${nuevas.length} actividad(es) del catálogo al ciclo ` +
-          `${ciclo.numero} de "${ciclo.carpeta.nombre}".`,
+          `Añadió ${nuevas.length} actividad(es) del catálogo a la intervención ` +
+          `${intervencion.numero} de "${intervencion.carpeta.nombre}".`,
       });
 
     return {

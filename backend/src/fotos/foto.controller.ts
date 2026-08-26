@@ -26,20 +26,20 @@ import type { UsuarioAutenticado } from '../auth/tipos';
  * Las fotos.
  *
  * ⚠️ Se llamaba «Álbumes y fotos» y ya no hay álbumes (Fase 4). La galería
- * volvió a ser una lista plana, pero colgando del CICLO y no de la carpeta:
- * agrupar por visita es lo que HVC pregunta, y el álbum era un segundo
+ * volvió a ser una lista plana, pero colgando de la INTERVENCIÓN y no de la carpeta:
+ * agrupar por intervención es lo que HVC pregunta, y el álbum era un segundo
  * agrupador que obligaba a elegir dónde mirar.
  *
  * Las fotos van por su id —que es como llegan los enlaces de descarga— y lo
- * que las agrupa va en la URL: `ciclo/:id/foto` o `actividad/:id/foto`.
+ * que las agrupa va en la URL: `intervencion/:id/foto` o `actividad/:id/foto`.
  */
 @RequiereModulo(Modulo.FOTOS)
 @Controller('fotos')
 export class FotoController {
   constructor(private readonly fotos: FotoService) {}
 
-  /** Las fotos sueltas de una visita, paginadas. */
-  @Get('ciclo/:id/foto')
+  /** Las fotos sueltas de una intervención, paginadas. */
+  @Get('intervencion/:id/foto')
   galeria(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
@@ -57,8 +57,8 @@ export class FotoController {
     });
   }
 
-  /** Quiénes han subido fotos a esta visita, para el filtro. */
-  @Get('ciclo/:id/autores')
+  /** Quiénes han subido fotos a esta intervención, para el filtro. */
+  @Get('intervencion/:id/autores')
   autores(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
@@ -67,13 +67,13 @@ export class FotoController {
   }
 
   /**
-   * Subir fotos sueltas a la visita.
+   * Subir fotos sueltas a la intervención.
    *
    * Sin paso de «nombrar» nada (§17): con los álbumes retirados no hay
-   * agrupación que inventar, la foto entra directamente en el ciclo. Multer
+   * agrupación que inventar, la foto entra directamente en la intervención. Multer
    * las mantiene en memoria: nunca tocan el disco, que en Render es efímero.
    */
-  @Post('ciclo/:id/foto')
+  @Post('intervencion/:id/foto')
   @UseFilters(ErroresDeSubidaFilter)
   @UseInterceptors(
     FilesInterceptor('fotos', LIMITES.fotosPorSubida, {
@@ -88,7 +88,7 @@ export class FotoController {
   ) {
     return this.fotos.subir(
       usuario,
-      { tipo: 'ciclo', cicloId: id },
+      { tipo: 'intervencion', intervencionId: id },
       archivos,
       dto?.descripcion,
     );
@@ -157,7 +157,7 @@ export class FotoController {
     @Body()
     dto: {
       fotoIds?: number[];
-      cicloId?: number;
+      intervencionId?: number;
       actividadId?: number;
     },
   ) {
@@ -171,13 +171,16 @@ export class FotoController {
     const destino =
       dto?.actividadId !== undefined
         ? ({ tipo: 'actividad', actividadId: Number(dto.actividadId) } as const)
-        : dto?.cicloId !== undefined
-          ? ({ tipo: 'ciclo', cicloId: Number(dto.cicloId) } as const)
+        : dto?.intervencionId !== undefined
+          ? ({
+              tipo: 'intervencion',
+              intervencionId: Number(dto.intervencionId),
+            } as const)
           : null;
 
     if (!destino)
       throw new BadRequestException(
-        'Indica a dónde van las fotos: una actividad o una visita.',
+        'Indica a dónde van las fotos: una actividad o una intervención.',
       );
 
     return this.fotos.clasificar(usuario, dto?.fotoIds ?? [], destino);
@@ -223,7 +226,7 @@ export class FotoController {
     @Param('fotoId', ParseIntPipe) fotoId: number,
     @Body()
     dto: {
-      cicloId?: number;
+      intervencionId?: number;
       actividadId?: number;
       bandeja?: boolean;
     },
@@ -236,13 +239,16 @@ export class FotoController {
               tipo: 'actividad',
               actividadId: Number(dto.actividadId),
             } as const)
-          : dto?.cicloId !== undefined
-            ? ({ tipo: 'ciclo', cicloId: Number(dto.cicloId) } as const)
+          : dto?.intervencionId !== undefined
+            ? ({
+                tipo: 'intervencion',
+                intervencionId: Number(dto.intervencionId),
+              } as const)
             : null;
 
     if (!destino)
       throw new BadRequestException(
-        'Indica a dónde va la foto: una actividad, una visita, o «sin clasificar».',
+        'Indica a dónde va la foto: una actividad, una intervención, o «sin clasificar».',
       );
 
     return this.fotos.mover(usuario, fotoId, destino);

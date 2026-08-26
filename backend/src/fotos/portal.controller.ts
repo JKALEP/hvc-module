@@ -11,7 +11,7 @@ import { FotoService } from './foto.service';
 import { AccesoService } from './acceso.service';
 import { ActividadService } from './actividad.service';
 import { ComentarioService } from './comentario.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import { PermiteCliente, UsuarioActual } from '../auth/decoradores';
 import type { UsuarioAutenticado } from '../auth/tipos';
 
@@ -34,7 +34,7 @@ export class PortalController {
     // dos handlers de esta clase.
     private readonly actividades_: ActividadService,
     private readonly comentarios_: ComentarioService,
-    private readonly ciclos_: CicloService,
+    private readonly intervenciones_: IntervencionService,
   ) {}
 
   private exigirCliente(usuario: UsuarioAutenticado) {
@@ -60,14 +60,14 @@ export class PortalController {
   }
 
   /**
-   * Las fotos sueltas de una visita, en solo lectura.
+   * Las fotos sueltas de una intervención, en solo lectura.
    *
    * ⚠️ Era `carpeta/:id/album` y colgaba de la carpeta. Con los álbumes
-   * retirados (Fase 4) las fotos son del CICLO, así que el cliente recorre lo
-   * mismo que un interno: carpeta → equipo → visita → fotos. §22 describe ese
+   * retirados (Fase 4) las fotos son de la INTERVENCIÓN, así que el cliente recorre lo
+   * mismo que un interno: carpeta → equipo → intervención → fotos. §22 describe ese
    * recorrido, y esta ruta es la que lo hace posible.
    */
-  @Get('ciclo/:id/foto')
+  @Get('intervencion/:id/foto')
   galeria(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
@@ -116,19 +116,19 @@ export class PortalController {
   // prometer algo que da 404.
 
   /**
-   * El historial de ciclos del equipo. El cliente lo ve COMPLETO: es
+   * El historial de intervenciónes del equipo. El cliente lo ve COMPLETO: es
    * información de su propia instalación y la trazabilidad era el objetivo.
    */
-  @Get('carpeta/:id/ciclo')
-  ciclos(
+  @Get('carpeta/:id/intervencion')
+  intervenciones(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,
   ) {
     this.exigirCliente(usuario);
-    return this.ciclos_.listar(usuario, id);
+    return this.intervenciones_.listar(usuario, id);
   }
 
-  @Get('ciclo/:id/actividad')
+  @Get('intervencion/:id/actividad')
   actividades(
     @UsuarioActual() usuario: UsuarioAutenticado,
     @Param('id', ParseIntPipe) id: number,

@@ -3,7 +3,7 @@ import * as ExcelJS from 'exceljs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar } from '../common/texto';
 import { rutaDe } from '../common/arbol-ruta';
@@ -81,7 +81,7 @@ export class ImportacionFotosService {
     private readonly prisma: PrismaService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
-    private readonly ciclos: CicloService,
+    private readonly intervenciones: IntervencionService,
   ) {}
 
   /**
@@ -313,10 +313,10 @@ export class ImportacionFotosService {
       const yaEsta =
         f.tipo === 'ACTIVIDAD'
           ? await this.prisma.actividadFotos.findFirst({
-              // La actividad cuelga del CICLO, no de la carpeta: el duplicado
-              // se busca en cualquier ciclo de ese equipo, porque «Revisar
-              // pernos» ya existe aunque sea de la visita anterior.
-              where: { ciclo: { carpetaId }, titulo: f.nombre },
+              // La actividad cuelga de la INTERVENCIÓN, no de la carpeta: el duplicado
+              // se busca en cualquier intervención de ese equipo, porque «Revisar
+              // pernos» ya existe aunque sea de la intervención anterior.
+              where: { intervencion: { carpetaId }, titulo: f.nombre },
               select: { id: true },
             })
           : null;
@@ -411,11 +411,11 @@ export class ImportacionFotosService {
        * Devuelve el id de la carpeta del camino, creándola si hace falta.
        *
        * ⚠️ El último tramo se crea como carpeta de tipo EQUIPO cuando la fila
-       * traía columna «Equipo», y entonces se le abre su Ciclo 1 en la MISMA
+       * traía columna «Equipo», y entonces se le abre su Intervención 1 en la MISMA
        * transacción. Antes se creaba corriente, y eso escribía actividades en
        * una carpeta que no era un equipo —el import saltaba §13 por escribir
-       * con `tx` en vez de pasar por el service—. Con el modelo de ciclos ese
-       * atajo dejó de existir: sin equipo no hay ciclo, y sin ciclo no hay
+       * con `tx` en vez de pasar por el service—. Con el modelo de intervenciónes ese
+       * atajo dejó de existir: sin equipo no hay intervención, y sin intervención no hay
        * dónde poner una actividad.
        *
        * Una carpeta que YA existe no cambia de tipo: el Excel no manda sobre
@@ -467,7 +467,7 @@ export class ImportacionFotosService {
             data: { ruta: rutaDe(nueva.id, padre.ruta) },
           });
           if (esEquipo)
-            await this.ciclos.abrirPrimeroEn(tx, nueva.id, usuario.id);
+            await this.intervenciones.abrirPrimeroEn(tx, nueva.id, usuario.id);
 
           creado.carpetas++;
           idPorCamino.set(clave, nueva.id);
@@ -482,7 +482,7 @@ export class ImportacionFotosService {
         const existente =
           f.tipo === 'ACTIVIDAD'
             ? await tx.actividadFotos.findFirst({
-                where: { ciclo: { carpetaId }, titulo: f.nombre },
+                where: { intervencion: { carpetaId }, titulo: f.nombre },
                 select: { id: true },
               })
             : null;
@@ -498,34 +498,41 @@ export class ImportacionFotosService {
           continue;
         }
 
+        // ⚠️ ACTUALIZAR se comporta como OMITIR, y no es un descuido.
+        //
+        // Lo único que actualizaba era la DESCRIPCIÓN, que se retiró con el
+        // detalle de la actividad. Una actividad es hoy su título —que es
+        // justo lo que la identifica y por lo que se detectó el conflicto—,
+        // así que no queda nada que reescribir: repetir la fila no cambia
+        // nada. Se cuenta como omitida para que el resumen diga la verdad.
+        //
+        // La opción sigue existiendo en la vista previa porque la decisión
+        // es del usuario y quitarla de golpe rompería la pantalla; el día
+        // que una actividad vuelva a tener campos editables, aquí es donde
+        // se vuelve a enganchar.
         if (existente && decision === 'ACTUALIZAR') {
-          await tx.actividadFotos.update({
-            where: { id: existente.id },
-            data: { descripcion: f.descripcion },
-          });
-          actualizado.actividades++;
+          omitido.actividades++;
           continue;
         }
 
         if (f.tipo === 'ACTIVIDAD') {
-          // ⚠️ Una actividad necesita un CICLO donde caer, y solo cabe en el
-          // que esté en curso: meterla en uno cerrado reescribiría una visita
+          // ⚠️ Una actividad necesita una INTERVENCIÓN donde caer, y solo cabe en el
+          // que esté en curso: meterla en uno cerrado reescribiría una intervención
           // ya terminada, que es justo lo que el historial impide. Si el
           // equipo no tiene ninguno abierto, la fila se OMITE y se avisa —el
           // mismo criterio que con las actividades fuera de un EQUIPO—.
-          const cicloAbierto = await tx.cicloFotos.findFirst({
+          const intervencionAbierta = await tx.intervencionFotos.findFirst({
             where: { carpetaId, cerradoEn: null },
             select: { id: true },
           });
-          if (!cicloAbierto) {
+          if (!intervencionAbierta) {
             omitido.actividades++;
             continue;
           }
           await tx.actividadFotos.create({
             data: {
-              cicloId: cicloAbierto.id,
+              intervencionId: intervencionAbierta.id,
               titulo: f.nombre,
-              descripcion: f.descripcion,
               creadoPorId: usuario.id,
             },
           });

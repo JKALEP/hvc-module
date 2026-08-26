@@ -615,20 +615,24 @@ export class AccesoService {
       where: { id: fotoId },
       select: {
         subidaPorId: true,
-        // ⚠️ Los TRES casos desde la Fase 4: suelta en un ciclo, evidencia de
-        // una actividad —que cuelga de un ciclo—, o en la bandeja. El caso
+        // ⚠️ Los TRES casos desde la Fase 4: suelta en una intervención, evidencia de
+        // una actividad —que cuelga de una intervención—, o en la bandeja. El caso
         // del álbum desapareció con los álbumes.
         //
-        // La actividad tampoco guarda `carpetaId`: cuelga de un ciclo y el
-        // ciclo de la carpeta. Un salto más, y a cambio una sola verdad.
-        ciclo: { select: { carpetaId: true } },
-        actividad: { select: { ciclo: { select: { carpetaId: true } } } },
+        // La actividad tampoco guarda `carpetaId`: cuelga de una intervención y el
+        // intervención de la carpeta. Un salto más, y a cambio una sola verdad.
+        intervencion: { select: { carpetaId: true } },
+        actividad: {
+          select: { intervencion: { select: { carpetaId: true } } },
+        },
       },
     });
     if (!foto) throw new NotFoundException(noExisteOSinAcceso('Esa foto'));
 
     const carpetaId =
-      foto.ciclo?.carpetaId ?? foto.actividad?.ciclo.carpetaId ?? null;
+      foto.intervencion?.carpetaId ??
+      foto.actividad?.intervencion.carpetaId ??
+      null;
 
     if (carpetaId === null) {
       // Bandeja: solo quien la subió, y con el MISMO 404 que si no

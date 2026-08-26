@@ -9,7 +9,7 @@ import { AlmacenamientoService } from './almacenamiento.service';
 import { ImagenService, LIMITES } from './imagen.service';
 import { AccesoService, noExisteOSinAcceso } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import { claveDia } from '../common/fechas';
 import type { UsuarioAutenticado } from '../auth/tipos';
 import { limpiar, describir } from '../common/texto';
@@ -39,16 +39,16 @@ export interface ArchivoSubido {
  * A dónde van las fotos de una subida.
  *
  * Los TRES sitios donde puede estar una foto desde la Fase 4: suelta en la
- * visita, como evidencia de una actividad, o sin clasificar en la bandeja de
+ * intervención, como evidencia de una actividad, o sin clasificar en la bandeja de
  * §18. Los destinos `carpeta` y `album` se retiraron con los álbumes.
  *
- * **Es una unión y no parámetros opcionales** a propósito: con `cicloId?` y
+ * **Es una unión y no parámetros opcionales** a propósito: con `intervencionId?` y
  * `actividadId?` sueltos existirían combinaciones imposibles —dos destinos a
  * la vez, ninguno— que habría que rechazar a mano en cada rama. Aquí el tipo
  * ya no las admite, y el CHECK de la base dice lo mismo.
  */
 export type DestinoSubida =
-  | { tipo: 'ciclo'; cicloId: number }
+  | { tipo: 'intervencion'; intervencionId: number }
   | { tipo: 'actividad'; actividadId: number }
   | { tipo: 'bandeja' };
 
@@ -66,7 +66,7 @@ export class FotoService {
     private readonly imagen: ImagenService,
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
-    private readonly ciclos: CicloService,
+    private readonly intervenciones: IntervencionService,
   ) {}
 
   /**
@@ -77,21 +77,21 @@ export class FotoService {
    * nunca pasa de 120 fotos ni de 240 URLs firmadas.
    */
   /**
-   * Las fotos SUELTAS de una visita, paginadas (Fase 4).
+   * Las fotos SUELTAS de una intervención, paginadas (Fase 4).
    *
    * ⚠️ Antes esto paginaba ÁLBUMES y devolvía sus fotos anidadas. Con los
-   * álbumes retirados el agrupador es el ciclo, así que la galería es una
+   * álbumes retirados el agrupador es la intervención, así que la galería es una
    * lista plana de fotos con cursor por id. Se gana lo que costaba el nivel
    * de más: una foto se busca por su fecha o por quién la subió, no por en
    * qué tanda entró.
    *
-   * Solo las del CICLO: la evidencia de una actividad se ve en su actividad
+   * Solo las de la INTERVENCIÓN: la evidencia de una actividad se ve en su actividad
    * (§15), donde el antes y el después significan algo. Mezclarlas aquí
    * volvería a juntar dos cosas que la Fase 3 acaba de separar.
    */
   async galeria(
     usuario: UsuarioAutenticado,
-    cicloId: number,
+    intervencionId: number,
     opciones: {
       cursor?: number;
       subidaPorId?: number;
@@ -100,9 +100,13 @@ export class FotoService {
       anonimo?: boolean;
     } = {},
   ) {
-    // `exigirCiclo` resuelve la carpeta y exige LECTURA sobre ella: la
+    // `exigirIntervencion` resuelve la carpeta y exige LECTURA sobre ella: la
     // negativa es el 404 uniforme del módulo, escrito en un solo sitio.
-    await this.ciclos.exigirCiclo(usuario, cicloId, 'LECTURA');
+    await this.intervenciones.exigirIntervencion(
+      usuario,
+      intervencionId,
+      'LECTURA',
+    );
 
     const rango =
       opciones.desde || opciones.hasta
@@ -120,7 +124,7 @@ export class FotoService {
         : {};
 
     const where = {
-      cicloId,
+      intervencionId,
       ...rango,
       ...(opciones.subidaPorId !== undefined
         ? { subidaPorId: opciones.subidaPorId }
@@ -176,13 +180,17 @@ export class FotoService {
     };
   }
 
-  /** Quiénes han subido fotos a esta visita, para el filtro. */
-  async autores(usuario: UsuarioAutenticado, cicloId: number) {
-    await this.ciclos.exigirCiclo(usuario, cicloId, 'LECTURA');
+  /** Quiénes han subido fotos a esta intervención, para el filtro. */
+  async autores(usuario: UsuarioAutenticado, intervencionId: number) {
+    await this.intervenciones.exigirIntervencion(
+      usuario,
+      intervencionId,
+      'LECTURA',
+    );
 
     const filas = await this.prisma.foto.groupBy({
       by: ['subidaPorId'],
-      where: { cicloId },
+      where: { intervencionId },
       _count: { _all: true },
     });
     if (filas.length === 0) return [];
@@ -254,7 +262,7 @@ export class FotoService {
   /**
    * Traduce un destino a «dónde cuelga la foto» y exige el permiso.
    *
-   * Los tres casos acaban en lo mismo: un `cicloId` o un `actividadId` con el
+   * Los tres casos acaban en lo mismo: un `intervencionId` o un `actividadId` con el
    * que crear la fila, y la `ruta` de la carpeta para marcar actividad. La
    * bandeja de §18 es el único que no tiene carpeta, y por eso `ruta` es
    * nullable.
@@ -268,7 +276,7 @@ export class FotoService {
     usuario: UsuarioAutenticado,
     destino: DestinoSubida,
   ): Promise<{
-    cicloId?: number;
+    intervencionId?: number;
     actividadId?: number;
     /** La carpeta a la que pertenece el destino. Solo para la bitácora. */
     carpetaId?: number;
@@ -282,20 +290,20 @@ export class FotoService {
       return { ruta: null };
     }
 
-    if (destino.tipo === 'ciclo') {
-      // `exigirCiclo` pide EDICION sobre la carpeta y contesta el 404
+    if (destino.tipo === 'intervencion') {
+      // `exigirIntervencion` pide EDICION sobre la carpeta y contesta el 404
       // uniforme si no se ve; `exigirAbierto` es el otro candado, el del
-      // historial: en una visita cerrada no entra una foto nueva.
-      const ciclo = await this.ciclos.exigirCiclo(
+      // historial: en una intervención cerrada no entra una foto nueva.
+      const intervencion = await this.intervenciones.exigirIntervencion(
         usuario,
-        destino.cicloId,
+        destino.intervencionId,
         'EDICION',
       );
-      this.exigirCicloAbiertoParaFotos(ciclo);
+      this.exigirIntervencionAbiertaParaFotos(intervencion);
       return {
-        cicloId: ciclo.id,
-        carpetaId: ciclo.carpetaId,
-        ruta: ciclo.carpeta.ruta,
+        intervencionId: intervencion.id,
+        carpetaId: intervencion.carpetaId,
+        ruta: intervencion.carpeta.ruta,
       };
     }
 
@@ -304,48 +312,54 @@ export class FotoService {
       select: {
         id: true,
         evidencia: true,
-        // ⚠️ Y el ciclo, para no dejar subir fotos a una visita ya cerrada:
-        // el permiso dice quién eres, esto dice si esa visita sigue viva.
-        ciclo: { select: { numero: true, cerradoEn: true, carpetaId: true } },
+        // ⚠️ Y la intervención, para no dejar subir fotos a una intervención ya cerrada:
+        // el permiso dice quién eres, esto dice si esa intervención sigue viva.
+        intervencion: {
+          select: { numero: true, cerradoEn: true, carpetaId: true },
+        },
       },
     });
     if (!actividad)
       throw new NotFoundException(noExisteOSinAcceso('Esa actividad'));
-    this.exigirCicloAbiertoParaFotos(actividad.ciclo);
+    this.exigirIntervencionAbiertaParaFotos(actividad.intervencion);
     const carpeta = await this.acceso.exigirPermiso(
       usuario,
-      actividad.ciclo.carpetaId,
+      actividad.intervencion.carpetaId,
       'EDICION',
     );
     return {
       actividadId: actividad.id,
       evidencia: actividad.evidencia,
-      carpetaId: actividad.ciclo.carpetaId,
+      carpetaId: actividad.intervencion.carpetaId,
       ruta: carpeta.ruta,
     };
   }
 
   /**
-   * En una visita cerrada no entran fotos nuevas.
+   * En una intervención cerrada no entran fotos nuevas.
    *
-   * Mensaje propio y no el de `CicloService.exigirAbierto` porque aquí lo que
+   * Mensaje propio y no el de `IntervencionService.exigirAbierto` porque aquí lo que
    * se está intentando es SUBIR, y decirlo con esas palabras evita que quien
    * lo lee busque qué «cambio» hizo.
    */
-  private exigirCicloAbiertoParaFotos(ciclo: {
+  private exigirIntervencionAbiertaParaFotos(intervencion: {
     numero: number;
     cerradoEn: Date | null;
   }) {
-    if (ciclo.cerradoEn)
+    if (intervencion.cerradoEn)
       throw new BadRequestException(
-        `El ciclo ${ciclo.numero} está cerrado y no admite fotos nuevas. ` +
+        `La intervención ${intervencion.numero} está cerrada y no admite fotos nuevas. ` +
           'Si hay que corregir algo, reábrelo primero: queda registrado.',
       );
   }
 
   async bandeja(usuario: UsuarioAutenticado) {
     const fotos = await this.prisma.foto.findMany({
-      where: { subidaPorId: usuario.id, cicloId: null, actividadId: null },
+      where: {
+        subidaPorId: usuario.id,
+        intervencionId: null,
+        actividadId: null,
+      },
       orderBy: { creadoEn: 'desc' },
       take: LIMITE_LOTE,
       select: {
@@ -363,7 +377,11 @@ export class FotoService {
 
     return {
       total: await this.prisma.foto.count({
-        where: { subidaPorId: usuario.id, cicloId: null, actividadId: null },
+        where: {
+          subidaPorId: usuario.id,
+          intervencionId: null,
+          actividadId: null,
+        },
       }),
       fotos: await Promise.all(
         fotos.map(async (f) => ({
@@ -414,7 +432,7 @@ export class FotoService {
     // ⚠️ Ya no se crea nada al clasificar. Cuando el destino era una CARPETA
     // había que inventar un álbum aquí —con su nombre, su descripción, y el
     // borrado de cortesía si el lote acababa vacío—; con los álbumes
-    // retirados el destino ya existe siempre: un ciclo o una actividad.
+    // retirados el destino ya existe siempre: una intervención o una actividad.
     //
     // Sigue siendo un `updateMany` con `subidaPorId` en el `where` y no un
     // bucle que valide foto a foto: una foto ajena o ya clasificada
@@ -423,11 +441,11 @@ export class FotoService {
       where: {
         id: { in: fotoIds },
         subidaPorId: usuario.id,
-        cicloId: null,
+        intervencionId: null,
         actividadId: null,
       },
       data: {
-        cicloId: resuelto.cicloId ?? null,
+        intervencionId: resuelto.intervencionId ?? null,
         actividadId: resuelto.actividadId ?? null,
       },
     });
@@ -440,7 +458,7 @@ export class FotoService {
     if (resuelto.ruta) await this.acceso.marcarActividad(resuelto.ruta);
     return {
       clasificadas: movidas.count,
-      cicloId: resuelto.cicloId ?? null,
+      intervencionId: resuelto.intervencionId ?? null,
       actividadId: resuelto.actividadId ?? null,
     };
   }
@@ -485,12 +503,12 @@ export class FotoService {
 
     // ⚠️ Aquí se creaba el álbum que recogía el lote, antes de procesar y
     // con borrado de cortesía si todo fallaba. Con los álbumes retirados
-    // (Fase 4) el destino ya existe siempre —un ciclo o una actividad—, así
+    // (Fase 4) el destino ya existe siempre —una intervención o una actividad—, así
     // que no hay nada que crear ni nada que deshacer.
-    const cicloId = resuelto.cicloId ?? null;
+    const intervencionId = resuelto.intervencionId ?? null;
     const actividadId = resuelto.actividadId ?? null;
 
-    // La clave en R2 se agrupa por CICLO. Sin ciclo —actividad o bandeja— se
+    // La clave en R2 se agrupa por INTERVENCIÓN. Sin intervención —actividad o bandeja— se
     // agrupa por quien subió: el bucket sigue siendo navegable y una foto
     // NO cambia de clave al clasificarse después (§18), que es lo que
     // importa —mover el objeto obligaría a copiar y borrar en R2 por cada
@@ -498,7 +516,7 @@ export class FotoService {
     //
     // El prefijo `lotes/` que pone `construirClave` se conserva aunque los
     // lotes ya no existan: cambiarlo partiría el bucket en dos para siempre.
-    const grupo = cicloId !== null ? cicloId : `u${usuario.id}`;
+    const grupo = intervencionId !== null ? intervencionId : `u${usuario.id}`;
 
     for (const archivo of archivos) {
       try {
@@ -531,7 +549,7 @@ export class FotoService {
 
         const foto = await this.prisma.foto.create({
           data: {
-            cicloId,
+            intervencionId,
             actividadId,
             momento,
             descripcion: texto,
@@ -574,9 +592,9 @@ export class FotoService {
       // para exigir el permiso, y de ella sale el hilo de §23.
       carpetaId: resuelto.carpetaId ?? null,
       entidad: 'FOTO',
-      // Sin ciclo ni actividad —la bandeja— no hay id de contenedor: se usa
+      // Sin intervención ni actividad —la bandeja— no hay id de contenedor: se usa
       // el de la primera foto, que es lo único que identifica la subida.
-      entidadId: cicloId ?? actividadId ?? guardadas[0].id,
+      entidadId: intervencionId ?? actividadId ?? guardadas[0].id,
       accion: 'SUBIDA_FOTO',
       descripcion: `Subió ${guardadas.length} foto(s)${
         destino.tipo === 'bandeja' ? ' sin asignar' : ''
@@ -584,7 +602,7 @@ export class FotoService {
     });
 
     return {
-      cicloId,
+      intervencionId,
       actividadId,
       enBandeja: destino.tipo === 'bandeja',
       subidas: guardadas.length,
@@ -635,7 +653,7 @@ export class FotoService {
         claveImagen: true,
         claveMiniatura: true,
         creadoEn: true,
-        cicloId: true,
+        intervencionId: true,
         actividadId: true,
         // Para poder anotar el valor ANTERIOR al editar la descripción: una
         // auditoría que solo dice «cambió» no responde a qué cambió.
@@ -704,7 +722,7 @@ export class FotoService {
 
     const resuelto = await this.resolverDestino(usuario, destino);
 
-    const cicloDestino = resuelto.cicloId ?? null;
+    const intervencionDestino = resuelto.intervencionId ?? null;
     const actividadDestino = resuelto.actividadId ?? null;
 
     // Mover algo a donde ya está no es un error, pero tampoco es un
@@ -712,17 +730,23 @@ export class FotoService {
     // nada que deshacer al salir por aquí — antes había que retirar el álbum
     // que se acababa de crear para recibirla.
     if (
-      foto.cicloId === cicloDestino &&
+      foto.intervencionId === intervencionDestino &&
       foto.actividadId === actividadDestino
     ) {
       return { ok: true, id: fotoId, sinCambios: true };
     }
 
-    const origen = await this.nombreDeSitio(foto.cicloId, foto.actividadId);
+    const origen = await this.nombreDeSitio(
+      foto.intervencionId,
+      foto.actividadId,
+    );
 
     await this.prisma.foto.update({
       where: { id: fotoId },
-      data: { cicloId: cicloDestino, actividadId: actividadDestino },
+      data: {
+        intervencionId: intervencionDestino,
+        actividadId: actividadDestino,
+      },
     });
 
     // Las DOS líneas de ancestros marcan actividad: la carpeta de la que
@@ -730,7 +754,10 @@ export class FotoService {
     if (foto.carpeta) await this.acceso.marcarActividad(foto.carpeta.ruta);
     if (resuelto.ruta) await this.acceso.marcarActividad(resuelto.ruta);
 
-    const hacia = await this.nombreDeSitio(cicloDestino, actividadDestino);
+    const hacia = await this.nombreDeSitio(
+      intervencionDestino,
+      actividadDestino,
+    );
 
     // §23. `MOVIMIENTO` ya existía en el enum desde la Fase 1 y hasta ahora
     // solo lo escribían las carpetas.
@@ -748,7 +775,7 @@ export class FotoService {
     return {
       ok: true,
       id: fotoId,
-      cicloId: cicloDestino,
+      intervencionId: intervencionDestino,
       actividadId: actividadDestino,
       sinCambios: false,
     };
@@ -756,33 +783,33 @@ export class FotoService {
 
   /** Cómo se lee el sitio de una foto en la bitácora. */
   private async nombreDeSitio(
-    cicloId: number | null,
+    intervencionId: number | null,
     actividadId: number | null,
   ): Promise<string> {
-    if (cicloId !== null) {
-      const c = await this.prisma.cicloFotos.findUnique({
-        where: { id: cicloId },
+    if (intervencionId !== null) {
+      const c = await this.prisma.intervencionFotos.findUnique({
+        where: { id: intervencionId },
         select: { numero: true, carpeta: { select: { nombre: true } } },
       });
       return c
-        ? `${c.carpeta.nombre} / ciclo ${c.numero}`
-        : `ciclo #${cicloId}`;
+        ? `${c.carpeta.nombre} / intervención ${c.numero}`
+        : `intervención #${intervencionId}`;
     }
     if (actividadId !== null) {
       const t = await this.prisma.actividadFotos.findUnique({
         where: { id: actividadId },
         select: {
           titulo: true,
-          ciclo: {
+          intervencion: {
             select: { numero: true, carpeta: { select: { nombre: true } } },
           },
         },
       });
       const actividad = t?.titulo ?? `actividad #${actividadId}`;
-      // Se nombra el ciclo además de la carpeta: en un equipo con historial,
-      // «UPC / Inspección» no distingue la visita de marzo de la de agosto.
+      // Se nombra la intervención además de la carpeta: en un equipo con historial,
+      // «UPC / Inspección» no distingue la intervención de marzo de la de agosto.
       return t
-        ? `${t.ciclo.carpeta.nombre} / ciclo ${t.ciclo.numero} / ${actividad}`
+        ? `${t.intervencion.carpeta.nombre} / intervención ${t.intervencion.numero} / ${actividad}`
         : actividad;
     }
     return 'sin clasificar';
@@ -883,8 +910,8 @@ export class FotoService {
         : 'Eliminó una foto de otro usuario.',
     });
     // ⚠️ Aquí se devolvía `albumVacio`, que decía «el álbum se quedó SIN
-    // FOTOS». Se fue con los álbumes en la Fase 4: un ciclo sin fotos sigue
-    // siendo una visita, así que no hay nada que avisar — y nadie lo
+    // FOTOS». Se fue con los álbumes en la Fase 4: una intervención sin fotos sigue
+    // siendo una intervención, así que no hay nada que avisar — y nadie lo
     // consumía ya.
     return { ok: true, id: fotoId };
   }

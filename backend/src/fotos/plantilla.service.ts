@@ -446,22 +446,21 @@ export class PlantillaService {
             omitidas.actividades++;
             continue;
           }
-          // ⚠️ Una actividad cae en el ciclo EN CURSO del equipo. Sin ninguno
+          // ⚠️ Una actividad cae en la intervención EN CURSO del equipo. Sin ninguno
           // abierto se omite igual que si la carpeta no fuera un equipo:
-          // estampar un checklist sobre una visita ya cerrada la reescribiría.
-          const cicloAbierto = await tx.cicloFotos.findFirst({
+          // estampar un checklist sobre una intervención ya cerrada la reescribiría.
+          const intervencionAbierta = await tx.intervencionFotos.findFirst({
             where: { carpetaId, cerradoEn: null },
             select: { id: true },
           });
-          if (!cicloAbierto) {
+          if (!intervencionAbierta) {
             omitidas.actividades++;
             continue;
           }
           await tx.actividadFotos.create({
             data: {
-              cicloId: cicloAbierto.id,
+              intervencionId: intervencionAbierta.id,
               titulo: nodo.nombre,
-              descripcion: nodo.descripcion,
               creadoPorId: usuario.id,
             },
           });

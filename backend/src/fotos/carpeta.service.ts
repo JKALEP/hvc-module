@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccesoService } from './acceso.service';
 import { AuditoriaFotosService } from './auditoria-fotos.service';
 import { ValorCampoFotosService } from './valor-campo-fotos.service';
-import { CicloService } from './ciclo.service';
+import { IntervencionService } from './intervencion.service';
 import { SistemaFotosService } from './sistema.service';
 import { CatalogoActividadService } from './catalogo-actividad.service';
 import type { UsuarioAutenticado } from '../auth/tipos';
@@ -38,7 +38,7 @@ export interface CrearCarpetaDto {
    */
   tipoSistemaId?: number | string | null;
   /**
-   * Qué actividades del catálogo estampar en el Ciclo 1 (Fase 2).
+   * Qué actividades del catálogo estampar en el Intervención 1 (Fase 2).
    *
    * ⚠️ **Omitirlo y mandar `[]` NO es lo mismo.** Sin el campo se estampa la
    * PRESELECCIÓN del tipo de sistema —lo que quiere quien da de alta un
@@ -68,11 +68,11 @@ export interface EditarCarpetaDto {
    * Corregir el tipo de sistema de un equipo (Fase 2). `null` lo deja sin
    * definir.
    *
-   * ⚠️ Cambiarlo **NO reescribe las visitas ya hechas ni la que está en
+   * ⚠️ Cambiarlo **NO reescribe las intervenciones ya hechas ni la que está en
    * curso**: lo que hace es cambiar qué se propone la próxima vez. Un tipo
    * mal elegido se corrige, pero el checklist que alguien ya recorrió es
-   * historial. Para traer las nuevas al ciclo abierto está
-   * `POST ciclo/:id/actividad/desde-catalogo`, que es una decisión explícita.
+   * historial. Para traer las nuevas a la intervención abierta está
+   * `POST intervencion/:id/actividad/desde-catalogo`, que es una decisión explícita.
    */
   tipoSistemaId?: number | string | null;
 }
@@ -84,7 +84,7 @@ export class CarpetaService {
     private readonly acceso: AccesoService,
     private readonly auditoria: AuditoriaFotosService,
     private readonly valores: ValorCampoFotosService,
-    private readonly ciclos: CicloService,
+    private readonly intervenciones: IntervencionService,
     private readonly sistemas: SistemaFotosService,
     private readonly catalogo: CatalogoActividadService,
   ) {}
@@ -150,7 +150,7 @@ export class CarpetaService {
 
     // El tipo de sistema y las actividades preseleccionadas describen un
     // EQUIPO, igual que los campos configurables: en una carpeta corriente no
-    // hay dónde enseñarlos ni ciclo donde estampar nada.
+    // hay dónde enseñarlos ni intervención donde estampar nada.
     const tipoSistemaId = await this.sistemas.validarTipo(dto.tipoSistemaId);
     if (tipoSistemaId !== null && tipo !== 'EQUIPO')
       throw new BadRequestException(
@@ -234,22 +234,22 @@ export class CarpetaService {
       if (valoresDeEquipo)
         await this.valores.escribirEn(tx, carpeta.id, valoresDeEquipo);
 
-      // ⚠️ Un EQUIPO nace con su Ciclo 1 abierto (§4.3), en la MISMA
-      // transacción. Sin ciclo no habría dónde colgar una actividad, así que
+      // ⚠️ Un EQUIPO nace con su Intervención 1 abierto (§4.3), en la MISMA
+      // transacción. Sin intervención no habría dónde colgar una actividad, así que
       // los dos nacen juntos o no nace ninguno. Una carpeta corriente no
-      // lleva ciclos: no es una visita, es una estructura.
+      // lleva intervenciones: no es una intervención, es una estructura.
       if (tipo === 'EQUIPO') {
-        const ciclo = await this.ciclos.abrirPrimeroEn(
+        const intervencion = await this.intervenciones.abrirPrimeroEn(
           tx,
           carpeta.id,
           usuario.id,
         );
         // Y con el checklist que propone su tipo de sistema (Fase 2), en la
-        // misma transacción por lo mismo: un equipo con ciclo pero sin
+        // misma transacción por lo mismo: un equipo con intervención pero sin
         // checklist obliga a repetir a mano lo que el catálogo ya sabía.
         await this.catalogo.estamparEn(
           tx,
-          ciclo.id,
+          intervencion.id,
           usuario.id,
           tipoSistemaId,
           elegidas,
@@ -456,82 +456,164 @@ export class CarpetaService {
   }
 
   /**
-   * Borra una carpeta. Las FK son Restrict a propósito: una carpeta con
-   * subcarpetas o álbumes no se puede borrar sin decidir antes qué pasa con
-   * ellos, y borrar en cascada se llevaría fotos por delante.
+   * Eliminar una carpeta se lleva TODO lo que tiene dentro.
    *
-   * Exige TOTAL, no ADMIN_GLOBAL como en v2: §5 le da «eliminar» a Acceso
-   * Total, y §26.7 aclara que eso no lo convierte en administrador global
-   * —puede borrar dentro de SU carpeta y en ninguna otra—. Lo que impide
-   * que sea peligroso no es el rol sino el Restrict: una carpeta con algo
-   * dentro no se borra, así que TOTAL solo alcanza a las vacías.
+   * ⚠️ **Es irreversible y no hay papelera.** Decisión de HVC, tomada con la
+   * consecuencia delante: se van las subcarpetas, las intervenciones, sus
+   * actividades, las observaciones, los comentarios, los accesos
+   * compartidos, el historial de §23 y **todas las fotos, también las de
+   * R2**. Antes se rechazaba el borrado si había algo dentro y había que
+   * vaciarlo a mano carpeta por carpeta, que en un árbol de obra es un
+   * recorrido que nadie termina.
+   *
+   * Lo que evita que sea una puerta trasera son tres cosas, y las tres están
+   * aquí abajo:
+   *
+   *  1. **`TOTAL` sobre la carpeta Y sobre cada descendiente.** No basta con
+   *     el permiso de arriba: §7 admite restringir una subcarpeta, y esa
+   *     restricción no puede volverse irrelevante justo en la operación que
+   *     la destruye. Si algo del subárbol se te escapa, se rechaza diciendo
+   *     cuántas son —no cuáles, que sería delatarlas—.
+   *  2. **Se cuenta antes lo que se va a destruir**, y ese recuento va a la
+   *     bitácora. Era una deuda conocida: los comentarios se los llevaba el
+   *     `Cascade` de la base, que no pasa por `registrar()`, así que
+   *     desaparecía contenido escrito por una persona y el historial decía
+   *     que no había pasado nada.
+   *  3. **R2 se limpia con las claves leídas ANTES del borrado.** La base no
+   *     sabe nada del bucket: sin esto, cada carpeta eliminada dejaría dos
+   *     objetos huérfanos por foto y ninguna fila que apuntara a ellos.
    */
   async eliminar(usuario: UsuarioAutenticado, id: number) {
-    await this.acceso.exigirPermiso(usuario, id, 'TOTAL');
+    const raiz = await this.acceso.exigirPermiso(usuario, id, 'TOTAL');
 
     const carpeta = await this.prisma.carpetaFotos.findUnique({
       where: { id },
-      select: {
-        nombre: true,
-        parentId: true,
-        _count: { select: { hijas: true } },
-      },
+      select: { nombre: true },
     });
     if (!carpeta) throw new NotFoundException('Esa carpeta ya no existe.');
 
-    if (carpeta._count.hijas > 0)
-      throw new BadRequestException(
-        `No se puede eliminar: esta carpeta tiene ${carpeta._count.hijas} carpeta(s) dentro. Muévelas o elimínalas primero.`,
+    // El subárbol entero por prefijo de `ruta`, que es como se recorre este
+    // árbol en todo el módulo.
+    const descendientes = await this.prisma.carpetaFotos.findMany({
+      where: { ruta: { startsWith: `${raiz.ruta}/` } },
+      select: { id: true, ruta: true },
+    });
+
+    // 1 · El permiso, carpeta a carpeta. `permisoSobre` es puro y el alcance
+    // se carga una sola vez, así que esto no son N viajes a la base.
+    const alcance = await this.acceso.alcanceDe(usuario);
+    const vetadas = descendientes.filter(
+      (d) => this.acceso.permisoSobre(alcance, d.ruta) !== 'TOTAL',
+    );
+    if (vetadas.length > 0)
+      throw new ForbiddenException(
+        `No se puede eliminar: dentro hay ${vetadas.length} carpeta(s) sobre las que no tienes Acceso Total. ` +
+          'Eliminar se lleva por delante todo el contenido, así que hace falta ese permiso en toda la rama.',
       );
-    // ⚠️ El candado que antes daba el `Restrict` de los álbumes.
-    //
-    // Con los álbumes retirados (Fase 4) las fotos cuelgan de los ciclos, y
-    // los ciclos van con `Cascade`: sin esta comprobación, borrar un equipo
-    // se llevaría por delante sus visitas, sus actividades y TODAS sus fotos
-    // en silencio. Se cuentan las dos clases —las sueltas del ciclo y las de
-    // sus actividades—, porque las dos son contenido que alguien subió.
-    const conFotos = await this.prisma.foto.count({
+
+    const ids = [id, ...descendientes.map((d) => d.id)];
+
+    // 2 · Qué se va a destruir. Se cuenta ANTES porque después no hay a quién
+    // preguntárselo, y es lo que se guarda en la bitácora.
+    const [fotos, comentarios, intervenciones, observaciones] =
+      await Promise.all([
+        this.prisma.foto.count({
+          where: {
+            OR: [
+              { intervencion: { carpetaId: { in: ids } } },
+              { actividad: { intervencion: { carpetaId: { in: ids } } } },
+            ],
+          },
+        }),
+        this.prisma.comentarioFotos.count({
+          where: {
+            OR: [
+              { carpetaId: { in: ids } },
+              { intervencion: { carpetaId: { in: ids } } },
+              { actividad: { intervencion: { carpetaId: { in: ids } } } },
+              {
+                foto: {
+                  OR: [
+                    { intervencion: { carpetaId: { in: ids } } },
+                    { actividad: { intervencion: { carpetaId: { in: ids } } } },
+                  ],
+                },
+              },
+            ],
+          },
+        }),
+        this.prisma.intervencionFotos.count({
+          where: { carpetaId: { in: ids } },
+        }),
+        this.prisma.observacionFotos.count({
+          where: { carpetaId: { in: ids } },
+        }),
+      ]);
+
+    // 3 · Las claves de R2, leídas antes del `delete`. Dos orígenes: las
+    // fotos del subárbol y las imágenes de los campos configurables.
+    const clavesFotos = await this.prisma.foto.findMany({
       where: {
         OR: [
-          { ciclo: { carpetaId: id } },
-          { actividad: { ciclo: { carpetaId: id } } },
+          { intervencion: { carpetaId: { in: ids } } },
+          { actividad: { intervencion: { carpetaId: { in: ids } } } },
         ],
       },
+      select: { claveImagen: true, claveMiniatura: true },
     });
-    if (conFotos > 0)
-      throw new BadRequestException(
-        `No se puede eliminar: esta carpeta tiene ${conFotos} foto(s) dentro. Archívala en su lugar.`,
-      );
+    const clavesCampos = (
+      await Promise.all(ids.map((c) => this.valores.imagenesDe(c)))
+    ).flat();
 
-    // ⚠️ Las imágenes de los campos de tipo FOTO se retiran de R2 ANTES de
-    // borrar la carpeta, y esto no es opcional.
-    //
-    // `ValorCampoFotos` va con `Cascade`, así que la base se lleva las
-    // filas sola —son datos DE la carpeta, no contenido colgado de ella—
-    // pero **no sabe nada del bucket**. Sin esto, cada equipo eliminado
-    // dejaría dos objetos huérfanos para siempre, y sin ninguna fila que
-    // apuntara a ellos no habría forma de encontrarlos después.
-    //
-    // Se leen antes del `delete` porque después ya no existen, y se borran
-    // del bucket después de que el `delete` haya salido bien: al revés, un
-    // fallo al borrar la carpeta dejaría la ficha apuntando a objetos que
-    // ya no están.
-    const imagenes = await this.valores.imagenesDe(id);
+    // El borrado, de más profunda a menos: `CarpetaFotos.padre` es `Restrict`
+    // —es el único FK del subárbol que no cascadea— así que una madre no se
+    // puede ir antes que sus hijas. Todo lo demás cuelga con `Cascade` y se
+    // va solo con cada fila.
+    const porProfundidad = [...descendientes].sort(
+      (a, b) => b.ruta.split('/').length - a.ruta.split('/').length,
+    );
+    await this.prisma.$transaction(async (tx) => {
+      for (const d of porProfundidad)
+        await tx.carpetaFotos.delete({ where: { id: d.id } });
+      await tx.carpetaFotos.delete({ where: { id } });
+    });
 
-    await this.prisma.carpetaFotos.delete({ where: { id } });
-
-    await this.valores.borrarObjetos(imagenes);
+    // R2 después de que la base haya salido bien: al revés, un fallo al
+    // borrar dejaría filas apuntando a objetos que ya no están.
+    await this.valores.borrarObjetos([...clavesFotos, ...clavesCampos]);
 
     // §23, acción 2. `carpetaId` va en NULL a propósito: la FK es Cascade y
     // apuntar a la carpeta recién borrada se llevaría el propio registro de
-    // su borrado. El nombre queda en la descripción, que es lo que se lee.
+    // su borrado. La descripción dice QUÉ se llevó por delante, que es lo
+    // único que queda de todo eso.
+    const seLlevo = [
+      descendientes.length > 0 && `${descendientes.length} subcarpeta(s)`,
+      intervenciones > 0 && `${intervenciones} intervención(es)`,
+      fotos > 0 && `${fotos} foto(s)`,
+      observaciones > 0 && `${observaciones} observación(es)`,
+      comentarios > 0 && `${comentarios} comentario(s)`,
+    ].filter((x): x is string => typeof x === 'string');
+
     await this.auditoria.registrar(usuario, {
       carpetaId: null,
       entidad: 'CARPETA',
       entidadId: id,
       accion: 'ELIMINACION',
-      descripcion: `Eliminó la carpeta "${carpeta.nombre}".`,
+      descripcion:
+        `Eliminó la carpeta "${carpeta.nombre}"` +
+        (seLlevo.length > 0 ? `, y con ella ${seLlevo.join(', ')}.` : '.'),
     });
-    return { ok: true, id };
+
+    return {
+      ok: true,
+      id,
+      eliminado: {
+        subcarpetas: descendientes.length,
+        intervenciones,
+        fotos,
+        observaciones,
+        comentarios,
+      },
+    };
   }
 }

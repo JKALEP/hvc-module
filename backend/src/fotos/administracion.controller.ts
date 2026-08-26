@@ -222,7 +222,7 @@ export class AdministracionFotosController {
   //
   // Configuración del módulo, como los campos y los colores: no cuelga de
   // ninguna carpeta. Leer es de cualquiera —hace falta para elegir el estado
-  // de una visita—; cambiar, de ADMIN_GLOBAL, y lo hace cumplir el service.
+  // de una intervención—; cambiar, de ADMIN_GLOBAL, y lo hace cumplir el service.
 
   @Get('estado-equipo')
   listarEstados(@Query('activos') activos?: string) {
@@ -246,7 +246,7 @@ export class AdministracionFotosController {
     return this.estados.editar(usuario, id, dto);
   }
 
-  /** Solo si ningún ciclo lo usa; si no, el service manda retirarlo. */
+  /** Solo si ninguna intervención lo usa; si no, el service manda retirarlo. */
   @Delete('estado-equipo/:id')
   eliminarEstado(
     @UsuarioActual() usuario: UsuarioAutenticado,
