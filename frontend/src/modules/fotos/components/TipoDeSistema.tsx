@@ -29,6 +29,15 @@ export function TipoDeSistema({
   const { data: familias } = useSistemas(true);
   const editar = useEditarCarpeta();
 
+  // ⚠️ Una familia SIN tipos no se ofrece: un `<optgroup>` vacío pinta el
+  // encabezado del grupo y nada debajo, así que el desplegable parecía roto
+  // —tres títulos y ninguna opción— cuando en realidad el catálogo está a
+  // medio cargar. Ver el mismo tratamiento en `FormularioEquipo`.
+  const conTipos = (familias ?? [])
+    .map((f) => ({ ...f, tipos: f.tipos ?? [] }))
+    .filter((f) => f.tipos.length > 0);
+  const hayTipos = conTipos.length > 0;
+
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3 shadow-sm">
       <span className="text-sm text-muted-foreground">Tipo de sistema</span>
@@ -43,7 +52,7 @@ export function TipoDeSistema({
         <Badge variant="secondary">Sin definir</Badge>
       )}
 
-      {puedeEditar && (
+      {puedeEditar && hayTipos && (
         <Select
           className="ml-auto w-64"
           aria-label="Cambiar el tipo de sistema"
@@ -59,9 +68,9 @@ export function TipoDeSistema({
           }
         >
           <option value="">— Sin definir —</option>
-          {(familias ?? []).map((f) => (
+          {conTipos.map((f) => (
             <optgroup key={f.id} label={f.nombre}>
-              {(f.tipos ?? []).map((t) => (
+              {f.tipos.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.nombre}
                 </option>
@@ -69,6 +78,15 @@ export function TipoDeSistema({
             </optgroup>
           ))}
         </Select>
+      )}
+
+      {/* Sin catálogo no se pinta un desplegable que no deja elegir nada: se
+          dice qué falta y dónde se arregla. */}
+      {puedeEditar && !hayTipos && (
+        <span className="ml-auto text-xs text-muted-foreground">
+          Sin tipos en el catálogo — se crean en Administración de Fotos ›
+          Tipos de sistema.
+        </span>
       )}
     </div>
   );

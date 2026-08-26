@@ -65,6 +65,17 @@ export function FormularioEquipo({
   // pide. Los retirados con valor siguen viéndose en la ficha de dentro.
   const { data: campos } = useCamposEquipo(true);
   const { data: familias } = useSistemas(true);
+
+  // ⚠️ Una familia SIN tipos no se pinta. Un `<optgroup>` vacío sale como un
+  // encabezado de grupo con nada debajo, así que con el catálogo a medio
+  // cargar el desplegable enseñaba «Aire Acondicionado» y «Ventilación» como
+  // si fueran opciones y no dejaba elegir ninguna. Parece un fallo y no lo es:
+  // lo que falta son los tipos.
+  const conTipos = (familias ?? [])
+    .map((f) => ({ ...f, tipos: f.tipos ?? [] }))
+    .filter((f) => f.tipos.length > 0);
+  const hayTipos = conTipos.length > 0;
+
   const [nombre, setNombre] = useState('');
   const [valores, setValores] = useState<Record<string, unknown>>({});
   const [tipoSistemaId, setTipoSistemaId] = useState<number | null>(null);
@@ -140,6 +151,7 @@ export function FormularioEquipo({
             <Select
               id="tipo-sistema"
               value={tipoSistemaId ?? ''}
+              disabled={!hayTipos}
               onChange={(e) => {
                 setTipoSistemaId(e.target.value ? Number(e.target.value) : null);
                 // Al cambiar de tipo el checklist es otro, así que las
@@ -148,9 +160,9 @@ export function FormularioEquipo({
               }}
             >
               <option value="">— Sin definir —</option>
-              {(familias ?? []).map((f) => (
+              {conTipos.map((f) => (
                 <optgroup key={f.id} label={f.nombre}>
-                  {(f.tipos ?? []).map((t) => (
+                  {f.tipos.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.nombre}
                     </option>
@@ -158,10 +170,21 @@ export function FormularioEquipo({
                 </optgroup>
               ))}
             </Select>
-            <p className="text-xs text-muted-foreground">
-              Decide qué actividades se proponen. Se puede dejar sin definir y
-              ponerlo después.
-            </p>
+            {hayTipos ? (
+              <p className="text-xs text-muted-foreground">
+                Decide qué actividades se proponen. Se puede dejar sin definir y
+                ponerlo después.
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                El catálogo todavía no tiene ningún tipo de sistema, así que no
+                hay nada que elegir. Un administrador los crea en{' '}
+                <strong className="font-medium text-foreground">
+                  Administración de Fotos › Tipos de sistema
+                </strong>
+                . El equipo se crea igual y se le pone después.
+              </p>
+            )}
           </div>
 
           {/* La preselección de la Fase 2: propone, no impone. */}

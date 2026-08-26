@@ -51,6 +51,17 @@ const ETIQUETA_TIPO_EVIDENCIA: Record<TipoEvidencia, string> = {
   ANTES_DESPUES: 'Antes y después',
 };
 
+/**
+ * En qué orden se ofrecen al crear una actividad.
+ *
+ * ⚠️ Explícito y no `Object.keys`: el orden de las claves de un objeto no es
+ * una decisión de diseño, y aquí sí lo es —lo más común primero («Una foto»,
+ * que además es el valor por defecto), luego el caso de dos huecos, y al final
+ * la excepción—. Con `Object.keys` bastaba reordenar el `Record` por estética
+ * para cambiar lo que ve el usuario sin que nadie lo notara.
+ */
+const ORDEN_EVIDENCIA: TipoEvidencia[] = ['UNA', 'ANTES_DESPUES', 'NINGUNA'];
+
 const ETIQUETA_ESTADO: Record<EstadoActividad, string> = {
   PENDIENTE: 'Pendiente',
   EN_PROCESO: 'En proceso',
@@ -244,34 +255,72 @@ export function PanelActividades({
           rellenaba —de 50 actividades entre las dos bases, ninguna tenía uno
           solo de los cuatro—. Lo único que sí se elige en el momento es la
           EVIDENCIA, porque decide si al subir se pedirá el antes y el
-          después. */}
+          después.
+
+          ⚠️ Y va PRIMERO, antes del nombre. Es el orden en que se decide de
+          verdad: uno sabe qué va a fotografiar antes de saber cómo llamar a la
+          tarea, y con el nombre delante el desplegable quedaba a la derecha
+          como un ajuste secundario que se pasaba por alto —se creaban
+          actividades con la evidencia por defecto sin haberla mirado—. Los dos
+          pasos van numerados por lo mismo: aquí el orden es información. */}
       {puedeEscribir && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Input
-            className="min-w-48 flex-1"
-            placeholder="Nueva actividad…"
-            value={titulo}
-            onChange={(e) => setTitulo(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && anadir()}
-          />
-          <Select
-            className="w-44"
-            aria-label="Evidencia que se le pedirá"
-            value={evidencia}
-            onChange={(e) => setEvidencia(e.target.value as TipoEvidencia)}
-          >
-            {(Object.keys(ETIQUETA_TIPO_EVIDENCIA) as TipoEvidencia[]).map(
-              (v) => (
-                <option key={v} value={v}>
-                  {ETIQUETA_TIPO_EVIDENCIA[v]}
-                </option>
-              ),
-            )}
-          </Select>
-          <Button onClick={anadir} disabled={!titulo.trim() || crear.isPending}>
-            <PlusIcon />
-            Añadir
-          </Button>
+        <div className="mt-3 rounded-lg border border-border/60 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+            <div className="space-y-1.5 sm:w-56">
+              <label
+                className="block text-xs font-medium text-muted-foreground"
+                htmlFor="nueva-evidencia"
+              >
+                1 · Qué foto se pedirá
+              </label>
+              <Select
+                id="nueva-evidencia"
+                value={evidencia}
+                onChange={(e) => setEvidencia(e.target.value as TipoEvidencia)}
+              >
+                {ORDEN_EVIDENCIA.map((v) => (
+                  <option key={v} value={v}>
+                    {ETIQUETA_TIPO_EVIDENCIA[v]}
+                  </option>
+                ))}
+              </Select>
+            </div>
+
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <label
+                className="block text-xs font-medium text-muted-foreground"
+                htmlFor="nueva-actividad"
+              >
+                2 · Qué hay que hacer
+              </label>
+              <Input
+                id="nueva-actividad"
+                placeholder="Limpieza de filtros…"
+                value={titulo}
+                onChange={(e) => setTitulo(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && anadir()}
+              />
+            </div>
+
+            <Button
+              onClick={anadir}
+              disabled={!titulo.trim() || crear.isPending}
+            >
+              <PlusIcon />
+              Añadir
+            </Button>
+          </div>
+
+          {/* La evidencia es una EXPECTATIVA, no un candado: se puede dar la
+              actividad por hecha sin la foto y el sistema lo dice en vez de
+              impedirlo. Conviene recordarlo justo donde se elige. */}
+          <p className="mt-2 text-xs text-muted-foreground">
+            {evidencia === 'NINGUNA'
+              ? 'No se avisará de fotos que falten en esta actividad.'
+              : evidencia === 'UNA'
+                ? 'Se avisará si se completa sin foto, pero no impide completarla.'
+                : 'Se avisará del antes y del después que falten, pero no impide completarla.'}
+          </p>
         </div>
       )}
     </PanelFotos>
