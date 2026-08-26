@@ -218,6 +218,26 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
           </AvisoArchivada>
         )}
 
+        {/* ⚠️ «Importar Excel» y «Crear desde plantilla» van AQUÍ, en el
+            cuerpo de la carpeta que se está mirando, y no dentro de las
+            pestañas de un equipo.
+
+            Lo que hacen es crear carpetas, subcarpetas y actividades desde
+            una hoja (§19) o desde un molde (§20): su destino natural es una
+            carpeta de proyecto. Metido en las pestañas del equipo era
+            inalcanzable justo donde se usa —en una carpeta corriente no se
+            pintan esas pestañas— y encima obligaba a entrar a un equipo y
+            cambiar de pestaña para volcar la estructura de un proyecto.
+
+            En la RAÍZ no se ofrece: importar necesita una carpeta destino, y
+            la raíz no es una. */}
+        {!buscando && sedeId !== null && data?.puedeEscribir && (
+          <CrearEstructura
+            carpetaId={sedeId}
+            onImportar={() => setImportando(true)}
+          />
+        )}
+
         {cargando && (
           <div className={GRID_CARPETAS}>
             {[0, 1, 2, 3].map((i) => (
@@ -357,15 +377,6 @@ export function Fotos({ seccion }: { seccion?: 'propias' | 'compartidas' } = {})
                       rechaza, asi que el formulario no se pinta. */}
                   {data.puedeEscribir && ciclo && ciclo.cerradoEn === null && (
                     <PanelSubida cicloId={ciclo.id} />
-                  )}
-                  {/* Crear estructura sigue siendo de la CARPETA, no de la
-                      visita: importar un Excel o estampar una plantilla crea
-                      carpetas y actividades, no fotos. */}
-                  {data.puedeEscribir && (
-                    <CrearEstructura
-                      carpetaId={sedeId}
-                      onImportar={() => setImportando(true)}
-                    />
                   )}
 
                   <FiltrosDeGaleria
