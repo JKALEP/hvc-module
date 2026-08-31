@@ -22,6 +22,7 @@ import {
 import { Modulo } from '../../../generated/prisma/enums';
 import type { UsuarioAutenticado } from '../../auth/tipos';
 import type { GuardarRequerimientoDto, GuardarItemDto, MotivoDto } from './dto';
+import type { GuardarClienteDto } from '../catalogo/dto';
 
 /**
  * El requerimiento y sus ítems.
@@ -135,6 +136,46 @@ export class RequerimientoController {
     @Body() dto: GuardarRequerimientoDto,
   ) {
     return this.requerimientos.editar(usuario, id, dto);
+  }
+
+  /**
+   * Reserva el número para enseñarlo en la vista previa.
+   *
+   * Idempotente: volver al paso 3 no consume otro correlativo. Ver el
+   * aviso de `RequerimientoService.reservarNumero` sobre los huecos que
+   * deja un borrador que llega aquí y no se emite.
+   */
+  @Post(':id/reservar-numero')
+  @RequiereRolCostos('SOLICITANTE')
+  reservarNumero(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    return this.requerimientos.reservarNumero(usuario, id);
+  }
+
+  /**
+   * Da de alta un cliente desde el propio formulario del requerimiento.
+   *
+   * Existe porque el selector de cliente pasó a ser un combobox
+   * «buscar o crear»: quien emite se encuentra a menudo con un cliente
+   * que todavía no está en el maestro, y mandarlo a pedirle el alta al
+   * SuperAdmin para poder seguir escribiendo era el camino corto a que
+   * alguien reutilizara un cliente equivocado.
+   *
+   * ⚠️ Es un permiso NUEVO para el Solicitante: `/costos/admin/cliente`
+   * sigue siendo solo del SuperAdmin y este endpoint no lo sustituye —
+   * aquí solo se CREA, no se edita ni se retira. El alta queda en la
+   * bitácora con su autor, igual que la que hace el SuperAdmin, porque
+   * es el mismo `ClienteService.crear`.
+   */
+  @Post('cliente')
+  @RequiereRolCostos('SOLICITANTE')
+  crearCliente(
+    @UsuarioActual() usuario: UsuarioAutenticado,
+    @Body() dto: GuardarClienteDto,
+  ) {
+    return this.clientes.crear(usuario, dto);
   }
 
   /** §25. También es «devolverlo corregido» tras una observación (§28). */

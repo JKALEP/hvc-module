@@ -2,7 +2,22 @@
 
 /** A quiénes se les pide cotización (§30). */
 export interface CompartirDto {
-  proveedorIds?: unknown;
+  /**
+   * A quién se le pide, y a qué dirección.
+   *
+   * Antes era una lista de ids a secas. Lleva el correo porque el de la
+   * ficha puede faltar —y eso dejaba al proveedor sin poder recibir nada—
+   * o estar viejo. Lo que se elige sigue siendo el PROVEEDOR: la dirección
+   * acompaña, no lo sustituye.
+   */
+  destinos?: unknown;
+}
+
+/** Un destinatario del selector de §30. */
+export interface DestinoDto {
+  proveedorId?: unknown;
+  /** Vacío = se usa el de la ficha. */
+  correo?: unknown;
 }
 
 /** Una línea de la cotización que llegó del proveedor. */

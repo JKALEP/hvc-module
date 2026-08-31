@@ -17,6 +17,7 @@ import {
 import { getErrorMessage } from '@/shared/services/api';
 import { QUERY_KEYS } from '@/shared/lib/constants';
 import type {
+  DestinoCotizacion,
   GuardarCotizacionPayload,
   RecomendarPayload,
 } from '@/modules/costos/types';
@@ -119,11 +120,11 @@ export function useCompartir() {
   return useMutation({
     mutationFn: ({
       requerimientoId,
-      proveedorIds,
+      destinos,
     }: {
       requerimientoId: number;
-      proveedorIds: number[];
-    }) => compartirRequerimiento(requerimientoId, proveedorIds),
+      destinos: DestinoCotizacion[];
+    }) => compartirRequerimiento(requerimientoId, destinos),
     onSuccess: (resultado, { requerimientoId }) => {
       invalidar(requerimientoId);
       const fallidos = resultado.solicitudes.filter((s) => !s.enviado);

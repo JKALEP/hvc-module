@@ -1,6 +1,7 @@
 import { Input } from '@/shared/ui/input';
 import { Select } from '@/shared/ui/select';
 import { Campo } from './Campo';
+import { SelectorCliente } from './SelectorCliente';
 import type { Cabecera } from '@/modules/costos/lib/cabecera';
 import type { OpcionesRequerimiento } from '@/modules/costos/types';
 
@@ -19,12 +20,18 @@ export function FormularioCabecera({
   valor,
   opciones,
   soloLogistica,
+  creandoCliente,
   onChange,
+  onCrearCliente,
 }: {
   valor: Cabecera;
   opciones: OpcionesRequerimiento;
   soloLogistica?: boolean;
+  /** Hay un alta de cliente en vuelo. */
+  creandoCliente?: boolean;
   onChange: (c: Cabecera) => void;
+  /** Alta desde el combobox. Sin él, el campo solo busca. */
+  onCrearCliente?: (nombre: string) => void;
 }) {
   const set = (campo: keyof Cabecera) => (v: string) =>
     onChange({ ...valor, [campo]: v });
@@ -81,19 +88,24 @@ export function FormularioCabecera({
         </Select>
       </Campo>
 
-      <Campo label="Cliente" requerido ayuda={motivo}>
-        <Select
-          value={valor.clienteId}
-          disabled={soloLogistica}
-          onChange={(e) => set('clienteId')(e.target.value)}
-        >
-          <option value="">Selecciona…</option>
-          {opciones.clientes.map((c) => (
-            <option key={c.id} value={String(c.id)}>
-              {c.nombre}
-            </option>
-          ))}
-        </Select>
+      <Campo
+        label="Cliente"
+        requerido
+        ayuda={
+          motivo ??
+          (onCrearCliente
+            ? 'Escribe para buscar. Si no está, se puede crear.'
+            : 'Escribe para buscar.')
+        }
+      >
+        <SelectorCliente
+          clienteId={valor.clienteId}
+          clientes={opciones.clientes}
+          deshabilitado={soloLogistica}
+          creando={creandoCliente}
+          onElegir={set('clienteId')}
+          onCrear={onCrearCliente}
+        />
       </Campo>
 
       <Campo label="Lugar de entrega" requerido>

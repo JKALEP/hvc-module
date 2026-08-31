@@ -55,6 +55,7 @@ export function ModalItem({
   const [descripcion, setDescripcion] = useState(item?.descripcion ?? '');
   const [unidad, setUnidad] = useState(item?.unidad ?? unidades[0]?.valor ?? '');
   const [cantidad, setCantidad] = useState(String(item?.cantidad ?? ''));
+  const [codigo, setCodigo] = useState(item?.codigoProducto ?? '');
   const [detalle, setDetalle] = useState(item?.detalleObservacion ?? '');
   const [referencias, setReferencias] = useState(item?.referencias ?? '');
 
@@ -73,7 +74,12 @@ export function ModalItem({
     !!item &&
     (descripcion.trim() !== item.descripcion ||
       unidad !== item.unidad ||
-      (cantidadValida && n !== item.cantidad));
+      (cantidadValida && n !== item.cantidad) ||
+      // Sustituir un código por otro es pedir otra pieza; rellenar el que
+      // estaba vacío solo la identifica. Misma regla que el backend, para
+      // que el aviso y lo que después ocurre digan lo mismo.
+      (item.codigoProducto !== null &&
+        codigo.trim() !== item.codigoProducto));
 
   const guardar = () => {
     if (!listo) return;
@@ -81,6 +87,7 @@ export function ModalItem({
       descripcion: descripcion.trim(),
       unidad,
       cantidad: n,
+      codigoProducto: codigo.trim() || null,
       detalleObservacion: detalle.trim() || null,
       referencias: referencias.trim() || null,
     });
@@ -112,19 +119,28 @@ export function ModalItem({
           </div>
         )}
 
+        {/* Cantidad · Unidad · Código y después la descripción: es el
+            orden en que se lee una línea de pedido —cuánto, de qué, cuál—
+            y el mismo del comprobante al que HVC está acostumbrada. */}
         <div className="grid gap-4 sm:grid-cols-6">
-          <div className="sm:col-span-6">
-            <Campo label="Descripción" requerido>
+          <div className="sm:col-span-2">
+            <Campo
+              label="Cantidad"
+              requerido
+              ayuda="Número entero mayor que 0."
+            >
               <Input
-                value={descripcion}
-                onChange={(e) => setDescripcion(e.target.value)}
-                placeholder="Cinta de aluminio 2&quot;"
+                value={cantidad}
+                onChange={(e) => setCantidad(e.target.value)}
+                inputMode="numeric"
+                placeholder="4"
+                aria-invalid={cantidad !== '' && !cantidadValida}
                 autoFocus
               />
             </Campo>
           </div>
 
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <Campo label="Unidad" requerido>
               <Select
                 value={unidad}
@@ -139,18 +155,25 @@ export function ModalItem({
             </Campo>
           </div>
 
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <Campo
-              label="Cantidad"
-              requerido
-              ayuda="Número entero mayor que 0."
+              label="Código de producto"
+              ayuda="El del proveedor, si se tiene."
             >
               <Input
-                value={cantidad}
-                onChange={(e) => setCantidad(e.target.value)}
-                inputMode="numeric"
-                placeholder="4"
-                aria-invalid={cantidad !== '' && !cantidadValida}
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                placeholder="425"
+              />
+            </Campo>
+          </div>
+
+          <div className="sm:col-span-6">
+            <Campo label="Descripción" requerido>
+              <Input
+                value={descripcion}
+                onChange={(e) => setDescripcion(e.target.value)}
+                placeholder="Cinta de aluminio 2&quot;"
               />
             </Campo>
           </div>
@@ -167,11 +190,11 @@ export function ModalItem({
           </div>
 
           <div className="sm:col-span-6">
-            <Campo label="Referencias" ayuda="Marca, modelo, código.">
+            <Campo label="Referencias" ayuda="Marca, modelo o nota para el proveedor.">
               <Input
                 value={referencias}
                 onChange={(e) => setReferencias(e.target.value)}
-                placeholder="Marca 3M, código 425"
+                placeholder="Marca 3M"
               />
             </Campo>
           </div>

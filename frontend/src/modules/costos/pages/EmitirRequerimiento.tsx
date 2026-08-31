@@ -34,6 +34,8 @@ import {
   useBorrarItem,
   useEmitirRequerimiento,
   useBorrarBorrador,
+  useReservarNumero,
+  useCrearCliente,
 } from '@/modules/costos/hooks/useRequerimientos';
 import { formatFechaCorta } from '@/shared/lib/format';
 import type { RequerimientoItem } from '@/modules/costos/types';
@@ -84,8 +86,41 @@ export function EmitirRequerimiento() {
   const borrarItem = useBorrarItem();
   const emitir = useEmitirRequerimiento();
   const descartar = useBorrarBorrador();
+  const reservar = useReservarNumero();
+  const crearCliente = useCrearCliente();
 
   const items = borrador.data?.items ?? [];
+
+  /**
+   * Alta de cliente desde el combobox: se crea y queda ELEGIDO.
+   *
+   * Seleccionarlo aquí y no dentro del hook es a propósito — el hook
+   * refresca la lista, pero solo esta pantalla sabe que el alta salió del
+   * campo «Cliente» y que quien la pidió quiere seguir escribiendo, no
+   * volver a buscar lo que acaba de crear.
+   */
+  const altaDeCliente = (nombre: string) => {
+    crearCliente.mutate(nombre, {
+      onSuccess: (cliente) =>
+        setCabecera((antes) => ({ ...antes, clienteId: String(cliente.id) })),
+    });
+  };
+
+  /**
+   * Paso 2 → 3: se pide el número ANTES de pintar la vista previa.
+   *
+   * El paso cambia igual si la reserva falla: la vista previa sigue
+   * sirviendo para revisar el documento, y bloquearla por no haber podido
+   * pedir un número dejaría al usuario sin poder emitir. Con el fallo, la
+   * plantilla enseña lo de siempre —«se asignará al emitir»— y `emitir`
+   * lo pedirá entonces, que es como funcionaba antes de todo esto.
+   */
+  const irAVistaPrevia = () => {
+    if (borradorId !== null && borrador.data?.numero === null) {
+      reservar.mutate(borradorId);
+    }
+    setPaso('VISTA_PREVIA');
+  };
 
   // ── Paso 1 → 2 ──
   const continuarDesdeFormulario = () => {
@@ -161,7 +196,9 @@ export function EmitirRequerimiento() {
             <FormularioCabecera
               valor={cabecera}
               opciones={opciones.data}
+              creandoCliente={crearCliente.isPending}
               onChange={setCabecera}
+              onCrearCliente={altaDeCliente}
             />
 
             <div className="flex justify-end gap-2 border-t border-border pt-4">
@@ -225,10 +262,10 @@ export function EmitirRequerimiento() {
                     Cancelar
                   </Button>
                   <Button
-                    onClick={() => setPaso('VISTA_PREVIA')}
-                    disabled={items.length === 0}
+                    onClick={irAVistaPrevia}
+                    disabled={items.length === 0 || reservar.isPending}
                   >
-                    <ArrowRightIcon />
+                    {reservar.isPending ? <Spinner /> : <ArrowRightIcon />}
                     Continuar
                   </Button>
                 </>

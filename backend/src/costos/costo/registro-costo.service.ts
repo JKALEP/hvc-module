@@ -130,6 +130,7 @@ export class RegistroCostoService {
         descripcion: i.descripcion,
         unidad: i.unidad,
         cantidad: i.cantidad,
+        codigoProducto: i.codigoProducto,
         detalleObservacion: i.detalleObservacion,
         referencias: i.referencias,
         /**
@@ -201,6 +202,7 @@ export class RegistroCostoService {
       descripcion: string;
       unidad: string;
       cantidad: number;
+      codigoProducto: string | null;
       detalleObservacion: string | null;
       referencias: string | null;
       costoUnitario: string;
@@ -229,6 +231,7 @@ export class RegistroCostoService {
         descripcion: item.descripcion,
         unidad: item.unidad,
         cantidad: item.cantidad,
+        codigoProducto: item.codigoProducto,
         detalleObservacion: item.detalleObservacion,
         referencias: item.referencias,
         costoUnitario: this.aCosto(cruda?.costoUnitario, item.descripcion),

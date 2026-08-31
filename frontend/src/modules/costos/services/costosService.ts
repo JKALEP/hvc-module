@@ -1,5 +1,6 @@
 import { api } from '@/shared/services/api';
 import type {
+  ClienteCostos,
   Costo,
   EventoCostos,
   GuardarItemPayload,
@@ -68,6 +69,35 @@ export async function editarRequerimiento(
   const { data } = await api.patch<Requerimiento>(
     `${RAIZ}/requerimiento/${id}`,
     payload,
+  );
+  return data;
+}
+
+/**
+ * Reserva el número para enseñarlo en la vista previa.
+ *
+ * Idempotente en el backend: llamarlo dos veces devuelve el mismo número
+ * y no consume otro correlativo, así que ir y volver al paso 3 es
+ * gratis. Lo que NO es gratis es llegar al paso 3 y no emitir: eso deja
+ * un hueco permanente en la serie.
+ */
+export async function reservarNumero(id: number): Promise<{ numero: string }> {
+  const { data } = await api.post<{ numero: string }>(
+    `${RAIZ}/requerimiento/${id}/reservar-numero`,
+  );
+  return data;
+}
+
+/**
+ * Da de alta un cliente desde el propio formulario, sin salir a pedirle
+ * el alta al SuperAdmin. Solo crea; editar y retirar siguen siendo suyos.
+ */
+export async function crearClienteDesdeRequerimiento(
+  nombre: string,
+): Promise<ClienteCostos> {
+  const { data } = await api.post<ClienteCostos>(
+    `${RAIZ}/requerimiento/cliente`,
+    { nombre },
   );
   return data;
 }

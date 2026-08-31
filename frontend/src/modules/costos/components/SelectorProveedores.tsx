@@ -21,7 +21,10 @@ import { Spinner } from '@/shared/ui/spinner';
 import { useDebounce } from '@/shared/hooks/useDebounce';
 import { useProveedores } from '@/modules/costos/hooks/useProveedores';
 import { cn } from '@/shared/lib/utils';
-import type { Proveedor } from '@/modules/costos/types';
+import type { DestinoCotizacion, Proveedor } from '@/modules/costos/types';
+
+/** Formato laxo: solo descarta lo que NO puede ser una dirección. */
+const FORMATO_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 /**
  * A quién pedirle cotización (§30-33).
@@ -30,12 +33,18 @@ import type { Proveedor } from '@/modules/costos/types';
  * §30, resueltos en el backend, que es donde está el índice. Aquí solo
  * se retrasa la petición mientras se teclea.
  *
- * ── Por qué se marca al que no tiene correo ──────────────────────────
- * El backend rechaza la tanda ENTERA si alguno de los elegidos no tiene
- * dirección: es un dato que falta en su ficha, no un envío que salió
- * mal. Dejar que se seleccione para después devolver un 400 sería
- * esconder el problema hasta el peor momento, así que se ve desde la
- * lista y no se puede marcar.
+ * ── El correo se puede escribir aquí ────────────────────────────────
+ * Antes, al proveedor sin correo en su ficha no se le podía ni marcar:
+ * había que salir a Administración, completarlo y volver. Ahora la
+ * dirección se escribe en la propia fila.
+ *
+ * Lo escrito PISA a lo de la ficha para este envío, que resuelve también
+ * al proveedor cuyo correo guardado ya no responde. Y si la ficha estaba
+ * vacía, el backend lo guarda ahí para no volver a pedirlo.
+ *
+ * Lo que NO cambia es a quién se le pide: se elige un PROVEEDOR, no una
+ * dirección suelta. De ese id cuelgan la solicitud, la cotización que
+ * llegue y el costo que se registre al final.
  *
  * Se admite volver a elegir a un proveedor al que YA se le pidió: §33
  * avisa de que no todos responden y §44 admite una segunda vuelta. El
@@ -51,11 +60,13 @@ export function SelectorProveedores({
   /** Ids a los que ya se les pidió, para avisar de que se está insistiendo. */
   yaSolicitados: Set<number>;
   ocupado: boolean;
-  onCompartir: (proveedorIds: number[]) => void;
+  onCompartir: (destinos: DestinoCotizacion[]) => void;
   onCerrar: () => void;
 }) {
   const [busqueda, setBusqueda] = useState('');
   const [elegidos, setElegidos] = useState<Set<number>>(new Set());
+  /** Lo tecleado por proveedor. Vacío = usar el de su ficha. */
+  const [correos, setCorreos] = useState<Record<number, string>>({});
 
   const q = useDebounce(busqueda, 300);
   const { data, isError, isFetching } = useProveedores(q);
@@ -64,7 +75,6 @@ export function SelectorProveedores({
   const cargando = !data && !isError;
 
   const alternar = (p: Proveedor) => {
-    if (!p.correo) return;
     setElegidos((antes) => {
       const copia = new Set(antes);
       if (copia.has(p.id)) copia.delete(p.id);
@@ -74,6 +84,27 @@ export function SelectorProveedores({
   };
 
   const repetidos = [...elegidos].filter((id) => yaSolicitados.has(id)).length;
+
+  /** La dirección con la que saldría este proveedor: la escrita o la suya. */
+  const direccionDe = (p: Proveedor) => (correos[p.id] ?? '').trim() || p.correo;
+
+  /**
+   * ¿Falta algo para poder mandar?
+   *
+   * Se comprueba aquí Y en el backend. Aquí para que el botón diga la
+   * verdad antes de pulsarlo; allí porque es donde la regla se cumple.
+   */
+  const incompletos = proveedores.filter((p) => {
+    if (!elegidos.has(p.id)) return false;
+    const d = direccionDe(p);
+    return !d || !FORMATO_CORREO.test(d);
+  });
+
+  const destinos = (): DestinoCotizacion[] =>
+    [...elegidos].map((id) => {
+      const escrito = (correos[id] ?? '').trim();
+      return escrito ? { proveedorId: id, correo: escrito } : { proveedorId: id };
+    });
 
   return (
     <Dialog open onOpenChange={(abierto) => !abierto && onCerrar()}>
@@ -136,15 +167,12 @@ export function SelectorProveedores({
                   <label
                     className={cn(
                       'flex items-start gap-3 px-3 py-2.5',
-                      sinCorreo
-                        ? 'cursor-not-allowed opacity-60'
-                        : 'cursor-pointer hover:bg-muted/50',
+                      'cursor-pointer hover:bg-muted/50',
                     )}
                   >
                     <input
                       type="checkbox"
                       checked={marcado}
-                      disabled={sinCorreo}
                       onChange={() => alternar(p)}
                       className="mt-1 size-4 shrink-0 accent-primary"
                     />
@@ -167,12 +195,37 @@ export function SelectorProveedores({
                         {' · '}
                         {p.correo ?? 'sin correo'}
                       </p>
-                      {sinCorreo && (
-                        <p className="mt-0.5 flex items-center gap-1 text-xs text-warning-soft-foreground">
-                          <MailWarningIcon className="size-3.5" />
-                          Complétale el correo en su ficha para poder pedirle
-                          cotización.
-                        </p>
+                      {/* El campo solo aparece al marcarlo: enseñar un
+                          input por fila convertiría la lista en un
+                          formulario de veinte campos. */}
+                      {marcado && (
+                        <div className="mt-2">
+                          <Input
+                            value={correos[p.id] ?? ''}
+                            onChange={(e) =>
+                              setCorreos((antes) => ({
+                                ...antes,
+                                [p.id]: e.target.value,
+                              }))
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            placeholder={
+                              p.correo ?? 'Escribe el correo del proveedor…'
+                            }
+                            aria-label={`Correo para ${p.razonSocial}`}
+                            aria-invalid={
+                              !direccionDe(p) ||
+                              !FORMATO_CORREO.test(direccionDe(p) as string)
+                            }
+                            className="h-8 text-sm"
+                          />
+                          <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                            <MailWarningIcon className="size-3.5 shrink-0" />
+                            {sinCorreo
+                              ? 'No tiene correo en su ficha. El que escribas se guardará ahí.'
+                              : 'Vacío usa el de su ficha. Lo que escribas vale solo para este envío.'}
+                          </p>
+                        </div>
                       )}
                     </div>
                   </label>
@@ -188,7 +241,13 @@ export function SelectorProveedores({
               ? 'Nadie seleccionado.'
               : `${String(elegidos.size)} proveedor(es) seleccionados.`}
           </span>
-          {repetidos > 0 && (
+          {incompletos.length > 0 && (
+            <span className="text-warning-soft-foreground">
+              Falta un correo válido en {incompletos.length} de los
+              seleccionados.
+            </span>
+          )}
+          {repetidos > 0 && incompletos.length === 0 && (
             <span className="text-warning-soft-foreground">
               A {repetidos} ya se le había pedido: se le vuelve a mandar y
               queda registrado como un envío nuevo.
@@ -201,8 +260,8 @@ export function SelectorProveedores({
             Cancelar
           </Button>
           <Button
-            onClick={() => onCompartir([...elegidos])}
-            disabled={elegidos.size === 0 || ocupado}
+            onClick={() => onCompartir(destinos())}
+            disabled={elegidos.size === 0 || incompletos.length > 0 || ocupado}
           >
             {ocupado ? <Spinner /> : <SendIcon />}
             Pedir cotización

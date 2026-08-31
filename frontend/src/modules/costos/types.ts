@@ -88,6 +88,8 @@ export interface RequerimientoItem {
   descripcion: string;
   unidad: string;
   cantidad: number;
+  /** Número de parte contra el que cotiza el proveedor. Opcional. */
+  codigoProducto: string | null;
   detalleObservacion: string | null;
   referencias: string | null;
 }
@@ -139,10 +141,23 @@ export interface GuardarRequerimientoPayload {
   fechaEmision?: string;
 }
 
+/**
+ * A quién se le pide cotización y a qué dirección.
+ *
+ * El correo es opcional: sin él se usa el de la ficha del proveedor. Se
+ * manda cuando la ficha no tiene ninguno —y entonces se guarda ahí— o
+ * cuando esta vez hay que escribir a otro buzón.
+ */
+export interface DestinoCotizacion {
+  proveedorId: number;
+  correo?: string;
+}
+
 export interface GuardarItemPayload {
   descripcion?: string;
   unidad?: string;
   cantidad?: number;
+  codigoProducto?: string | null;
   detalleObservacion?: string | null;
   referencias?: string | null;
 }
