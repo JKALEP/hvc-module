@@ -348,9 +348,9 @@ export function RequerimientoGestion() {
             new Set((solicitudes ?? []).map((s) => s.proveedorId))
           }
           ocupado={compartir.isPending}
-          onCompartir={(proveedorIds) =>
+          onCompartir={(destinos) =>
             compartir.mutate(
-              { requerimientoId, proveedorIds },
+              { requerimientoId, destinos },
               { onSuccess: () => setEligiendoProveedores(false) },
             )
           }

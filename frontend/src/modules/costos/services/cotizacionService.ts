@@ -1,5 +1,6 @@
 import { api } from '@/shared/services/api';
 import type {
+  DestinoCotizacion,
   Comparacion,
   CotizacionProveedor,
   EvaluacionCotizacion,
@@ -41,11 +42,11 @@ export async function listarSolicitudes(
  */
 export async function compartirRequerimiento(
   requerimientoId: number,
-  proveedorIds: number[],
+  destinos: DestinoCotizacion[],
 ): Promise<ResultadoCompartir> {
   const { data } = await api.post<ResultadoCompartir>(
     `${RAIZ}/requerimiento/${requerimientoId}/solicitud`,
-    { proveedorIds },
+    { destinos },
   );
   return data;
 }

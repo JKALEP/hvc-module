@@ -25,6 +25,7 @@ export interface GuardarItemDto {
   descripcion?: string | null;
   unidad?: string | null;
   cantidad?: number | string | null;
+  codigoProducto?: string | null;
   detalleObservacion?: string | null;
   referencias?: string | null;
 }

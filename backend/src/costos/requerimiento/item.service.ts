@@ -113,13 +113,14 @@ export class ItemService {
     return n;
   }
 
-  /** Los cinco campos de §21, validados. */
+  /** Los campos de §21, validados. */
   private campos(dto: GuardarItemDto, parcial: boolean) {
     const exige = (clave: keyof GuardarItemDto) => !parcial || clave in dto;
     const data: {
       descripcion?: string;
       unidad?: string;
       cantidad?: number;
+      codigoProducto?: string | null;
       detalleObservacion?: string | null;
       referencias?: string | null;
     } = {};
@@ -134,6 +135,8 @@ export class ItemService {
 
     if (exige('cantidad')) data.cantidad = this.aCantidad(dto.cantidad);
 
+    if ('codigoProducto' in dto)
+      data.codigoProducto = aTextoOpcional(dto.codigoProducto);
     if ('detalleObservacion' in dto)
       data.detalleObservacion = aTextoOpcional(dto.detalleObservacion);
     if ('referencias' in dto)
@@ -254,6 +257,7 @@ export class ItemService {
         descripcion: data.descripcion as string,
         unidad: data.unidad as string,
         cantidad: data.cantidad as number,
+        codigoProducto: data.codigoProducto ?? null,
         detalleObservacion: data.detalleObservacion ?? null,
         referencias: data.referencias ?? null,
       },
@@ -286,9 +290,16 @@ export class ItemService {
    * quedan marcadas: el proveedor cotizó otra cosa.
    *
    * Solo se marcan si cambió algo que ALTERA LO QUE SE PIDE —descripción,
-   * unidad o cantidad—. Corregir una errata en las referencias o añadir
-   * un detalle no invalida ningún precio, y marcarlo por eso obligaría al
-   * Gestor a perseguir a tres proveedores por una coma.
+   * unidad, cantidad o el código de producto—. Corregir una errata en las
+   * referencias o añadir un detalle no invalida ningún precio, y marcarlo
+   * por eso obligaría al Gestor a perseguir a tres proveedores por una
+   * coma.
+   *
+   * ⚠️ El código entra en esa lista con un matiz: SUSTITUIR un código por
+   * otro es pedir otro artículo y sí invalida, pero RELLENAR el que estaba
+   * vacío no —es la misma pieza, ahora identificada—. Sin esa distinción,
+   * completar los códigos de un requerimiento ya cotizado mandaría a pedir
+   * precio otra vez por un dato que solo precisa lo que ya se pidió.
    */
   async editar(
     usuario: UsuarioAutenticado,
@@ -307,11 +318,19 @@ export class ItemService {
     const data = this.campos(dto, true);
     if (Object.keys(data).length === 0) return actual;
 
+    // Rellenar un código que estaba vacío no cambia el artículo, solo lo
+    // identifica; sustituir uno por otro sí. De ahí el `actual !== null`.
+    const cambiaElCodigo =
+      data.codigoProducto !== undefined &&
+      actual.codigoProducto !== null &&
+      data.codigoProducto !== actual.codigoProducto;
+
     const cambiaLoPedido =
       (data.descripcion !== undefined &&
         data.descripcion !== actual.descripcion) ||
       (data.unidad !== undefined && data.unidad !== actual.unidad) ||
-      (data.cantidad !== undefined && data.cantidad !== actual.cantidad);
+      (data.cantidad !== undefined && data.cantidad !== actual.cantidad) ||
+      cambiaElCodigo;
 
     const afectadas = cambiaLoPedido
       ? await this.cotizacionesDelItem(itemId)
@@ -337,6 +356,7 @@ export class ItemService {
             descripcion: actual.descripcion,
             unidad: actual.unidad,
             cantidad: String(actual.cantidad),
+            codigoProducto: actual.codigoProducto,
             detalleObservacion: actual.detalleObservacion,
             referencias: actual.referencias,
           },
@@ -344,6 +364,7 @@ export class ItemService {
             descripcion: actualizado.descripcion,
             unidad: actualizado.unidad,
             cantidad: String(actualizado.cantidad),
+            codigoProducto: actualizado.codigoProducto,
             detalleObservacion: actualizado.detalleObservacion,
             referencias: actualizado.referencias,
           },

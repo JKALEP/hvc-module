@@ -44,6 +44,7 @@ export function TablaItems({
           <TableHeader>
             <TableRow className="bg-muted/40 hover:bg-muted/40">
               <TableHead className="w-10">#</TableHead>
+              <TableHead className="min-w-24">Código</TableHead>
               <TableHead className="min-w-56">Descripción</TableHead>
               <TableHead>Unidad</TableHead>
               <TableHead className="text-right">Cantidad</TableHead>
@@ -56,7 +57,7 @@ export function TablaItems({
             {items.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={soloLectura ? 6 : 7}
+                  colSpan={soloLectura ? 7 : 8}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
                   <PackageIcon className="mx-auto mb-2 size-6 opacity-50" />
@@ -70,6 +71,9 @@ export function TablaItems({
               <TableRow key={item.id} className="align-top">
                 <TableCell className="text-muted-foreground tabular-nums">
                   {n + 1}
+                </TableCell>
+                <TableCell className="text-sm text-muted-foreground tabular-nums">
+                  {orDash(item.codigoProducto)}
                 </TableCell>
                 <TableCell className="font-medium whitespace-normal text-foreground">
                   {item.descripcion}

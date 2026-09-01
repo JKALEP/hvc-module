@@ -102,8 +102,12 @@ export class ExportableService {
         {
           titulo: 'Ítems solicitados',
           columnas: [
+            // El ancho total en PDF no cambia al meter «Código»: se le
+            // restan los puntos a Descripción y Detalle, que son las dos
+            // que sobraban. Pasarse del total desborda la caja.
             { titulo: '#', ancho: 6, anchoPdf: 26 },
-            { titulo: 'Descripción', ancho: 40, anchoPdf: 190 },
+            { titulo: 'Código', ancho: 14, anchoPdf: 60 },
+            { titulo: 'Descripción', ancho: 34, anchoPdf: 150 },
             { titulo: 'Unidad', ancho: 10, anchoPdf: 50 },
             {
               titulo: 'Cantidad',
@@ -112,11 +116,12 @@ export class ExportableService {
               derecha: true,
               formato: '#,##0',
             },
-            { titulo: 'Detalle', ancho: 28, anchoPdf: 110 },
+            { titulo: 'Detalle', ancho: 24, anchoPdf: 90 },
             { titulo: 'Referencias', ancho: 24, anchoPdf: 88 },
           ],
           filas: req.items.map((i, n) => [
             n + 1,
+            guion(i.codigoProducto),
             i.descripcion,
             i.unidad,
             i.cantidad,

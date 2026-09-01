@@ -408,6 +408,66 @@ export class RequerimientoService {
   }
 
   /**
+   * Reserva el número de pedido ANTES de emitir, para que la vista previa
+   * enseñe el identificador definitivo y no una promesa.
+   *
+   * ⚠️ **Consume un correlativo de verdad, y eso tiene un precio.** Hasta
+   * aquí el número se pedía al emitir justamente para que un borrador
+   * abandonado no se llevara uno por delante (§25, y el comentario de
+   * `crear`). Con la reserva adelantada, cada borrador que llega al paso 3
+   * y no se emite deja un HUECO PERMANENTE en la serie: `nextval()` no se
+   * deshace ni con un ROLLBACK. Es una decisión de negocio tomada a
+   * sabiendas —HVC prefiere ver el número antes de emitir— y no un efecto
+   * secundario que nadie midió. Si algún día se quiere volver atrás, basta
+   * con dejar de llamar a este método: `emitir` sigue sabiendo pedirlo.
+   *
+   * **Idempotente.** Si el requerimiento ya tiene número lo devuelve tal
+   * cual, sin tocar la secuencia. Es lo que permite ir y volver entre el
+   * paso 2 y el 3 sin quemar un correlativo por cada visita, y lo que hace
+   * que reemitir un OBSERVADO siga conservando el número que el proveedor
+   * ya vio.
+   *
+   * No cambia el estado: el requerimiento sigue en BORRADOR hasta que
+   * alguien pulse Emitir. Tener número y estar emitido son cosas
+   * distintas a partir de ahora.
+   */
+  async reservarNumero(usuario: UsuarioAutenticado, id: number) {
+    const actual = await this.suyo(usuario, id);
+
+    // Ya lo tiene: ni se consulta la secuencia. El caso de la reemisión y
+    // el de volver al paso 3 son el mismo desde aquí.
+    if (actual.numero !== null) return { numero: actual.numero };
+
+    // Se comprueba que EMITIR sea legal desde donde está, aunque no se
+    // emita todavía: reservar un número para un requerimiento que jamás
+    // podrá emitirse es gastar la serie sin motivo. `transicion` lanza con
+    // el mensaje en lenguaje de persona si no lo es.
+    transicion(actual.estado, 'EMITIR');
+
+    const numero = await this.prisma.$transaction(async (tx) => {
+      const n = await this.numeracion.siguienteNumeroRequerimiento(tx);
+      await tx.requerimiento.update({ where: { id }, data: { numero: n } });
+      return n;
+    });
+
+    // Queda en la bitácora para que un hueco en la serie tenga a quién
+    // preguntarle: sin esto, un número reservado y nunca emitido sería un
+    // salto sin explicación.
+    await this.auditoria.registrarUno(usuario, {
+      requerimientoId: id,
+      entidad: 'REQUERIMIENTO',
+      entidadId: id,
+      accion: 'EDICION',
+      campoAfectado: 'numero',
+      valorAnterior: null,
+      valorNuevo: numero,
+      descripcion: 'Número reservado al abrir la vista previa.',
+    });
+
+    return { numero };
+  }
+
+  /**
    * Emite el requerimiento (§25): lo manda al Gestor.
    *
    * Es también la acción de devolverlo corregido tras una observación
@@ -415,6 +475,10 @@ export class RequerimientoService {
    * diferencia es que la segunda vez YA TIENE número y no se pide otro —
    * reemitir no puede consumir un correlativo, ni cambiar el que el
    * proveedor ya vio.
+   *
+   * Ese mismo `actual.numero ??` es lo que hace que `reservarNumero` no
+   * obligue a tocar nada aquí: si la vista previa ya lo pidió, se emite
+   * con ése.
    *
    * Todo va en una transacción con la reserva del número: si el alta
    * falla, el número se pierde (queda un hueco) pero no se duplica.

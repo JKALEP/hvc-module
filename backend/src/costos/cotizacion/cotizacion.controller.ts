@@ -63,7 +63,7 @@ export class CotizacionController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CompartirDto,
   ) {
-    return this.solicitudes.compartir(usuario, id, dto?.proveedorIds);
+    return this.solicitudes.compartir(usuario, id, dto?.destinos);
   }
 
   // ── Cotizaciones recibidas (§34-36) ──

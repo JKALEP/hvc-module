@@ -2571,9 +2571,23 @@ model RequerimientoItem {
   requerimientoId Int
   orden           Int @default(0)
 
-  descripcion        String
-  unidad             String
-  cantidad           Int
+  descripcion String
+  unidad      String
+  cantidad    Int
+
+  /// Número de parte con el que el proveedor identifica el artículo.
+  ///
+  /// Campo propio y no una parte de `referencias` porque son dos cosas
+  /// distintas: esto es un identificador exacto contra el que se cotiza
+  /// —«425» de 3M, un código de repuesto de chiller—, mientras que
+  /// `referencias` sigue siendo texto libre para la marca, el modelo o
+  /// una nota. Mezclados en un solo campo no se puede buscar por él.
+  ///
+  /// Opcional: mucho de lo que se pide en obra no tiene código, y
+  /// exigirlo trabaría la emisión por un dato que el solicitante no
+  /// siempre tiene.
+  codigoProducto String?
+
   detalleObservacion String?
   referencias        String?
 
@@ -2932,9 +2946,15 @@ model CostoItem {
   requerimientoItemId Int?
   orden               Int  @default(0)
 
-  descripcion        String
-  unidad             String
-  cantidad           Int
+  descripcion String
+  unidad      String
+  cantidad    Int
+
+  /// Copiado del ítem al registrar el costo, como el resto del snapshot:
+  /// la Base de Costos tiene que poder decir contra qué código se pagó
+  /// ese precio aunque después el requerimiento cambie.
+  codigoProducto String?
+
   detalleObservacion String?
   referencias        String?
 

@@ -6,6 +6,7 @@ import {
   borrarBorrador,
   borrarItem,
   cancelarRequerimiento,
+  crearClienteDesdeRequerimiento,
   crearRequerimiento,
   editarItem,
   editarRequerimiento,
@@ -14,6 +15,7 @@ import {
   obtenerHistorial,
   obtenerOpciones,
   obtenerRequerimiento,
+  reservarNumero,
 } from '@/modules/costos/services/costosService';
 import { getErrorMessage } from '@/shared/services/api';
 import { QUERY_KEYS } from '@/shared/lib/constants';
@@ -123,6 +125,49 @@ export function useEmitirRequerimiento() {
     },
     onError: (error) =>
       toast.error(getErrorMessage(error, 'No se pudo emitir')),
+  });
+}
+
+/**
+ * Pide el número al entrar a la vista previa.
+ *
+ * No lleva `toast`: no es una acción que el usuario haya pulsado, es lo
+ * que hace la pantalla al abrirse. Avisar de ello sería ruido.
+ *
+ * Sí invalida el detalle, porque el borrador acaba de cambiar en el
+ * servidor y la plantilla lee `numero` de ahí.
+ */
+export function useReservarNumero() {
+  const invalidar = useInvalidadores();
+  return useMutation({
+    mutationFn: (id: number) => reservarNumero(id),
+    onSuccess: (_r, id) => invalidar(id),
+    onError: (error) =>
+      toast.error(
+        getErrorMessage(error, 'No se pudo reservar el número de pedido'),
+      ),
+  });
+}
+
+/**
+ * Alta de cliente desde el combobox del paso 1.
+ *
+ * Invalida las opciones del formulario para que el recién creado aparezca
+ * en la lista; quién queda seleccionado lo decide la pantalla, que es la
+ * que sabe en qué campo se estaba escribiendo.
+ */
+export function useCrearCliente() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (nombre: string) => crearClienteDesdeRequerimiento(nombre),
+    onSuccess: (cliente) => {
+      void qc.invalidateQueries({
+        queryKey: QUERY_KEYS.opcionesRequerimiento,
+      });
+      toast.success(`Cliente "${cliente.nombre}" creado`);
+    },
+    onError: (error) =>
+      toast.error(getErrorMessage(error, 'No se pudo crear el cliente')),
   });
 }
 
